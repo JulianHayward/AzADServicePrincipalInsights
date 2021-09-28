@@ -1,0 +1,67 @@
+#v1_20210928_1_POC
+trigger: none
+
+pr: none
+
+parameters:
+- name: subscriptionQuotaIdWhitelistParameters
+  type: object
+  default:
+    - undefined
+
+variables:
+  ServiceConnection: AzAdServicePrincipalInsights
+  SubscriptionQuotaIdWhitelist: ${{ join(',',parameters.subscriptionQuotaIdWhitelistParameters) }}
+  WikiDir: wiki
+  CsvDelimiter: ;
+  ScriptDir: pwsh
+  Script: AzAdServicePrincipalInsights.ps1
+
+schedules:
+- cron: "0 6,16 * * *"
+  displayName: at 6am, 4pm
+  always: true
+  branches:
+    include:
+    - master
+
+jobs:
+- job: AzAdServicePrincipalInsights  
+  timeoutInMinutes: 0
+
+  pool:
+    vmImage: 'ubuntu-18.04'
+
+  steps:
+  - powershell: |
+      write-host "#################################"
+      write-host "Ensure AzAdServicePrincipalInsights prerequisites"
+      write-host "#################################"
+      write-host "wiki dir check"
+      if(!(test-path $(System.DefaultWorkingDirectory)/$(WikiDir))){New-Item -ItemType Directory -Force -Path $(System.DefaultWorkingDirectory)/$(WikiDir)}
+    displayName: 'Ensure AzAdServicePrincipalInsights v1 prerequisites'
+    env:
+      workingdirectory: $(Agent.BuildDirectory)
+  - task: AzurePowerShell@4
+    inputs:
+      azureSubscription: '$(ServiceConnection)'
+      scriptType: filePath
+      pwsh: true
+      scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(Script)'
+      scriptArguments: '-OutputPath $(WikiDir) -AzureDevOpsWikiAsCode'
+      azurePowerShellVersion: latestVersion
+    displayName: 'Run AzAdServicePrincipalInsights v1'
+  - powershell: |
+      write-host "#################################"
+      write-host "Push AzAdServicePrincipalInsights output to repository"
+      write-host "#################################"
+      $executionDateTimeInternationalReadable = get-date -format "dd-MMM-yyyy HH:mm:ss"
+      $currentTimeZone = (Get-TimeZone).Id
+      git config --global user.email "AzAdServicePrincipalInsightsPipeline@azdo.com"
+      $PipelineInfo = "Pipeline: '$(Build.DefinitionName)' 'rev $(Build.BuildNumber)' (Project: $([uri]::EscapeDataString("$(System.TeamProject)")); Repository: $(Build.Repository.Name); Branch: $(Build.SourceBranchName) Commit: $(Build.SourceVersion))"
+      git config --global user.name "$PipelineInfo"
+      git config pull.rebase false
+      git add --all
+      git commit -m "wiki $executionDateTimeInternationalReadable ($currentTimeZone)"
+      git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin HEAD:$(Build.SourceBranchName)
+    displayName: 'Push AzAdServicePrincipalInsights v1 output to repository'
