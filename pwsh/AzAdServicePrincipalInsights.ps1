@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzAdServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20210104_1_POC",
+    [string]$ProductVersion = "v1_20210104_2_POC",
     [string]$GithubRepository = "someTinyURL/AzAdServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
@@ -1024,7 +1024,7 @@ function resolveObectsById($objects, $targetHt) {
         $t = 0
         foreach ($resolvedIdentity in $resolvedIdentities) {
             $t++
-            Write-Host $t
+            #Write-Host $t
             $type = "unforseen type"
             if ($resolvedIdentity.'@odata.type' -eq '#microsoft.graph.servicePrincipal') {
                 $type = "Serviceprincipal"
@@ -3851,6 +3851,7 @@ foreach ($app in $htAppOwners.Keys) {
 
 if (-not $NoAzureRoleAssignments) {
     #region AzureRoleAssignmentMapping
+    $start = get-date
 
     #resolving createdby/updatedby
     $htARMRaResolvedCreatedByUpdatedBy = @{}
@@ -3870,8 +3871,8 @@ if (-not $NoAzureRoleAssignments) {
                 }
                 else {
                     if ($htUsersResolved.($createdByItem)){
-                        Write-Host $createdByItem "already known form other HT"
-                        $htUsersResolved.($createdByItem)
+                        #Write-Host $createdByItem "already known form other HT"
+                        #$htUsersResolved.($createdByItem)
                         $htARMRaResolvedCreatedByUpdatedBy.($createdByItem) = @{}
                         $htARMRaResolvedCreatedByUpdatedBy.($createdByItem).full = $htUsersResolved.($createdByItem).full
                         $htARMRaResolvedCreatedByUpdatedBy.($createdByItem).typeOnly = $htUsersResolved.($createdByItem).typeOnly
@@ -3906,8 +3907,10 @@ if (-not $NoAzureRoleAssignments) {
         $htAssignmentsByPrincipalId."groups" = @{}
         foreach ($assignment in $htCacheAssignments.roleFromAPI.values) {
             #todo sp created ra in azure
-            if ($htARMRaResolvedCreatedByUpdatedBy.($assignment.assignment.properties.createdBy)) {
-                $assignment.assignment.properties.createdBy = $htARMRaResolvedCreatedByUpdatedBy.($assignment.assignment.properties.createdBy).full
+            if (-not [string]::IsNullOrEmpty($assignment.assignment.properties.createdBy)){
+                if ($htARMRaResolvedCreatedByUpdatedBy.($assignment.assignment.properties.createdBy)) {
+                    $assignment.assignment.properties.createdBy = $htARMRaResolvedCreatedByUpdatedBy.($assignment.assignment.properties.createdBy).full
+                }
             }
             if ($getServicePrincipals.id -contains $assignment.assignment.properties.principalId) {
                 if (-not $htAssignmentsByPrincipalId."servicePrincipals".($assignment.assignment.properties.principalId)) {
@@ -3931,11 +3934,16 @@ if (-not $NoAzureRoleAssignments) {
         Write-Host " No RoleAssignments?!"
         break
     }
+    $end = get-date
+    $duration = NEW-TIMESPAN -Start $start -End $end
+    Write-Host "AzureRoleAssignmentMapping duration: $(($duration).TotalMinutes) minutes ($(($duration).TotalSeconds) seconds)"
     #endregion AzureRoleAssignmentMapping
 }
 else {
 
 }
+
+
 
 
 #region enrichedAADSPData
