@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzAdServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20210104_2_POC",
+    [string]$ProductVersion = "v1_20210105_1_POC",
     [string]$GithubRepository = "someTinyURL/AzAdServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
@@ -1437,7 +1437,8 @@ function summary() {
 <th>App displayName</th>
 <th>App Owners</th>
 <th>AppReg</th>
-<th>MI Resource Type</th>
+<th>MI Resource type</th>
+<th>MI Resource scope</th>
 </tr>
 </thead>
 <tbody>
@@ -1459,6 +1460,10 @@ function summary() {
             $miResourceType = ""
             if ($sp.ManagedIdentity) {
                 $miResourceType = $sp.ManagedIdentity.resourceType
+            }
+            $miResourceScope = ""
+            if ($sp.ManagedIdentity) {
+                $miResourceScope = $sp.ManagedIdentity.resourceScope
             }
 
             if ($sp.APP) {
@@ -1510,6 +1515,7 @@ function summary() {
 <td class="breakwordall">$($appOwners)</td>
 <td>$($hasApp)</td>
 <td class="breakwordall">$($miResourceType)</th>
+<td class="breakwordall">$($miResourceScope)</th>
 </tr>
 "@)
         }
@@ -1548,12 +1554,13 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
-col_widths: ['7%', '7%', '13%', '10%', '7%', '7%', '7%', '7%', '13%', '10%', '5%', '7%'],            
+col_widths: ['7%', '7%', '11%', '10%', '7%', '7%', '7%', '7%', '11%', '10%', '5%', '4%', '7%'],            
             col_3: 'select',
             col_5: 'multiple',
             col_10: 'select',
             locale: 'en-US',
             col_types: [
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -3340,6 +3347,14 @@ else {
                     $s1 = $altName -replace ".*/providers/"; $rm = $s1 -replace ".*/"; $resourceType = $s1 -replace "/$($rm)"              
                     $miAlternativeName = $altname
                     $miResourceType = $resourceType
+                    if ($altName -like "/subscriptions/*"){
+                        $altNameSplit = $altName.split('/')
+                        $miResourceScope = "Subscription $($altNameSplit[2])"
+                    }
+                    else{
+                        $altNameSplit = $altName.split('/')
+                        $miResourceScope = "ManagementGroup $($altNameSplit[4])"
+                    }
                 }              
             }
         }
@@ -3357,6 +3372,7 @@ else {
             $script:htServicePrincipalsEnriched.($sp.id).subtype = $miType
             $script:htServicePrincipalsEnriched.($sp.id).altname = $miAlternativeName
             $script:htServicePrincipalsEnriched.($sp.id).resourceType = $miResourceType
+            $script:htServicePrincipalsEnriched.($sp.id).resourceScope = $miResourceScope
         }
         else {
             $script:htServicePrincipalsEnriched.($sp.id).spTypeConcatinated = "SP $($spTypeINTEXT)"
@@ -3942,8 +3958,6 @@ if (-not $NoAzureRoleAssignments) {
 else {
 
 }
-
-
 
 
 #region enrichedAADSPData
@@ -4594,6 +4608,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
         $htOptInfo.type = $hlper.subtype
         $htOptInfo.alternativeName = $hlper.altname
         $htOptInfo.resourceType = $hlper.resourceType
+        $htOptInfo.resourceScope = $hlper.resourceScope
         $null = $arrayManagedIdentityOpt.Add($htOptInfo)
     }
     #endregion ManagedIdentity
