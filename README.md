@@ -1,5 +1,7 @@
 # AzAdServicePrincipalInsights
 
+## Features
+
 List all ServicePrincipals
 * ServicePrincipal  owners
 * Application owners
@@ -15,7 +17,13 @@ List all ServicePrincipals
 * Application Certificated
 * ManagedIdentity Resource Type
 
-Permission requirements:
+## Permission requirements:
+
+### Azure
+
+Management Group (Tenant Root Management Group) RBAC: __Reader__
+
+### Azure Active Directory
 
 Microsoft Graph API | Application | __Directory.Read.All__  
 Microsoft Graph API | Application | __RoleManagement.Read.All__
