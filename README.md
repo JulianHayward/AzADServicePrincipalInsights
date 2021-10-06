@@ -14,7 +14,7 @@ List all ServicePrincipals
 * Azure Role assignments
 * Group memberships
 * Application Secrets
-* Application Certificated
+* Application Certificates
 * ManagedIdentity Resource Type
 
 ## Permission requirements:
