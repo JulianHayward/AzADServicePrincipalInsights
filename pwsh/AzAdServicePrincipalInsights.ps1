@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzAdServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20210105_1_POC",
+    [string]$ProductVersion = "v1_20210106_1_POC",
     [string]$GithubRepository = "someTinyURL/AzAdServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
@@ -1411,7 +1411,7 @@ function summary() {
 
     #region SUMMARYServicePrincipals
     [void]$htmlTenantSummary.AppendLine(@"
-    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Service Principals" /></button>
+    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Service Principals" /></button>
     <div class="content TenantSummaryContent">
 "@)
 
@@ -1598,7 +1598,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsAADRoleAssignments
     [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Service Principals AAD RoleAssignments" /></button>
+<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Service Principals AAD RoleAssignments" /></button>
 <div class="content TenantSummaryContent">
 "@)
 
@@ -1725,7 +1725,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsAppRoleAssignments
     [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Service Principals App RoleAssignments" /></button>
+<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Service Principals App RoleAssignments (API permissions Application)" /></button>
 <div class="content TenantSummaryContent">
 "@)
 
@@ -1850,7 +1850,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsOauth2PermissionGrants
     [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Service Principals Oauth Permission grants" /></button>
+<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Service Principals Oauth Permission grants (API permissions Delegated)" /></button>
 <div class="content TenantSummaryContent">
 "@)
 
@@ -1974,7 +1974,7 @@ extensions: [{ name: 'sort' }]
     if (-not $NoAzureRoleAssignments) {
         #region SUMMARYServicePrincipalsAzureRoleAssignments
         [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Service Principals Azure RoleAssignments" /></button>
+<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment" data-content="Service Principals Azure RoleAssignments" /></button>
 <div class="content TenantSummaryContent">
 "@)
 
@@ -2101,14 +2101,14 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Service Principals Azure RoleAssignments / excluded by parameter '-NoAzureRoleAssignments'" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Service Principals Azure RoleAssignments / excluded by parameter '-NoAzureRoleAssignments'" /></button>
         <div class="content TenantSummaryContent"></div>
 "@)
     }
 
     #region SUMMARYServicePrincipalsGroupMemberships
     [void]$htmlTenantSummary.AppendLine(@"
-    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Service Principals Group memberships" /></button>
+    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principals Group memberships" /></button>
     <div class="content TenantSummaryContent">
 "@)
     
@@ -2230,16 +2230,27 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYServicePrincipalsAzureRoleAssignments
 
     #region SUMMARYApplicationSecrets
-    [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Application Secrets" /></button>
-<div class="content TenantSummaryContent">
+    $applicationSecrets = $cu.where( { $_.APPPasswordCredentials.Count -ne 0 } )
+    $applicationSecretsCount = $applicationSecrets.Count
+    $applicationSecretsExpireSoon = $applicationSecrets.where( {$_.APPKeyCredentials.expiryInfo -like "expires soon*"} )
+    $applicationSecretsExpireSoonCount = $applicationSecretsExpireSoon.Count
+
+    if ($applicationSecretsExpireSoonCount -gt 0){
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Application Secrets ($applicationSecretsExpireSoonCount expire soon)" /></button>
+        <div class="content TenantSummaryContent">
 "@)
+    }
+    else{
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Application Secrets" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+    }
+
 
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ApplicationSecrets"
-
-    $applicationSecrets = $cu.where( { $_.APPPasswordCredentials.Count -ne 0 } )
-    $applicationSecretsCount = $applicationSecrets.Count
 
     if ($applicationSecretsCount -gt 0) {
         $tfCount = $applicationSecretsCount
@@ -2367,16 +2378,27 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYApplicationSecrets
 
     #region SUMMARYApplicationCertificates
-    [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textPolicy" data-content="Application Certificates" /></button>
-<div class="content TenantSummaryContent">
+    $applicationCertificates = $cu.where( { $_.APPKeyCredentials.Count -ne 0 } )
+    $applicationCertificatesCount = $applicationCertificates.Count
+    $applicationCertificatesExpireSoon = $applicationCertificates.where( {$_.APPKeyCredentials.expiryInfo -like "expires soon*"} )
+    $applicationCertificatesExpireSoonCount = $applicationCertificatesExpireSoon.Count
+
+    if ($applicationCertificatesExpireSoonCount -gt 0){
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Application Certificates ($applicationCertificatesExpireSoonCount expire soon)" /></button>
+        <div class="content TenantSummaryContent">
 "@)
+    }
+    else{
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Application Certificates" /></button>
+        <div class="content TenantSummaryContent">
+"@) 
+    }
+
 
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ApplicationCertificates"
-
-    $applicationCertificates = $cu.where( { $_.APPKeyCredentials.Count -ne 0 } )
-    $applicationCertificatesCount = $applicationCertificates.Count
 
     if ($applicationCertificatesCount -gt 0) {
         $tfCount = $applicationCertificatesCount
@@ -3345,15 +3367,25 @@ else {
                 }
                 else {
                     $s1 = $altName -replace ".*/providers/"; $rm = $s1 -replace ".*/"; $resourceType = $s1 -replace "/$($rm)"              
-                    $miAlternativeName = $altname
                     $miResourceType = $resourceType
+                    $altNameSplit = $altName.split('/')
                     if ($altName -like "/subscriptions/*"){
-                        $altNameSplit = $altName.split('/')
-                        $miResourceScope = "Subscription $($altNameSplit[2])"
+                        if ($resourceType -eq "Microsoft.Authorization/policyAssignments"){
+                            if ($altName -like "/subscriptions/*/resourceGroups/*"){
+                                $miResourceScope = "Sub $($altNameSplit[2]) RG $($altNameSplit[4])"
+                            }
+                            else{
+                                $miResourceScope = "Sub $($altNameSplit[2])"
+                            }
+                        }
+                        else{
+                            #$altNameSplit = $altName.split('/')
+                            $miResourceScope = "Sub $($altNameSplit[2])"
+                        }
                     }
                     else{
-                        $altNameSplit = $altName.split('/')
-                        $miResourceScope = "ManagementGroup $($altNameSplit[4])"
+                        #$altNameSplit = $altName.split('/')
+                        $miResourceScope = "MG $($altNameSplit[4])"
                     }
                 }              
             }
@@ -3370,7 +3402,7 @@ else {
             $script:htServicePrincipalsEnriched.($sp.id).spTypeConcatinated = "SP $($spType) $($miType)"
             $script:htServicePrincipalsEnriched.($sp.id).type = $spType
             $script:htServicePrincipalsEnriched.($sp.id).subtype = $miType
-            $script:htServicePrincipalsEnriched.($sp.id).altname = $miAlternativeName
+            $script:htServicePrincipalsEnriched.($sp.id).altname = $altName
             $script:htServicePrincipalsEnriched.($sp.id).resourceType = $miResourceType
             $script:htServicePrincipalsEnriched.($sp.id).resourceScope = $miResourceScope
         }
@@ -4791,7 +4823,7 @@ $html += @"
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>$($Product)</title>
-    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_002.css">
+    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_003.css">
     <script src="https://www.azadvertizer.net/azgovvizv4/js/jquery-1.12.1.js"></script>
     <script src="https://www.azadvertizer.net/azgovvizv4/js/jquery-ui-1.12.1.js"></script>
     <script type="text/javascript" src="https://www.azadvertizer.net/azgovvizv4/js/highlight_v004_002.js"></script>
