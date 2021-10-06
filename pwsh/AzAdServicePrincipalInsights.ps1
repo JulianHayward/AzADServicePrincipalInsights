@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzAdServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20210106_1_POC",
+    [string]$ProductVersion = "v1_20210106_2_POC",
     [string]$GithubRepository = "someTinyURL/AzAdServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
@@ -1725,7 +1725,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsAppRoleAssignments
     [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Service Principals App RoleAssignments (API permissions Application)" /></button>
+<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="Service Principals App RoleAssignments (API permissions Application)" /></button>
 <div class="content TenantSummaryContent">
 "@)
 
@@ -1850,7 +1850,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsOauth2PermissionGrants
     [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Service Principals Oauth Permission grants (API permissions Delegated)" /></button>
+<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="Service Principals Oauth Permission grants (API permissions Delegated)" /></button>
 <div class="content TenantSummaryContent">
 "@)
 
@@ -2237,13 +2237,13 @@ extensions: [{ name: 'sort' }]
 
     if ($applicationSecretsExpireSoonCount -gt 0){
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Application Secrets ($applicationSecretsExpireSoonCount expire soon)" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Secrets ($applicationSecretsExpireSoonCount expire soon)" /></button>
         <div class="content TenantSummaryContent">
 "@)
     }
     else{
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Application Secrets" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Secrets" /></button>
         <div class="content TenantSummaryContent">
 "@)
     }
@@ -2385,13 +2385,13 @@ extensions: [{ name: 'sort' }]
 
     if ($applicationCertificatesExpireSoonCount -gt 0){
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Application Certificates ($applicationCertificatesExpireSoonCount expire soon)" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates ($applicationCertificatesExpireSoonCount expire soon)" /></button>
         <div class="content TenantSummaryContent">
 "@)
     }
     else{
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Application Certificates" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates" /></button>
         <div class="content TenantSummaryContent">
 "@) 
     }
@@ -4823,7 +4823,7 @@ $html += @"
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>$($Product)</title>
-    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_003.css">
+    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_004.css">
     <script src="https://www.azadvertizer.net/azgovvizv4/js/jquery-1.12.1.js"></script>
     <script src="https://www.azadvertizer.net/azgovvizv4/js/jquery-ui-1.12.1.js"></script>
     <script type="text/javascript" src="https://www.azadvertizer.net/azgovvizv4/js/highlight_v004_002.js"></script>
