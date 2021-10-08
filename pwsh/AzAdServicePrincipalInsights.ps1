@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzAdServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20210107_1_POC",
+    [string]$ProductVersion = "v1_20210107_3_POC",
     [string]$GithubRepository = "someTinyURL/AzAdServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
@@ -997,6 +997,7 @@ if ($CsvDelimiter -eq ",") {
 
 #region resolveObectsById
 function resolveObectsById($objects, $targetHt) {
+
     $counterBatch = [PSCustomObject] @{ Value = 0 }
     $batchSize = 1000
     $ObjectIdsBatch = $objects | Group-Object -Property { [math]::Floor($counterBatch.Value++ / $batchSize) }
@@ -1038,9 +1039,13 @@ function resolveObectsById($objects, $targetHt) {
             if ($resolvedIdentity.'@odata.type' -eq '#microsoft.graph.user') {
                 $type = "User"
             }
-            $targetHt.($resolvedIdentity.id) = @{}
-            $targetHt.($resolvedIdentity.id).full = "$($type) ($($resolvedIdentity.userType)), DisplayName: $($resolvedIdentity.displayName), Id: $(($resolvedIdentity.id))"
-            $targetHt.($resolvedIdentity.id).typeOnly = "$($type) ($($resolvedIdentity.userType))"
+
+            if ($targetHt -eq "htUsersResolved"){
+                $script:htUsersResolved.($resolvedIdentity.id) = @{}
+                $script:htUsersResolved.($resolvedIdentity.id).full = "$($type) ($($resolvedIdentity.userType)), DisplayName: $($resolvedIdentity.displayName), Id: $(($resolvedIdentity.id))"
+                $script:htUsersResolved.($resolvedIdentity.id).typeOnly = "$($type) ($($resolvedIdentity.userType))"
+            }
+
         }
         $resolvedIdentitiesCount = $resolvedIdentities.Count
         Write-Host "    $resolvedIdentitiesCount identities resolved"
@@ -1555,7 +1560,7 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
 col_widths: ['7%', '7%', '11%', '10%', '7%', '7%', '7%', '7%', '11%', '10%', '5%', '4%', '7%'],            
-            col_3: 'select',
+            col_4: 'select',
             col_5: 'multiple',
             col_10: 'select',
             locale: 'en-US',
@@ -3402,16 +3407,19 @@ else {
 $start = get-date
 Write-Host "Getting Service Principal count"
 $currentTask = "getSPCount"
-$uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/`$count"
+$uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/`$count"
 $method = "GET"
 $spCount = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn "Content" -consistencyLevel "eventual" -getSp $true
+Write-Host "API `$Count returned $spCount Service Principals count"
 
-Write-Host "Getting $spCount Service Principals"
-$currentTask = "getAllSPs"
+$currentTask = "Get all Service Principals"
 $start = get-date
-$uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals"
+$uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals"
 $method = "GET"
-$getServicePrincipals = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -getSp $true -getSPShowProgress $spCount
+$getServicePrincipalsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -getSp $true -getSPShowProgress $spCount
+Write-Host "API returned count: $($getServicePrincipalsFromAPI.Count)"
+$getServicePrincipals = $getServicePrincipalsFromAPI | Sort-Object -Property id -Unique
+Write-Host "Sorting unique by Id count: $($getServicePrincipalsFromAPI.Count)"
 $end = get-date
 $duration = NEW-TIMESPAN -Start $start -End $end
 Write-Host "Getting $($getServicePrincipals.Count) Service Principals duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
@@ -3453,11 +3461,11 @@ else {
             }
         }
         #publishedPermissionScopes
-        if (($sp.publishedPermissionScopes).Count -gt 0) {
+        if (($sp.oauth2PermissionScopes).Count -gt 0) {
             $htServicePrincipalsPublishedPermissionScopes.($sp.id) = @{}
             $htServicePrincipalsPublishedPermissionScopes.($sp.id).spDetails = $sp
             $htServicePrincipalsPublishedPermissionScopes.($sp.id).publishedPermissionScopes = @{}
-            foreach ($spPublishedPermissionScope in $sp.publishedPermissionScopes) {
+            foreach ($spPublishedPermissionScope in $sp.oauth2PermissionScopes) {
                 $htServicePrincipalsPublishedPermissionScopes.($sp.id).publishedPermissionScopes.($spPublishedPermissionScope.id) = $spPublishedPermissionScope
                 if (-not $htPublishedPermissionScopes.($sp.id)) {
                     $htPublishedPermissionScopes.($sp.id) = @{}
@@ -3494,10 +3502,9 @@ else {
         { $_ -gt 10000 } { $indicator = 250 }
     }
 
-    #Write-Host " processing $($getServicePrincipals.Count) ServicePrincipals (indicating progress in steps of $indicator)"
     Write-Host " processing $($getServicePrincipals.Count) ServicePrincipals"
     
-    ($getServicePrincipals | Sort-Object -Property id -unique) | ForEach-Object -Parallel {
+    $getServicePrincipals | ForEach-Object -Parallel {
         $sp = $_
         #array&ht
         $arrayAzureManagementEndPointUrls = $using:arrayAzureManagementEndPointUrls
@@ -4074,7 +4081,7 @@ foreach ($appOwner in $htAppOwners.Values) {
         }
     }
 }
-resolveObectsById -objects $htUsersToResolveGuestMember.Keys -targetHt $htUsersResolved
+resolveObectsById -objects $htUsersToResolveGuestMember.Keys -targetHt "htUsersResolved"
 
 $htOwnedByEnriched = @{}
 foreach ($sp in $htOwnedBy.Keys) {
@@ -4241,9 +4248,7 @@ foreach ($sp in $htServicePrincipalsEnriched.Keys) {
             }
 
             $owners = getowner -owner $owner.id
-
-            $htOptInfo.ownedBy = $($owners)
-
+            $htOptInfo.ownedBy = $owners
             $null = $arrayOwners.Add($htOptInfo)
         }
     }
@@ -4290,28 +4295,25 @@ if (-not $NoAzureRoleAssignments) {
     $start = get-date
 
     #resolving createdby/updatedby
-    $htARMRaResolvedCreatedByUpdatedBy = @{}
+    #$htUsersResolved = @{}
     $htCreatedByUpdatedByObjectIdsToBeResolved = @{}
     foreach ($createdByItem in $htCacheAssignments.roleFromAPI.values.assignment.properties.createdBy | Sort-Object -Unique) {
         
         if ([guid]::TryParse(($createdByItem), $([ref][guid]::Empty))){
-            #$createdByItem
-            if (-not $htARMRaResolvedCreatedByUpdatedBy.($createdByItem)) {            
+            if (-not $htUsersResolved.($createdByItem)) {            
                 if ($getServicePrincipals.id -contains $createdByItem) {
                     if ($htServicePrincipalsEnriched.($createdByItem)) {
                         $hlper = $htServicePrincipalsEnriched.($createdByItem)
-                        $htARMRaResolvedCreatedByUpdatedBy.($createdByItem) = @{}
-                        $htARMRaResolvedCreatedByUpdatedBy.($createdByItem).full = "$($hlper.spTypeConcatinated), DisplayName: $($hlper.ServicePrincipal.ServicePrincipalDetails.displayName), Id: $($createdByItem)"
-                        $htARMRaResolvedCreatedByUpdatedBy.($createdByItem).typeOnly = $hlper.spTypeConcatinated
+                        $htUsersResolved.($createdByItem) = @{}
+                        $htUsersResolved.($createdByItem).full = "$($hlper.spTypeConcatinated), DisplayName: $($hlper.ServicePrincipal.ServicePrincipalDetails.displayName), Id: $($createdByItem)"
+                        $htUsersResolved.($createdByItem).typeOnly = $hlper.spTypeConcatinated
                     }
                 }
                 else {
                     if ($htUsersResolved.($createdByItem)){
-                        #Write-Host $createdByItem "already known form other HT"
-                        #$htUsersResolved.($createdByItem)
-                        $htARMRaResolvedCreatedByUpdatedBy.($createdByItem) = @{}
-                        $htARMRaResolvedCreatedByUpdatedBy.($createdByItem).full = $htUsersResolved.($createdByItem).full
-                        $htARMRaResolvedCreatedByUpdatedBy.($createdByItem).typeOnly = $htUsersResolved.($createdByItem).typeOnly
+                        $htUsersResolved.($createdByItem) = @{}
+                        $htUsersResolved.($createdByItem).full = $htUsersResolved.($createdByItem).full
+                        $htUsersResolved.($createdByItem).typeOnly = $htUsersResolved.($createdByItem).typeOnly
                     }
                     else{
                         if (-not $htCreatedByUpdatedByObjectIdsToBeResolved.($createdByItem)) {
@@ -4334,7 +4336,7 @@ if (-not $NoAzureRoleAssignments) {
         }
         $arrayUnresolvedIdentitiesCount = $arrayUnresolvedIdentities.Count
         Write-Host "    $arrayUnresolvedIdentitiesCount unresolved identities that have a value"
-        resolveObectsById -objects $arrayUnresolvedIdentities -targetHt $htARMRaResolvedCreatedByUpdatedBy        
+        resolveObectsById -objects $arrayUnresolvedIdentities -targetHt "htUsersResolved"        
     }
 
     if ($htCacheAssignments.Keys.Count -gt 0) {
@@ -4344,8 +4346,8 @@ if (-not $NoAzureRoleAssignments) {
         foreach ($assignment in $htCacheAssignments.roleFromAPI.values) {
             #todo sp created ra in azure
             if (-not [string]::IsNullOrEmpty($assignment.assignment.properties.createdBy)){
-                if ($htARMRaResolvedCreatedByUpdatedBy.($assignment.assignment.properties.createdBy)) {
-                    $assignment.assignment.properties.createdBy = $htARMRaResolvedCreatedByUpdatedBy.($assignment.assignment.properties.createdBy).full
+                if ($htUsersResolved.($assignment.assignment.properties.createdBy)) {
+                    $assignment.assignment.properties.createdBy = $htUsersResolved.($assignment.assignment.properties.createdBy).full
                 }
             }
             if ($getServicePrincipals.id -contains $assignment.assignment.properties.principalId) {
@@ -4990,11 +4992,11 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
     $arrayManagedIdentityOpt = [System.Collections.ArrayList]@()
     if ($sp.ServicePrincipal.ManagedIdentity) {
         $htOptInfo = [ordered]@{}
-        $hlper = $htServicePrincipalsEnriched.($sp.ServicePrincipal.ServicePrincipalDetails.id)
-        $htOptInfo.type = $hlper.subtype
-        $htOptInfo.alternativeName = $hlper.altname
-        $htOptInfo.resourceType = $hlper.resourceType
-        $htOptInfo.resourceScope = $hlper.resourceScope
+        #$hlper = $htServicePrincipalsEnriched.($sp.ServicePrincipal.ServicePrincipalDetails.id)
+        $htOptInfo.type = $sp.subtype
+        $htOptInfo.alternativeName = $sp.altname
+        $htOptInfo.resourceType = $sp.resourceType
+        $htOptInfo.resourceScope = $sp.resourceScope
         $null = $arrayManagedIdentityOpt.Add($htOptInfo)
     }
     #endregion ManagedIdentity
@@ -5012,7 +5014,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
         SPServicePrincipalType      = $sp.ServicePrincipal.ServicePrincipalDetails.servicePrincipalType
         SPAccountEnabled            = $sp.ServicePrincipal.ServicePrincipalDetails.accountEnabled
         SPCreatedDateTime           = $sp.ServicePrincipal.ServicePrincipalDetails.createdDateTime
-        SPPublisherName             = $sp.ServicePrincipal.ServicePrincipalDetails.publisherName
+        #SPPublisherName             = $sp.ServicePrincipal.ServicePrincipalDetails.publisherName
         SPVerifiedPublisher         = $sp.ServicePrincipal.ServicePrincipalDetails.verifiedPublisher
         SPHomepage                  = $sp.ServicePrincipal.ServicePrincipalDetails.homepage
         SPErrorUrl                  = $sp.ServicePrincipal.ServicePrincipalDetails.errorUrl
