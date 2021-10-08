@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzAdServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20210106_2_POC",
+    [string]$ProductVersion = "v1_20210107_1_POC",
     [string]$GithubRepository = "someTinyURL/AzAdServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
@@ -998,7 +998,7 @@ if ($CsvDelimiter -eq ",") {
 #region resolveObectsById
 function resolveObectsById($objects, $targetHt) {
     $counterBatch = [PSCustomObject] @{ Value = 0 }
-    $batchSize = 100
+    $batchSize = 1000
     $ObjectIdsBatch = $objects | Group-Object -Property { [math]::Floor($counterBatch.Value++ / $batchSize) }
     $ObjectIdsBatchCount = ($ObjectIdsBatch | measure-object).Count
     $batchCnt = 0
@@ -1593,8 +1593,455 @@ extensions: [{ name: 'sort' }]
     
 
     $endCustPolLoop = get-date
-    Write-Host "   Custom Policy processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipals
+
+    #region SUMMARYServicePrincipalOwners
+    [void]$htmlTenantSummary.AppendLine(@"
+    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal Owners" /></button>
+    <div class="content TenantSummaryContent">
+"@)
+
+    $startCustPolLoop = get-date
+    Write-Host "  processing TenantSummary ServicePrincipal Owners"
+
+    if ($cu.SPOwners.Count -gt 0) {
+        $tfCount = $cu.SPOwners.Count
+        $htmlTableId = "TenantSummary_ServicePrincipalOwners"
+        [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>SP object Id</th>
+<th>SP application Id</th>
+<th>SP displayName</th>
+<th>SP App Owner Organization Id</th>
+<th>Type</th>
+<th>Owner DisplayName</th>
+<th>Owner PrincipalType</th>
+<th>Owner Id</th>
+<th>Owner Applicability</th>
+<th>Owner OwnedBy</th>
+</tr>
+</thead>
+<tbody>
+"@)
+
+        foreach ($sp in ($cu.where( { $_.SPOwners.Count -gt 0 } ))) {
+
+            $spType = $sp.SPType
+            $ownerOwnedBy = ""
+            foreach ($ownerinfo in $sp.SPOwners){
+                $hlpArrayDirect = @()
+                $hlpArrayInDirect = @()
+                $ownerDisplayName = "$($ownerinfo.displayName)"
+                $ownerPrincipalType = "$($ownerinfo.principalType)"
+                $ownerId = "$($ownerinfo.id)"
+                $ownerApplicability = $($ownerinfo.applicability)
+
+                if ($ownerPrincipalType -like "SP*"){
+                    $ownedBy = ($htSPOwnersFinal.($ownerinfo.id))
+                    $ownedByCount = $ownedBy.Count
+                    if ($ownedByCount -gt 0){
+                        foreach ($owned in $ownedBy){
+                            if ($owned.applicability -eq "direct"){
+                                $hlpArrayDirect += "$($owned.displayName) $($owned.principalType)"
+                            }
+                            if ($owned.applicability -eq "indirect"){
+                                $hlpArrayInDirect += "$($owned.displayName) $($owned.principalType)"
+                            }
+                        }
+                        if ($hlpArrayDirect.Count -gt 0 -and $hlpArrayInDirect.Count -gt 0){
+                            $ownerOwnedBy = "direct $($hlpArrayDirect.Count) [$($hlpArrayDirect -Join ", ")]<br> indirect $($hlpArrayInDirect.Count) [$($hlpArrayInDirect -Join ", ")]"
+                        }
+                        else{
+                            if ($hlpArrayDirect.Count -gt 0){
+                                $ownerOwnedBy = "direct $($hlpArrayDirect.Count) [$($hlpArrayDirect -Join ", ")]"
+                            }
+                        }
+                    }
+                    else{
+                        $ownerOwnedBy = ""
+                    }
+                }
+                else{
+                    $ownerOwnedBy = ""
+                }        
+            
+            [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($sp.SP.SPObjectId)</td>
+<td>$($sp.SP.SPAppId)</td>
+<td class="breakwordall">$($sp.SP.SPDisplayName)</td>
+<td>$($sp.SP.SPAppOwnerOrganizationId)</td>
+<td>$($spType)</td>
+<td class="breakwordall">$($ownerDisplayName)</td>
+<td>$($ownerPrincipalType)</td>
+<td>$($ownerId)</td>
+<td>$($ownerApplicability)</td>
+<td class="breakwordall">$($ownerOwnedBy)</td>
+</tr>
+"@)
+            }
+        }
+
+        [void]$htmlTenantSummary.AppendLine(@"
+            </tbody>
+        </table>
+
+    <script>
+        var tfConfig4$htmlTableId = {
+            base_path: 'https://www.azadvertizer.net/azgovvizv4/tablefilter/', rows_counter: true,       
+"@)      
+        if ($tfCount -gt 10) {
+            $spectrum = "10, $tfCount"
+            if ($tfCount -gt 50) {
+                $spectrum = "10, 25, 50, $tfCount"
+            }        
+            if ($tfCount -gt 100) {
+                $spectrum = "10, 30, 50, 100, $tfCount"
+            }
+            if ($tfCount -gt 500) {
+                $spectrum = "10, 30, 50, 100, 250, $tfCount"
+            }
+            if ($tfCount -gt 1000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+            }
+            if ($tfCount -gt 2000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+            }
+            if ($tfCount -gt 3000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+        }
+        [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
+col_widths: ['10%', '10%', '11%', '10%', '10%', '11%', '10%', '10%', '7%', '11%'],            
+            col_3: 'select',
+            col_4: 'multiple',
+            col_6: 'multiple',
+            col_8: 'select',
+            locale: 'en-US',
+            col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring'
+            ],
+extensions: [{ name: 'sort' }]
+        };
+        var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+        tf.init();
+    </script>
+"@)
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@"
+    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($cu.Count) Service Principals</span></p>
+"@)
+    }
+
+    [void]$htmlTenantSummary.AppendLine(@"
+    </div>
+"@)
+    
+
+    $endCustPolLoop = get-date
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    #endregion SUMMARYServicePrincipalOwners
+
+    #region SUMMARYApplicationOwners
+    [void]$htmlTenantSummary.AppendLine(@"
+    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Application Owners" /></button>
+    <div class="content TenantSummaryContent">
+"@)
+
+    $startCustPolLoop = get-date
+    Write-Host "  processing TenantSummary Application Owners"
+
+    if ($cu.APPAppOwners.Count -gt 0) {
+        $tfCount = $cu.APPAppOwners.Count
+        $htmlTableId = "TenantSummary_ApplicationOwners"
+        [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>App object Id</th>
+<th>App application Id</th>
+<th>App displayName</th>
+<th>SP App Owner Organization Id</th>
+<th>Type</th>
+<th>Owner DisplayName</th>
+<th>Owner PrincipalType</th>
+<th>Owner Id</th>
+<th>Owner Applicability</th>
+<th>Owner OwnedBy</th>
+</tr>
+</thead>
+<tbody>
+"@)
+
+        foreach ($sp in ($cu.where( { $_.APPAppOwners.Count -gt 0 } ))) {
+
+            $spType = $sp.SPType
+
+            $ownerOwnedBy = ""
+            foreach ($ownerinfo in $sp.APPAppOwners){
+                $hlpArrayDirect = @()
+                $hlpArrayInDirect = @()
+                $ownerDisplayName = "$($ownerinfo.displayName)"
+                $ownerPrincipalType = "$($ownerinfo.principalType)"
+                $ownerId = "$($ownerinfo.id)"
+                $ownerApplicability = $($ownerinfo.applicability)
+
+                if ($ownerPrincipalType -like "SP*"){
+                    $ownedBy = ($htSPOwnersFinal.($ownerinfo.id))
+                    $ownedByCount = $ownedBy.Count
+                    if ($ownedByCount -gt 0){
+                        foreach ($owned in $ownedBy){
+                            if ($owned.applicability -eq "direct"){
+                                $hlpArrayDirect += "$($owned.displayName) $($owned.principalType)"
+                            }
+                            if ($owned.applicability -eq "indirect"){
+                                $hlpArrayInDirect += "$($owned.displayName) $($owned.principalType)"
+                            }
+                        }
+                        if ($hlpArrayDirect.Count -gt 0 -and $hlpArrayInDirect.Count -gt 0){
+                            $ownerOwnedBy = "direct $($hlpArrayDirect.Count) [$($hlpArrayDirect -Join ", ")]<br> indirect $($hlpArrayInDirect.Count) [$($hlpArrayInDirect -Join ", ")]"
+                        }
+                        else{
+                            if ($hlpArrayDirect.Count -gt 0){
+                                $ownerOwnedBy = "direct $($hlpArrayDirect.Count) [$($hlpArrayDirect -Join ", ")]"
+                            }
+                        }
+                    }
+                    else{
+                        $ownerOwnedBy = ""
+                    }
+                }
+                else{
+                    $ownerOwnedBy = ""
+                }
+
+            [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($sp.APP.APPObjectId)</td>
+<td>$($sp.APP.APPAppClientId)</td>
+<td class="breakwordall">$($sp.APP.APPDisplayName)</td>
+<td>$($sp.SP.SPAppOwnerOrganizationId)</td>
+<td>$($spType)</td>
+<td class="breakwordall">$($ownerDisplayName)</td>
+<td>$($ownerPrincipalType)</td>
+<td>$($ownerId)</td>
+<td>$($ownerApplicability)</td>
+<td class="breakwordall">$($ownerOwnedBy)</td>
+</tr>
+"@)
+            }
+        }
+
+        [void]$htmlTenantSummary.AppendLine(@"
+            </tbody>
+        </table>
+
+    <script>
+        var tfConfig4$htmlTableId = {
+            base_path: 'https://www.azadvertizer.net/azgovvizv4/tablefilter/', rows_counter: true,       
+"@)      
+        if ($tfCount -gt 10) {
+            $spectrum = "10, $tfCount"
+            if ($tfCount -gt 50) {
+                $spectrum = "10, 25, 50, $tfCount"
+            }        
+            if ($tfCount -gt 100) {
+                $spectrum = "10, 30, 50, 100, $tfCount"
+            }
+            if ($tfCount -gt 500) {
+                $spectrum = "10, 30, 50, 100, 250, $tfCount"
+            }
+            if ($tfCount -gt 1000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+            }
+            if ($tfCount -gt 2000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+            }
+            if ($tfCount -gt 3000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+        }
+        [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
+col_widths: ['10%', '10%', '11%', '10%', '10%', '11%', '10%', '10%', '7%', '11%'],            
+            col_3: 'select',
+            col_4: 'multiple',
+            col_6: 'multiple',
+            col_8: 'select',
+            locale: 'en-US',
+            col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring'
+            ],
+extensions: [{ name: 'sort' }]
+        };
+        var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+        tf.init();
+    </script>
+"@)
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@"
+    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($cu.Count) Service Principals</span></p>
+"@)
+    }
+
+    [void]$htmlTenantSummary.AppendLine(@"
+    </div>
+"@)
+    
+
+    $endCustPolLoop = get-date
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    #endregion SUMMARYApplicationOwners
+
+    #region SUMMARYServicePrincipalOwnedObjects
+    [void]$htmlTenantSummary.AppendLine(@"
+    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal Owned Objects" /></button>
+    <div class="content TenantSummaryContent">
+"@)
+
+    $startCustPolLoop = get-date
+    Write-Host "  processing TenantSummary ServicePrincipal Owned Objects"
+
+    if ($cu.SPOwnedObjects.Count -gt 0) {
+        $tfCount = $cu.SPOwnedObjects.Count
+        $htmlTableId = "TenantSummary_ServicePrincipalOwnedObjects"
+        [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>SP object Id</th>
+<th>SP application Id</th>
+<th>SP displayName</th>
+<th>SP App Owner Organization Id</th>
+<th>Type</th>
+<th>Owned Objects</th>
+
+</tr>
+</thead>
+<tbody>
+"@)
+
+        foreach ($sp in ($cu.where( { $_.SPOwnedObjects.Count -gt 0 } ))) {
+
+            $spType = $sp.SPType
+            $arrayOwnedObjects = @()
+            foreach ($ownedObject in $sp.SPOwnedObjects | Sort-Object -Property type, typeDetailed, displayName){
+                $arrayOwnedObjects += "$($ownedObject.displayName) $($ownedObject.type) $($ownedObject.objectId)"
+            }
+                  
+            [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($sp.SP.SPObjectId)</td>
+<td>$($sp.SP.SPAppId)</td>
+<td class="breakwordall">$($sp.SP.SPDisplayName)</td>
+<td>$($sp.SP.SPAppOwnerOrganizationId)</td>
+<td>$($spType)</td>
+<td>$($arrayOwnedObjects -join ", ")</td>
+</tr>
+"@)
+            
+        }
+
+        [void]$htmlTenantSummary.AppendLine(@"
+            </tbody>
+        </table>
+
+    <script>
+        var tfConfig4$htmlTableId = {
+            base_path: 'https://www.azadvertizer.net/azgovvizv4/tablefilter/', rows_counter: true,       
+"@)      
+        if ($tfCount -gt 10) {
+            $spectrum = "10, $tfCount"
+            if ($tfCount -gt 50) {
+                $spectrum = "10, 25, 50, $tfCount"
+            }        
+            if ($tfCount -gt 100) {
+                $spectrum = "10, 30, 50, 100, $tfCount"
+            }
+            if ($tfCount -gt 500) {
+                $spectrum = "10, 30, 50, 100, 250, $tfCount"
+            }
+            if ($tfCount -gt 1000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+            }
+            if ($tfCount -gt 2000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+            }
+            if ($tfCount -gt 3000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+        }
+        [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
+col_widths: ['10%', '10%', '11%', '10%', '7%', '52%'],            
+            col_3: 'select',
+            col_4: 'multiple',
+            locale: 'en-US',
+            col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring'
+            ],
+extensions: [{ name: 'sort' }]
+        };
+        var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+        tf.init();
+    </script>
+"@)
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@"
+    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($cu.Count) Service Principals</span></p>
+"@)
+    }
+
+    [void]$htmlTenantSummary.AppendLine(@"
+    </div>
+"@)
+    
+
+    $endCustPolLoop = get-date
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    #endregion SUMMARYServicePrincipalOwnedObjects
 
     #region SUMMARYServicePrincipalsAADRoleAssignments
     [void]$htmlTenantSummary.AppendLine(@"
@@ -1644,7 +2091,6 @@ extensions: [{ name: 'sort' }]
                 }
             }
         
-            
             [void]$htmlTenantSummary.AppendLine(@"
 <tr>
 <td>$($sp.SP.SPObjectId)</td>
@@ -1720,7 +2166,7 @@ extensions: [{ name: 'sort' }]
 "@)
 
     $endCustPolLoop = get-date
-    Write-Host "   Custom Policy processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAADRoleAssignments
 
     #region SUMMARYServicePrincipalsAppRoleAssignments
@@ -1845,7 +2291,7 @@ extensions: [{ name: 'sort' }]
 "@)
 
     $endCustPolLoop = get-date
-    Write-Host "   Custom Policy processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAppRoleAssignments
 
     #region SUMMARYServicePrincipalsOauth2PermissionGrants
@@ -1968,7 +2414,7 @@ extensions: [{ name: 'sort' }]
 "@)
 
     $endCustPolLoop = get-date
-    Write-Host "   Custom Policy processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAppRoleAssignments
 
     if (-not $NoAzureRoleAssignments) {
@@ -2096,7 +2542,7 @@ extensions: [{ name: 'sort' }]
 "@)
 
         $endCustPolLoop = get-date
-        Write-Host "   Custom Policy processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+        Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
         #endregion SUMMARYServicePrincipalsAzureRoleAssignments
     }
     else {
@@ -2226,13 +2672,13 @@ extensions: [{ name: 'sort' }]
 "@)
     
     $endCustPolLoop = get-date
-    Write-Host "   Custom Policy processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAzureRoleAssignments
 
     #region SUMMARYApplicationSecrets
-    $applicationSecrets = $cu.where( { $_.APPPasswordCredentials.Count -ne 0 } )
+    $applicationSecrets = $cu.where( { $_.APPPasswordCredentials.Count -gt 0 } )
     $applicationSecretsCount = $applicationSecrets.Count
-    $applicationSecretsExpireSoon = $applicationSecrets.where( {$_.APPKeyCredentials.expiryInfo -like "expires soon*"} )
+    $applicationSecretsExpireSoon = $applicationSecrets.APPPasswordCredentials.expiryInfo.where( { $_ -like "expires soon*" } )
     $applicationSecretsExpireSoonCount = $applicationSecretsExpireSoon.Count
 
     if ($applicationSecretsExpireSoonCount -gt 0){
@@ -2280,7 +2726,6 @@ extensions: [{ name: 'sort' }]
                 $appObjectId = $sp.APP.APPObjectId
                 $appId = $sp.APP.APPAppClientId
                 $appDisplayName = $sp.APP.APPDisplayName
-                #$appId
                 $APPPasswordCredentials = $null
                 if (($sp.APPPasswordCredentials)) {
                     if (($sp.APPPasswordCredentials.count -gt 0)) {
@@ -2374,13 +2819,13 @@ extensions: [{ name: 'sort' }]
 "@)
 
     $endCustPolLoop = get-date
-    Write-Host "   Custom Policy processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYApplicationSecrets
 
     #region SUMMARYApplicationCertificates
-    $applicationCertificates = $cu.where( { $_.APPKeyCredentials.Count -ne 0 } )
+    $applicationCertificates = $cu.where( { $_.APPKeyCredentials.Count -gt 0 } )
     $applicationCertificatesCount = $applicationCertificates.Count
-    $applicationCertificatesExpireSoon = $applicationCertificates.where( {$_.APPKeyCredentials.expiryInfo -like "expires soon*"} )
+    $applicationCertificatesExpireSoon = $applicationCertificates.APPKeyCredentials.expiryInfo.where( { $_ -like "expires soon*" } )
     $applicationCertificatesExpireSoonCount = $applicationCertificatesExpireSoon.Count
 
     if ($applicationCertificatesExpireSoonCount -gt 0){
@@ -2395,7 +2840,6 @@ extensions: [{ name: 'sort' }]
         <div class="content TenantSummaryContent">
 "@) 
     }
-
 
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ApplicationCertificates"
@@ -2429,7 +2873,7 @@ extensions: [{ name: 'sort' }]
                 $appId = $sp.APP.APPAppClientId
                 $appDisplayName = $sp.APP.APPDisplayName
                 #$appId
-                $APPPasswordCredentials = $null
+                $APPKeyCredentials = $null
                 if (($sp.APPKeyCredentials)) {
                     if (($sp.APPKeyCredentials.count -gt 0)) {
                         $array = @()
@@ -2522,13 +2966,10 @@ extensions: [{ name: 'sort' }]
 "@)
 
     $endCustPolLoop = get-date
-    Write-Host "   Custom Policy processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYApplicationCertificates
 
     $script:html += $htmlTenantSummary
-    #$htmlTenantSummary = $null
-    #$script:html | Add-Content -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).html" -Encoding utf8 -Force
-    #$script:html = $null
 
 }
 #endregion TenantSummary
@@ -2986,7 +3427,6 @@ else {
     $htAppRoles = @{}
     $htPublishedPermissionScopes = @{}
     $htAadGroupsToResolve = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
-    #$htUsersToResolveGuestMember = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htAppRoleAssignments = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htSPOauth2PermissionGrantedTo = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htUsersAndGroupsToCheck4AppRoleAssignments = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
@@ -2995,7 +3435,6 @@ else {
     $htApplications = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htSPOwners = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htAppOwners = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
-    #$htOwners = @{}
     $htOwnedBy = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htProcessedTracker = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
 
@@ -3074,7 +3513,6 @@ else {
         $htAadRoleDefinitions = $using:htAadRoleDefinitions
         $htParameters = $using:htParameters
         $htAadGroupsToResolve = $using:htAadGroupsToResolve
-        #$htUsersToResolveGuestMember = $using:htUsersToResolveGuestMember
         $htAppRoleAssignments = $using:htAppRoleAssignments
         $htSPOauth2PermissionGrantedTo = $using:htSPOauth2PermissionGrantedTo
         $htUsersAndGroupsToCheck4AppRoleAssignments = $using:htUsersAndGroupsToCheck4AppRoleAssignments
@@ -3082,7 +3520,6 @@ else {
         $indicator = $using:indicator
         $htSPOwners = $using:htSPOwners
         $htAppOwners = $using:htAppOwners
-        #$htOwners = $using:htOwners
         $htOwnedBy = $using:htOwnedBy
         $htProcessedTracker = $using:htProcessedTracker
         #func
@@ -3245,26 +3682,6 @@ else {
         if ($getSPOwner.Count -gt 0) {
             foreach ($spOwner in $getSPOwner) {
 
-                <#
-                if ($spOwner.'@odata.type' -eq "#microsoft.graph.user"){
-                    if (-not $htUsersToResolveGuestMember.($spOwner.id)){
-                        Write-Host "SPowner added ($($appOwner.id))"
-                        $script:htUsersToResolveGuestMember.($spOwner.id) = @{}
-                    }
-                }
-                #>
-
-                <#if (-not $htOwners.($spOwner.id)) {
-                    $script:htOwners.($spOwner.id) = @{}
-                    $script:htOwners.($spOwner.id).owners = [array]$($sp.id)
-                }
-                else {
-                    $array = [array]($htOwners.($spOwner.id).owners)
-                    $array += $sp.id
-                    $script:htOwners.($spOwner.id).owners = $array
-                }
-                #>
-
                 if (-not $htOwnedBy.($sp.id)) {
                     $script:htOwnedBy.($sp.id) = @{}
                     $script:htOwnedBy.($sp.id).ownedBy = [array]$($spOwner | select-Object id, displayName, '@odata.type')
@@ -3309,16 +3726,6 @@ else {
                     if (-not $htAppOwners.($getApplication.id)) {
                         $script:htAppOwners.($getApplication.id) = $getAppOwner | select-Object id, displayName, '@odata.type'
                     }
-                    <#
-                    foreach ($appOwner in $getAppOwner){
-                        if ($appOwner.'@odata.type' -eq "#microsoft.graph.user"){
-                            if (-not $htUsersToResolveGuestMember.($appOwner.id)){
-                                Write-Host "Appowner added ($($appOwner.id))"
-                                $script:htUsersToResolveGuestMember.($appOwner.id) = @{}
-                            }
-                        }
-                    }
-                    #>
                 }
                 #endregion getAppOwner
 
@@ -3379,12 +3786,10 @@ else {
                             }
                         }
                         else{
-                            #$altNameSplit = $altName.split('/')
                             $miResourceScope = "Sub $($altNameSplit[2])"
                         }
                     }
                     else{
-                        #$altNameSplit = $altName.split('/')
                         $miResourceScope = "MG $($altNameSplit[4])"
                     }
                 }              
@@ -3415,8 +3820,6 @@ else {
         $processedServicePrincipalsCount = ($script:htServicePrincipalsEnriched.Keys).Count
         if ($processedServicePrincipalsCount) {
             if ($processedServicePrincipalsCount % $indicator -eq 0) {
-                #$rand = Get-Random -Minimum 100 -Maximum 2000
-                #start-sleep -Milliseconds $rand
                 if (-not $script:htProcessedTracker.($processedServicePrincipalsCount)) {
                     $script:htProcessedTracker.($processedServicePrincipalsCount) = @{}
                     Write-Host " $processedServicePrincipalsCount Service Principals processed"
@@ -3428,11 +3831,11 @@ else {
 
     $endForeachSP = get-date
     $duration = NEW-TIMESPAN -Start $startForeachSP -End $endForeachSP
-    Write-Host " Collecting data for all Service Principals ($($getServicePrincipals.Count)) duration: $($duration.TotalMinutes) minutes ($($durationAADSP.TotalSeconds) seconds)"
+    Write-Host " Collecting data for all Service Principals ($($getServicePrincipals.Count)) duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 }
 $end = get-date
 $duration = NEW-TIMESPAN -Start $start -End $end
-Write-Host "SP Collection duration: $($duration.TotalMinutes) minutes ($($durationAADSP.TotalSeconds) seconds)"
+Write-Host "SP Collection duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 #endregion dataColletionAADSP
 
 $htUsersToResolveGuestMember = @{}
@@ -3445,7 +3848,7 @@ if ($htUsersAndGroupsToCheck4AppRoleAssignments.User.Keys.Count -gt 0) {
     #UsersToResolveGuestMember
     foreach ($user in $htUsersAndGroupsToCheck4AppRoleAssignments.User.Keys) {
         if (-not $htUsersToResolveGuestMember.($user)) {
-            Write-Host "UsersToResolveGuestMember user added ($($user))"
+            #Write-Host "UsersToResolveGuestMember user added ($($user))"
             $htUsersToResolveGuestMember.($user) = @{}
         }
     }
@@ -3550,7 +3953,7 @@ if (($htAadGroupsToResolve.Keys).Count -gt 0) {
         $function:createBearerToken = $using:funcCreateBearerToken
         $function:GetJWTDetails = $using:funcGetJWTDetails
             
-        Write-Host "resolving AAD Group: $aadGroupId"
+        #Write-Host "resolving AAD Group: $aadGroupId"
         $currentTask = "get AAD Group $($aadGroupId)"
         $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/groups/$($aadGroupId)"
         $method = "GET"
@@ -3562,7 +3965,7 @@ if (($htAadGroupsToResolve.Keys).Count -gt 0) {
         $method = "GET"
         $getNestedGroups = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual"
         if ($getNestedGroups) {
-            write-host " -> has nested Groups $($getNestedGroups.Count)"
+            write-host " $aadGroupId -> has nested Groups $($getNestedGroups.Count)"
             $script:htAadGroups.($aadGroupId).nestedGroups = $getNestedGroups
         }
     } -ThrottleLimit $ThrottleLimitGraph
@@ -3576,14 +3979,14 @@ else {
 }
 $end = get-date
 $duration = NEW-TIMESPAN -Start $start -End $end
-Write-Host "Resolving AAD Groups where any SP is memberOf duration: $($duration.TotalMinutes) minutes ($($durationAADSP.TotalSeconds) seconds)"
+Write-Host "Resolving AAD Groups where any SP is memberOf duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 #endregion groupsFromSPs
     
 #region GroupsFromAzureRoleAssignments
 $start = get-date
 #batching
 $counterBatch = [PSCustomObject] @{ Value = 0 }
-$batchSize = 100
+$batchSize = 1000
 $arrayObjectIdsToProcess = [System.Collections.ArrayList]@()
 $objectIdsUnique = $htCacheAssignments.roleFromAPI.values.assignment.properties.principalId | Sort-Object -Unique
 Write-Host " Unique objectIds that have Azure Role assignments: $($objectIdsUnique.Count)"
@@ -3655,7 +4058,7 @@ foreach ($spOwner in $htSPOwners.Values) {
     foreach ($owner in $spOwner) {
         if ($owner.'@odata.type' -eq "#microsoft.graph.user") {
             if (-not $htUsersToResolveGuestMember.($owner.id)) {
-                Write-Host "UsersToResolveGuestMember SPowner added ($($owner.id))"
+                #Write-Host "UsersToResolveGuestMember SPowner added ($($owner.id))"
                 $htUsersToResolveGuestMember.($owner.id) = @{}
             }
         }
@@ -3665,7 +4068,7 @@ foreach ($appOwner in $htAppOwners.Values) {
     foreach ($owner in $appOwner) {
         if ($owner.'@odata.type' -eq "#microsoft.graph.user") {
             if (-not $htUsersToResolveGuestMember.($owner.id)) {
-                Write-Host "UsersToResolveGuestMember appOwner added ($($owner.id))"
+                #Write-Host "UsersToResolveGuestMember appOwner added ($($owner.id))"
                 $htUsersToResolveGuestMember.($owner.id) = @{}
             }
         }
@@ -3684,7 +4087,14 @@ foreach ($sp in $htOwnedBy.Keys) {
                 $htTmp.id = $owner.id
                 $htTmp.displayName = $owner.displayName
                 $htTmp.'@odata.type' = $owner.'@odata.type'
-                $htTmp.spType = $htServicePrincipalsEnriched.($owner.id).spTypeConcatinated
+                if ($owner.'@odata.type' -eq "#microsoft.graph.servicePrincipal"){
+                    $hlpType = $htServicePrincipalsEnriched.($owner.id).spTypeConcatinated
+                    $htTmp.spType = $hlpType
+                    $htTmp.principalType = $hlpType
+                }
+                if ($owner.'@odata.type' -eq "#microsoft.graph.user"){
+                    $htTmp.principalType = $htUsersResolved.($owner.id).typeOnly
+                }
                 $htTmp.applicability = "direct"
                 $arrayx += $htTmp
                 if (-not $htOwnedByEnriched.($sp)) {
@@ -3784,8 +4194,8 @@ foreach ($sp in $htServicePrincipalsEnriched.Keys) {
     $arrayOwners = [System.Collections.ArrayList]@()
     foreach ($owner in $htSPOwnersTmp.($sp).direct) {
         $htOptInfo = [ordered] @{}
-        $htOptInfo.ownerId = $($owner.id)
-        $htOptInfo.owner = $($owner.displayName)
+        $htOptInfo.id = $($owner.id)
+        $htOptInfo.displayName = $($owner.displayName)
         $htOptInfo.type = $($owner.'@odata.type')
         if ($owner.'@odata.type' -eq "#microsoft.graph.servicePrincipal") {
             $htOptInfo.spType = $htServicePrincipalsEnriched.($owner.id).spTypeConcatinated
@@ -3801,16 +4211,15 @@ foreach ($sp in $htServicePrincipalsEnriched.Keys) {
         }
         $htOptInfo.ownedBy = $owners
         $null = $arrayOwners.Add($htOptInfo)
-        #write-host "DIRECT: $($owner.displayName) owns $sp" 
     }
 
     foreach ($owner in $htSPOwnersTmp.($sp).indirect) {
         if ($owner -eq "noOwner" -or $owner.'@odata.type' -eq '#microsoft.graph.user') {
             if ($owner.'@odata.type' -eq '#microsoft.graph.user') {
-                if (($arrayOwners.where({ $_.applicability -eq "indirect" })).ownerId -notcontains $owner.id) {
+                if (($arrayOwners.where({ $_.applicability -eq "indirect" })).id -notcontains $owner.id) {
                     $htOptInfo = [ordered] @{}
-                    $htOptInfo.ownerId = $($owner.id)
-                    $htOptInfo.owner = $($owner.displayName)
+                    $htOptInfo.id = $($owner.id)
+                    $htOptInfo.displayName = $($owner.displayName)
                     $htOptInfo.type = $($owner.'@odata.type')
                     $htOptInfo.principalType = $htUsersResolved.($owner.id).typeOnly
                     $htOptInfo.applicability = "indirect"
@@ -3820,12 +4229,11 @@ foreach ($sp in $htServicePrincipalsEnriched.Keys) {
         }
         else {
             $htOptInfo = [ordered] @{}
-            $htOptInfo.ownerId = $($owner.id)
-            $htOptInfo.owner = $($owner.displayName)
+            $htOptInfo.id = $($owner.id)
+            $htOptInfo.displayName = $($owner.displayName)
             $htOptInfo.type = $($owner.'@odata.type')
             $htOptInfo.applicability = "indirect"
             if ($owner.'@odata.type' -eq "#microsoft.graph.servicePrincipal") {
-                #$htOptInfo.spType = $htServicePrincipalsEnriched.($owner.id).spTypeConcatinated
                 $htOptInfo.principalType = $htServicePrincipalsEnriched.($owner.id).spTypeConcatinated
             }
             if ($owner.'@odata.type' -eq "#microsoft.graph.user") {
@@ -3836,18 +4244,6 @@ foreach ($sp in $htServicePrincipalsEnriched.Keys) {
 
             $htOptInfo.ownedBy = $($owners)
 
-            <#
-            foreach ($userOwner in $owners.where({ $_.'@odata.type' -eq '#microsoft.graph.user' })) {
-                #Write-Host "U-INDIRECT $($owner.displayName) owns $sp and is owned by $($userOwner.displayName)"
-            }
-            foreach ($spOwner in $owners.where({ $_.'@odata.type' -eq '#microsoft.graph.servicePrincipal' })) {
-                #Write-Host "S-INDIRECT $($owner.displayName) owns $sp and is owned by $($spOwner.displayName)"
-    
-            }
-            foreach ($noOwner in $owners.where({ $_ -eq 'noOwner' })) {
-                #Write-Host "N-INDIRECT $($owner.displayName) owns $sp and is owned by $($noOwner)"
-            }
-            #>
             $null = $arrayOwners.Add($htOptInfo)
         }
     }
@@ -3856,14 +4252,6 @@ foreach ($sp in $htServicePrincipalsEnriched.Keys) {
         $htSPOwnersFinal.($sp) = @{}
         $htSPOwnersFinal.($sp) = $arrayOwners
     }  
-
-    <#
-    $allUsers = $htSPOwnersFinal.keys | where { $htSPOwnersFinal.($_).type -eq "#microsoft.graph.user" }
-    foreach ($user in $allUsers){
-        $htSPOwnersFinal.($user)
-        pause
-    }
-    #>
 
 }
 
@@ -3892,7 +4280,7 @@ foreach ($app in $htAppOwners.Keys) {
             $array += $htOpt
         }
     }
-    $htAppOwnersFinal.($app).owner = $array
+    $htAppOwnersFinal.($app) = $array
 }
 
 #endregion owners
@@ -3907,7 +4295,7 @@ if (-not $NoAzureRoleAssignments) {
     foreach ($createdByItem in $htCacheAssignments.roleFromAPI.values.assignment.properties.createdBy | Sort-Object -Unique) {
         
         if ([guid]::TryParse(($createdByItem), $([ref][guid]::Empty))){
-            $createdByItem
+            #$createdByItem
             if (-not $htARMRaResolvedCreatedByUpdatedBy.($createdByItem)) {            
                 if ($getServicePrincipals.id -contains $createdByItem) {
                     if ($htServicePrincipalsEnriched.($createdByItem)) {
@@ -3987,12 +4375,9 @@ if (-not $NoAzureRoleAssignments) {
     Write-Host "AzureRoleAssignmentMapping duration: $(($duration).TotalMinutes) minutes ($(($duration).TotalSeconds) seconds)"
     #endregion AzureRoleAssignmentMapping
 }
-else {
-
-}
-
 
 #region enrichedAADSPData
+Write-Host "Enrichment starting prep"
 $cu = [System.Collections.ArrayList]@()
 $appPasswordCredentialsExpiredCount = 0
 $appPasswordCredentialsGracePeriodExpiryCount = 0
@@ -4039,18 +4424,19 @@ foreach ($aadRoleAssignment in $htServicePrincipalsEnriched.values.ServicePrinci
         }
     }
 }
+Write-Host "Enrichment completed prep"
 
+Write-Host "Enrichment starting"
+$indicator = 100
+$processedServicePrincipalsCount = 0
+$startEnrichmentSP = get-date
 foreach ($sp in $htServicePrincipalsEnriched.values) {
-    Write-host "processing SP:" $sp.ServicePrincipal.ServicePrincipalDetails.displayName "objId: $($sp.ServicePrincipal.ServicePrincipalDetails.id)" "appId: $($sp.ServicePrincipal.ServicePrincipalDetails.appId)"
 
-    <# redundant
-    if (($sp.ServicePrincipal.ServicePrincipalDetails.appRoles).Count -gt 0) {
-        foreach ($spAppRole in $sp.ServicePrincipal.ServicePrincipalDetails.appRoles) {
-            Write-Host "SP AppRoles             : $($spAppRole.displayName) ($($spAppRole.id)) - $($spAppRole.allowedMemberTypes -join ", ") - $($spAppRole.value)"
+    #Write-host "processing SP:" $sp.ServicePrincipal.ServicePrincipalDetails.displayName "objId: $($sp.ServicePrincipal.ServicePrincipalDetails.id)" "appId: $($sp.ServicePrincipal.ServicePrincipalDetails.appId)"
 
-        }
+    if ($processedServicePrincipalsCount -gt 0 -and $processedServicePrincipalsCount % $indicator -eq 0) {
+        Write-Host "$processedServicePrincipalsCount ServicePrincipals processed"
     }
-    #>
 
     #region ServicePrincipalOwnedObjects
     $arrayServicePrincipalOwnedObjectsOpt = [System.Collections.ArrayList]@()
@@ -4079,28 +4465,15 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
         }
     }
     #endregion ServicePrincipalOwnedObjects
-
-
-    <# redundant
-    if (($sp.ServicePrincipal.ServicePrincipalDetails.publishedPermissionScopes).Count -gt 0) {
-        foreach ($publishedPermissionScope in $sp.ServicePrincipal.ServicePrincipalDetails.publishedPermissionScopes) {
-            Write-Host "SP publishedPermissionScope : $($publishedPermissionScope.adminConsentDisplayName)"
-        }
-    }
-    #>
     
     #region ServicePrincipalOwners
     $arrayServicePrincipalOwnerOpt = [System.Collections.ArrayList]@()
     if ($htSPOwnersFinal.($sp.ServicePrincipal.ServicePrincipalDetails.id)) {
         foreach ($servicePrincipalOwner in $htSPOwnersFinal.($sp.ServicePrincipal.ServicePrincipalDetails.id)) {
             $htOptInfo = [ordered] @{}
-            $htOptInfo.id = $servicePrincipalOwner.ownerId
-            $htOptInfo.displayName = $servicePrincipalOwner.owner
-            #$htOptInfo.type = $servicePrincipalOwner.type
+            $htOptInfo.id = $servicePrincipalOwner.id
+            $htOptInfo.displayName = $servicePrincipalOwner.displayName
             $htOptInfo.principalType = $servicePrincipalOwner.principalType
-            #if ($servicePrincipalOwner.spType) {
-            #    $htOptInfo.spType = $servicePrincipalOwner.spType 
-            #}
             $htOptInfo.applicability = $servicePrincipalOwner.applicability
             $arrayOwnedBy = @()
             
@@ -4138,7 +4511,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
             else {
                 $roleType = "Custom"
             }
-            #Write-Host "SP AAD Role assigned    :" $hlper.displayName "-" $hlper.description
+
             $htOptInfo = [ordered] @{}
             $htOptInfo.id = $servicePrincipalAADRoleAssignment.id
             $htOptInfo.roleDefinitionId = $servicePrincipalAADRoleAssignment.roleDefinitionId
@@ -4183,8 +4556,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
                 if (-not [string]::IsNullOrEmpty($scope) -and -not [string]::IsNullOrWhiteSpace($scope)) {
                     $hlperServicePrincipalsPublishedPermissionScope = $htServicePrincipalsPublishedPermissionScopes.($servicePrincipalOauth2PermissionGrant.resourceId)
                     $hlperPublishedPermissionScope = $htPublishedPermissionScopes.($servicePrincipalOauth2PermissionGrant.resourceId).($scope)
-                    #Write-Host "SP delegated            :" $hlperServicePrincipalsPublishedPermissionScope.spdetails.displayName "|" $scope "-" $hlperPublishedPermissionScope.adminConsentDescription
-                
+
                     $htOptInfo = [ordered] @{}
                     $htOptInfo.SPId = $hlperServicePrincipalsPublishedPermissionScope.spdetails.id
                     $htOptInfo.SPAppId = $hlperServicePrincipalsPublishedPermissionScope.spdetails.appId
@@ -4207,7 +4579,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
     #region SPOauth2PermissionGrantedTo
     $arraySPOauth2PermissionGrantedTo = [System.Collections.ArrayList]@()
     if ($htSPOauth2PermissionGrantedTo.($sp.ServicePrincipal.ServicePrincipalDetails.id)) {
-        foreach ($SPOauth2PermissionGrantedTo in $htSPOauth2PermissionGrantedTo.($sp.ServicePrincipal.ServicePrincipalDetails.id) | Sort-Object -Property clientId) {
+        foreach ($SPOauth2PermissionGrantedTo in $htSPOauth2PermissionGrantedTo.($sp.ServicePrincipal.ServicePrincipalDetails.id) | Sort-Object -Property clientId, id) {
             foreach ($SPOauth2PermissionGrantedToScope in $SPOauth2PermissionGrantedTo.scope | Sort-Object) {
                 $spHlper = $htServicePrincipalsEnriched.($SPOauth2PermissionGrantedTo.clientId).ServicePrincipal
                 $htOptInfo = [ordered] @{}
@@ -4236,7 +4608,6 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
     if ($sp.ServicePrincipal.ServicePrincipalAppRoleAssignments) {
         foreach ($servicePrincipalAppRoleAssignment in $sp.ServicePrincipal.ServicePrincipalAppRoleAssignments) {
             $hlper = $htAppRoles.($servicePrincipalAppRoleAssignment.appRoleId)
-            #Write-Host "SP AppRole Ass          :" $servicePrincipalAppRoleAssignment.resourceDisplayName "|" $hlper.value "-" $hlper.displayName
 
             $htOptInfo = [ordered] @{}
             $htOptInfo.AppRoleAssignmentId = $servicePrincipalAppRoleAssignment.id
@@ -4259,7 +4630,6 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
     if ($sp.ServicePrincipal.ServicePrincipalAppRoleAssignedTo) {
 
         foreach ($servicePrincipalAppRoleAssignedTo in $sp.ServicePrincipal.ServicePrincipalAppRoleAssignedTo) {
-            #Write-Host "SP AppRoleAssignedTo    :" $servicePrincipalAppRoleAssignedTo.principalDisplayName "($($servicePrincipalAppRoleAssignedTo.principalId)) |" $servicePrincipalAppRoleAssignedTo.principalType
             $htOptInfo = [ordered] @{}
             $htOptInfo.principalDisplayName = $servicePrincipalAppRoleAssignedTo.principalDisplayName
             $htOptInfo.principalId = $servicePrincipalAppRoleAssignedTo.principalId
@@ -4320,15 +4690,13 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
         $htSPAzureRoleAssignments = @{}
         $arrayServicePrincipalGroupMembershipsOpt = @()
         if ($sp.ServicePrincipal.ServicePrincipalGroupMemberships) {
-            foreach ($servicePrincipalGroupMembership in $sp.ServicePrincipal.ServicePrincipalGroupMemberships) {
+            foreach ($servicePrincipalGroupMembership in $sp.ServicePrincipal.ServicePrincipalGroupMemberships | Sort-Object) {
                 $htOptInfo = [ordered] @{}
                 if ($htAaDGroups.($servicePrincipalGroupMembership)) {
-                    #Write-Host "SP GroupMembership      :" $htAaDGroups.($servicePrincipalGroupMembership).groupDetails.displayName "($($servicePrincipalGroupMembership))"
                     $htOptInfo.DisplayName = $htAaDGroups.($servicePrincipalGroupMembership).groupDetails.displayName
                     $htOptInfo.ObjectId = $servicePrincipalGroupMembership
                 }
                 else {
-                    #Write-Host "SP GroupMembership      :" "notResolved" "($($servicePrincipalGroupMembership))"
                     $htOptInfo.DisplayName = "<n/a>"
                     $htOptInfo.ObjectId = $servicePrincipalGroupMembership
                 }
@@ -4338,7 +4706,6 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
                     foreach ($nestegGroupId in $htAadGroups.($servicePrincipalGroupMembership).nestedGroups.id) {
                         if ($htGroupRoleAssignmentThroughNesting.($nestegGroupId).RoleAssignmentsInherited) {
                             foreach ($roleAssignmentThroughNesting in $htGroupRoleAssignmentThroughNesting.($nestegGroupId).RoleAssignmentsInherited) {
-                                #Write-Host "Azure Role Assignment (through nested group membership ($nestegGroupId -> member of $($roleAssignmentThroughNesting.properties.principalId))) : $($roleAssignmentThroughNesting.id)"
                                 if (-not $htSPAzureRoleAssignments.($roleAssignmentThroughNesting.id)) {
                                     $htSPAzureRoleAssignments.($roleAssignmentThroughNesting.id) = @{}
                                     $htSPAzureRoleAssignments.($roleAssignmentThroughNesting.id).results = @()
@@ -4357,7 +4724,6 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
             foreach ($servicePrincipalGroupMembership in $sp.ServicePrincipal.ServicePrincipalGroupMemberships) {
                 if ($htAssignmentsByPrincipalId."groups".($servicePrincipalGroupMembership)) {
                     foreach ($roleAssignmentSPThroughGroup in $htAssignmentsByPrincipalId."groups".($servicePrincipalGroupMembership)) {
-                        #Write-Host "Azure RoleAssignment (from Group $servicePrincipalGroupMembership)    : $($roleAssignmentSP.id)"
                         if (-not $htSPAzureRoleAssignments.($roleAssignmentSPThroughGroup.assignment.id)) {
                             $htSPAzureRoleAssignments.($roleAssignmentSPThroughGroup.assignment.id) = @{}
                             $htSPAzureRoleAssignments.($roleAssignmentSPThroughGroup.assignment.id).results = @()
@@ -4377,7 +4743,6 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
         #region AzureRoleAssignmentsOpt
         if ($htAssignmentsByPrincipalId."servicePrincipals".($sp.ServicePrincipal.ServicePrincipalDetails.id)) {
             foreach ($roleAssignmentSP in $htAssignmentsByPrincipalId."servicePrincipals".($sp.ServicePrincipal.ServicePrincipalDetails.id)) {
-                #Write-Host "Azure RoleAssignment (direct)    : $($roleAssignmentSP.id)"
                 if (-not $htSPAzureRoleAssignments.($roleAssignmentSP.assignment.id)) {
                     $htSPAzureRoleAssignments.($roleAssignmentSP.assignment.id) = @{}
                     $htSPAzureRoleAssignments.($roleAssignmentSP.assignment.id).results = @()
@@ -4396,7 +4761,6 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
             foreach ($roleAssignment in $htSPAzureRoleAssignments.Keys | sort-object) {
                 foreach ($result in $htSPAzureRoleAssignments.($roleAssignment).results) {
                     $htOptInfo = [ordered] @{}
-                    #write-host "$($result.applicability) ($($result.appliesThrough)) - !$($result.roleAssignmentFull.assignmentScope) -> $($result.roleAssignmentFull.assignmentScopeId)! $roleAssignment"
                     if ($result.roleAssignmentFull.assignmentPIMDetails) {
                         $pimBased = $true                
                     }
@@ -4435,7 +4799,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
 
         $arrayServicePrincipalGroupMembershipsOpt = @()
         if ($sp.ServicePrincipal.ServicePrincipalGroupMemberships) {
-            foreach ($servicePrincipalGroupMembership in $sp.ServicePrincipal.ServicePrincipalGroupMemberships) {
+            foreach ($servicePrincipalGroupMembership in $sp.ServicePrincipal.ServicePrincipalGroupMemberships | Sort-Object) {
                 $htOptInfo = [ordered] @{}
                 if ($htAaDGroups.($servicePrincipalGroupMembership)) {
                     #Write-Host "SP GroupMembership      :" $htAaDGroups.($servicePrincipalGroupMembership).groupDetails.displayName "($($servicePrincipalGroupMembership))"
@@ -4476,7 +4840,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
         #region ApplicationOwner
         $arrayApplicationOwnerOpt = [System.Collections.ArrayList]@()
         if ($htAppOwnersFinal.($sp.ServicePrincipal.Application.ApplicationDetails.id)) {
-            $arrayApplicationOwnerOpt = $htAppOwnersFinal.($sp.ServicePrincipal.Application.ApplicationDetails.id).owner
+            $arrayApplicationOwnerOpt = $htAppOwnersFinal.($sp.ServicePrincipal.Application.ApplicationDetails.id)
         }
 
         $arrayApplicationOwnerOpt = [System.Collections.ArrayList]@()
@@ -4486,18 +4850,13 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
 
                 foreach ($servicePrincipalOwner in $htSPOwnersFinal.($appOwner.id)) {
                     $htOptInfo = [ordered] @{}
-                    $htOptInfo.id = $servicePrincipalOwner.ownerId
-                    $htOptInfo.displayName = $servicePrincipalOwner.owner
-                    #$htOptInfo.type = $servicePrincipalOwner.type
+                    $htOptInfo.id = $servicePrincipalOwner.id
+                    $htOptInfo.displayName = $servicePrincipalOwner.displayName
                     $htOptInfo.principalType = $servicePrincipalOwner.principalType
-                    #if ($servicePrincipalOwner.spType) {
-                    #    $htOptInfo.spType = $servicePrincipalOwner.spType 
-                    #}
                     $htOptInfo.applicability = $servicePrincipalOwner.applicability
                     $arrayOwnedBy = @()
                     
                     foreach ($owner in $servicePrincipalOwner.ownedBy) {
-                        $owner
                         if ($owner -ne "noOwner") {
                             if ($htSPOwnersFinal.($owner.id)) {
                                 $arrayOwnedBy += $htSPOwnersFinal.($owner.id)
@@ -4521,8 +4880,6 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
             $htOptInfo = [ordered] @{}
             $htOptInfo.id = $appOwner.id
             $htOptInfo.displayName = $appOwner.displayName
-            #$htOptInfo.type = $appOwner.'@odata.type'
-            #$htOptInfo.principalType = $appOwner.principalType
             if ($appOwner.'@odata.type' -eq "#microsoft.graph.servicePrincipal") {
                 $htOptInfo.principalType = $htServicePrincipalsEnriched.($appOwner.id).spTypeConcatinated
             }
@@ -4543,9 +4900,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
         if ($sp.ServicePrincipal.Application.ApplicationPasswordCredentials) {
             $appPasswordCredentialsCount = ($sp.ServicePrincipal.Application.ApplicationPasswordCredentials).count
             if ($appPasswordCredentialsCount -gt 0) {
-
                 foreach ($appPasswordCredential in $sp.ServicePrincipal.Application.ApplicationPasswordCredentials.keys | Sort-Object) {
-                    
                     $hlperApplicationPasswordCredential = $sp.ServicePrincipal.Application.ApplicationPasswordCredentials.($appPasswordCredential)
                     if ($hlperApplicationPasswordCredential.displayName) {
                         $displayName = $hlperApplicationPasswordCredential.displayName
@@ -4575,7 +4930,6 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
                         }
                     }
 
-                    #Write-Host "SP Application Secret : $($hlperApplicationPasswordCredential.keyId) ($($displayName)) expiry: $($expiryApplicationPasswordCredential) "
                     $htOptInfo = [ordered] @{}
                     $htOptInfo.keyId = $hlperApplicationPasswordCredential.keyId
                     $htOptInfo.displayName = $displayName
@@ -4617,7 +4971,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
                             $appKeyCredentialsExpiryOKCount++
                         }
                     }
-                    #Write-Host "SP Application Certificate : $($hlperApplicationKeyCredential.keyId) ($($hlperApplicationKeyCredential.displayName); $($hlperApplicationKeyCredential.customKeyIdentifier); $($hlperApplicationKeyCredential.type)) expiry:$($expiryApplicationKeyCredential) start:$($hlperApplicationKeyCredential.startDateTime) end:$($hlperApplicationKeyCredential.endDateTime)"
+
                     $htOptInfo = [ordered] @{}
                     $htOptInfo.keyId = $hlperApplicationKeyCredential.keyId
                     $htOptInfo.displayName = $hlperApplicationKeyCredential.displayName
@@ -4764,7 +5118,12 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
             })
     }
     #endregion finalArray
+    $processedServicePrincipalsCount++
 }
+Write-Host "Enrichment completed: $processedServicePrincipalsCount ServicePrincipals processed"
+$endEnrichmentSP = get-date
+$duration = NEW-TIMESPAN -Start $startEnrichmentSP -End $endEnrichmentSP
+Write-Host "Service Principals enrichment duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 
 #
 if ($AzureDevOpsWikiAsCode) {
@@ -4798,7 +5157,7 @@ foreach ($entry in $cu) {
 #region BuildHTML
 #
 #testhelper
-#$fileTimestamp = (get-date -format $FileTimeStampFormat)
+$fileTimestamp = (get-date -format $FileTimeStampFormat)
 
 $startBuildHTML = get-date
 
