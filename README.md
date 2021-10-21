@@ -1,5 +1,7 @@
 # AzAdServicePrincipalInsights
 
+![previewHTML](img/preview.png)
+
 ## Features
 
 * ServicePrincipals by type
