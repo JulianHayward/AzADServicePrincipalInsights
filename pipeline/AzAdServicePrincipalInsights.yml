@@ -1,4 +1,3 @@
-#v1_20210928_1_POC
 trigger: none
 
 pr: none
@@ -33,22 +32,20 @@ jobs:
     vmImage: 'ubuntu-18.04'
 
   steps:
-  - powershell: |
-      write-host "#################################"
-      write-host "Ensure AzAdServicePrincipalInsights prerequisites"
-      write-host "#################################"
-      write-host "wiki dir check"
-      if(!(test-path $(System.DefaultWorkingDirectory)/$(WikiDir))){New-Item -ItemType Directory -Force -Path $(System.DefaultWorkingDirectory)/$(WikiDir)}
-    displayName: 'Ensure AzAdServicePrincipalInsights v1 prerequisites'
+  - task: PowerShell@2
+    inputs:
+      targetType: 'filePath'
+      filePath: $(System.DefaultWorkingDirectory)/$(ScriptDir)/prerequisites.ps1
+    displayName: 'Prerequisites check'
     env:
-      workingdirectory: $(Agent.BuildDirectory)
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
   - task: AzurePowerShell@4
     inputs:
       azureSubscription: '$(ServiceConnection)'
       scriptType: filePath
       pwsh: true
       scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(Script)'
-      scriptArguments: '-OutputPath $(WikiDir) -AzureDevOpsWikiAsCode'
+      scriptArguments: '-OutputPath $(WikiDir) -AzureDevOpsWikiAsCode -ThrottleLimit 10 -ThrottleLimitGraph 10'
       azurePowerShellVersion: latestVersion
     displayName: 'Run AzAdServicePrincipalInsights v1'
   - powershell: |
