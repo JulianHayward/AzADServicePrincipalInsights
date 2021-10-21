@@ -1,6 +1,14 @@
 # AzAdServicePrincipalInsights
 
+Insights and tracking on Azure Active Directory Service Principals
+
 ## Features
+
+* HTML export
+* JSON export
+* CSV export (wip)
+
+## Data
 
 * ServicePrincipals by type
 * ServicePrincipal  owners
@@ -17,7 +25,7 @@
 * Application Secrets
 * Application Certificates
 
-## Permission requirements:
+## Permissions
 
 ### Azure
 
