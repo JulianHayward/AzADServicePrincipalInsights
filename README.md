@@ -1,7 +1,5 @@
 # AzAdServicePrincipalInsights
 
-![previewHTML](img/preview.png)
-
 ## Features
 
 * ServicePrincipals by type
@@ -35,3 +33,9 @@ Microsoft Graph API | Application | __User.Read.All__
 ### Azure DevOps
 
 The Build Service Account or Project Collection Build Service Account (which ever you use) requires 'contribute' permissions on the repository
+
+## Preview
+
+![previewHTML](img/preview.png)  
+![previewHTML2](img/preview2.png)  
+![previewJSON](img/previewJSON.png)
