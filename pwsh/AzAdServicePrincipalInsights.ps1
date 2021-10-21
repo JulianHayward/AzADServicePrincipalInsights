@@ -2,8 +2,8 @@
 Param
 (
     [string]$Product = "AzAdServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20210107_3_POC",
-    [string]$GithubRepository = "someTinyURL/AzAdServicePrincipalInsights",
+    [string]$ProductVersion = "v1_20211021_2_POC",
+    [string]$GithubRepository = "aka.ms/AzAdServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
     [switch]$NoCsvExport,
@@ -13,14 +13,15 @@ Param
     [array]$SubscriptionQuotaIdWhitelist = @("undefined"),
     [switch]$DoTranscript,
     [int]$HtmlTableRowsLimit = 40000, #HTML -> becomes unresponsive depending on client device performance. A recommendation will be shown to download the CSV instead of opening the TF table
-    [int]$ThrottleLimit = 10, 
-    [int]$ThrottleLimitGraph = 10, 
+    [int]$ThrottleLimit = 5, 
+    [int]$ThrottleLimitGraph = 5, 
     [string]$SubscriptionId4AzContext = "undefined",
     [string]$FileTimeStampFormat = "yyyyMMdd_HHmmss",
     [switch]$NoJsonExport,
     [int]$AADGroupMembersLimit = 500,
     [switch]$NoAzureRoleAssignments,
-    [int]$AADServicePrincipalExpiryWarningDays = 14
+    [int]$AADServicePrincipalExpiryWarningDays = 14,
+    [switch]$StatsOptOut
 )
 
 $Error.clear()
@@ -62,7 +63,7 @@ if ($DoTranscript) {
 }
 #endregion fileTimestamp
 
-#start
+#
 $startProduct = get-date
 $startTime = get-date -format "dd-MMM-yyyy HH:mm:ss"
 $startTimeUTC = ((Get-Date).ToUniversalTime()).ToString("dd-MMM-yyyy HH:mm:ss")
@@ -279,7 +280,7 @@ $htBearerAccessToken = @{}
 #API
 
 #region azapicall
-function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumption, $getGroup, $getGroupMembersCount, $getApp, $getSp, $getGuests, $caller, $consistencyLevel, $getCount, $getPolicyCompliance, $getMgAscSecureScore, $getRoleAssignmentSchedules, $getDiagnosticSettingsMg, $validateAccess) {
+function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumption, $getGroup, $getGroupMembersCount, $getApp, $getSP, $getGuests, $caller, $consistencyLevel, $getCount, $getPolicyCompliance, $getMgAscSecureScore, $getRoleAssignmentSchedules, $getRoleAssignmentScheduledInstances, $getDiagnosticSettingsMg, $validate) {
     $tryCounter = 0
     $tryCounterUnexpectedError = 0
     $retryAuthorizationFailed = 5
@@ -327,7 +328,6 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
         $startAPICall = Get-Date
         try {
             if ($body) {
-                #write-host "has BODY"
                 $azAPIRequest = Invoke-WebRequest -Uri $uri -Method $method -body $body -Headers $Header -ContentType "application/json" -UseBasicParsing
             }
             else {
@@ -381,12 +381,21 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
         }
 
         $tryCounter++
-        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "  DEBUGTASK: attempt#$($tryCounter) processing: $($currenttask) uri: '$($uri)'" -ForegroundColor $debugForeGroundColor }
+        if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "  DEBUGTASK: attempt#$($tryCounter) processing: $($currenttask) uri: '$($uri)'" -ForegroundColor $debugForeGroundColor }
+            if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "  Forced DEBUG: attempt#$($tryCounter) processing: $($currenttask) uri: '$($uri)'" }
+        }
         
         if ($unexpectedError -eq $false) {
-            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: unexpectedError: false" -ForegroundColor $debugForeGroundColor }
+            if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: unexpectedError: false" -ForegroundColor $debugForeGroundColor }
+                if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: unexpectedError: false" }
+            }
             if ($azAPIRequest.StatusCode -ne 200) {
-                if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" -ForegroundColor $debugForeGroundColor }
+                if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                    if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" -ForegroundColor $debugForeGroundColor }
+                    if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" }
+                }
                 if ($catchResult.error.code -like "*GatewayTimeout*" -or 
                     $catchResult.error.code -like "*BadGatewayConnection*" -or 
                     $catchResult.error.code -like "*InvalidGatewayHost*" -or 
@@ -414,8 +423,8 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         ($getConsumption -and $catchResult.error.code -eq "IndirectCostDisabled")
                     ) -or 
                     $catchResult.error.message -like "*The offer MS-AZR-0110P is not supported*" -or
-                    ($getSp -and $catchResult.error.code -like "*Request_ResourceNotFound*") -or 
-                    ($getSp -and $catchResult.error.code -like "*Authorization_RequestDenied*") -or
+                    ($getSP -and $catchResult.error.code -like "*Request_ResourceNotFound*") -or 
+                    ($getSP -and $catchResult.error.code -like "*Authorization_RequestDenied*") -or
                     ($getApp -and $catchResult.error.code -like "*Request_ResourceNotFound*") -or 
                     ($getApp -and $catchResult.error.code -like "*Authorization_RequestDenied*") -or 
                     ($getGroup -and $catchResult.error.code -like "*Request_ResourceNotFound*") -or 
@@ -430,10 +439,12 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                     ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "ResourceNotOnboarded") -or
                     ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "TenantNotOnboarded") -or
                     ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "InvalidResourceType") -or
+                    ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "InvalidResource") -or
+                    ($getRoleAssignmentScheduledInstances -and $catchResult.error.code -eq "InvalidResource") -or
                     ($getDiagnosticSettingsMg -and $catchResult.error.code -eq "InvalidResourceType") -or
                     ($catchResult.error.code -eq "InsufficientPermissions") -or
                     $catchResult.error.code -eq "ClientCertificateValidationFailure" -or
-                    ($validateAccess -and $catchResult.error.code -eq "Authorization_RequestDenied")
+                    ($validate -and $catchResult.error.code -eq "Authorization_RequestDenied")
                 ) {
                     if ($getPolicyCompliance -and $catchResult.error.code -like "*ResponseTooLarge*") {
                         Write-Host "Info: $currentTask - (StatusCode: '$($azAPIRequest.StatusCode)') Response too large, skipping this scope."
@@ -448,7 +459,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         Start-Sleep -Seconds $tryCounter
                     }
                     if ($catchResult.error.code -like "*AuthorizationFailed*") {
-                        if ($validateAccess) {
+                        if ($validate) {
                             #Write-Host "$currentTask failed ('$($catchResult.error.code)' | '$($catchResult.error.message)')" -ForegroundColor DarkRed
                             return "failed"
                         }
@@ -538,7 +549,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain Group status - skipping for now :)"
                         return "Request_ResourceNotFound"
                     }
-                    if (($getApp -or $getSp) -and $catchResult.error.code -like "*Request_ResourceNotFound*") {
+                    if (($getApp -or $getSP) -and $catchResult.error.code -like "*Request_ResourceNotFound*") {
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain ServicePrincipal status - skipping for now :)"
                         return "Request_ResourceNotFound"
                     }
@@ -546,7 +557,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) cannot get the executing user´s userType information (member/guest) - proceeding as 'unknown'"
                         return "unknown"
                     }
-                    if ((($getApp -or $getSp) -and $catchResult.error.code -like "*Authorization_RequestDenied*") -or ($getGuests -and $catchResult.error.code -like "*Authorization_RequestDenied*")) {
+                    if ((($getApp -or $getSP) -and $catchResult.error.code -like "*Authorization_RequestDenied*") -or ($getGuests -and $catchResult.error.code -like "*Authorization_RequestDenied*")) {
                         if ($userType -eq "Guest" -or $userType -eq "unknown") {
                             Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult)"
                             if ($userType -eq "Guest") {
@@ -600,7 +611,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                     }    
 
                     if ($getMgAscSecureScore -and $catchResult.error.code -eq "BadRequest") {
-                        $sleepSec = @(1, 1, 2, 3, 5, 7, 9, 10, 13, 15, 20, 25, 30, 45, 60, 60, 60)[$tryCounter]
+                        $sleepSec = @(1, 1, 2, 3, 5, 7, 9, 10, 13, 15, 20, 25, 30, 45, 60, 60, 60, 60)[$tryCounter]
                         $maxTries = 15
                         if ($tryCounter -gt $maxTries) {
                             Write-Host " $currentTask - capitulation after $maxTries attempts"
@@ -610,7 +621,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         Start-Sleep -Seconds $sleepSec
                     }
 
-                    if (($getRoleAssignmentSchedules -and $catchResult.error.code -eq "ResourceNotOnboarded") -or ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "TenantNotOnboarded") -or ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "InvalidResourceType")) {
+                    if (($getRoleAssignmentSchedules -and $catchResult.error.code -eq "ResourceNotOnboarded") -or ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "TenantNotOnboarded") -or ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "InvalidResourceType") -or ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "InvalidResource") -or ($getRoleAssignmentScheduledInstances -and $catchResult.error.code -eq "InvalidResource")) {
                         if ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "ResourceNotOnboarded") {
                             return "ResourceNotOnboarded"
                         }
@@ -619,6 +630,12 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         }
                         if ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "InvalidResourceType") {
                             return "InvalidResourceType"
+                        }
+                        if ($getRoleAssignmentSchedules -and $catchResult.error.code -eq "InvalidResource") {
+                            return "InvalidResource"
+                        }
+                        if ($getRoleAssignmentScheduledInstances -and $catchResult.error.code -eq "InvalidResource") {
+                            return "InvalidResource"
                         }
                     }
 
@@ -642,7 +659,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         start-sleep -Seconds $sleepSec
                     }
 
-                    if ($validateAccess -and $catchResult.error.code -eq "Authorization_RequestDenied") {
+                    if ($validate -and $catchResult.error.code -eq "Authorization_RequestDenied") {
                         #Write-Host "$currentTask failed ('$($catchResult.error.code)' | '$($catchResult.error.message)')" -ForegroundColor DarkRed
                         return "failed"
                     }
@@ -686,10 +703,16 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                 }
             }
             else {
-                if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" -ForegroundColor $debugForeGroundColor }
+                if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                    if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" -ForegroundColor $debugForeGroundColor }
+                    if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" }
+                }
                 $azAPIRequestConvertedFromJson = ($azAPIRequest.Content | ConvertFrom-Json)
-                if ($listenOn -eq "Content") {       
-                    if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: listenOn=content ($((($azAPIRequestConvertedFromJson) | Measure-Object).count))" -ForegroundColor $debugForeGroundColor }      
+                if ($listenOn -eq "Content") {        
+                    if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: listenOn=content ($((($azAPIRequestConvertedFromJson) | Measure-Object).count))" -ForegroundColor $debugForeGroundColor }
+                        if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: listenOn=content ($((($azAPIRequestConvertedFromJson) | Measure-Object).count))" }
+                    }    
                     $null = $apiCallResultsCollection.Add($azAPIRequestConvertedFromJson)
                 }
                 elseif ($listenOn -eq "ContentProperties") {
@@ -712,7 +735,10 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                 }
                 else {       
                     if (($azAPIRequestConvertedFromJson).value) {
-                        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: listenOn=default(value) value exists ($((($azAPIRequestConvertedFromJson).value | Measure-Object).count))" -ForegroundColor $debugForeGroundColor }
+                        if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: listenOn=default(value) value exists ($((($azAPIRequestConvertedFromJson).value | Measure-Object).count))" -ForegroundColor $debugForeGroundColor }
+                            if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: listenOn=default(value) value exists ($((($azAPIRequestConvertedFromJson).value | Measure-Object).count))" }
+                        }  
                         foreach ($entry in $azAPIRequestConvertedFromJson.value) {
                             $null = $apiCallResultsCollection.Add($entry)
                         }
@@ -725,12 +751,15 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         }
                     }
                     else {
-                        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: listenOn=default(value) value not exists; return empty array" -ForegroundColor $debugForeGroundColor }
+                        if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: listenOn=default(value) value not exists; return empty array" -ForegroundColor $debugForeGroundColor }
+                            if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: listenOn=default(value) value not exists; return empty array" }
+                        }  
                     }
                 }
 
                 $isMore = $false
-                if (-not $validateAccess) {
+                if (-not $validate) {
                     if ($azAPIRequestConvertedFromJson.nextLink) {
                         $isMore = $true
                         if ($uri -eq $azAPIRequestConvertedFromJson.nextLink) {
@@ -751,15 +780,18 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                                 Write-Host "nextLinkLog: re-starting (#$($restartDueToDuplicateNextlinkCounter)) '$currentTask'"
                                 $apiCallResultsCollection = [System.Collections.ArrayList]@()
                                 $uri = $initialUri
-                                Start-Sleep -Seconds 1
+                                Start-Sleep -Seconds 10
                                 createBearerToken -targetEndPoint $targetEndpoint
-                                Start-Sleep -Seconds 1
+                                Start-Sleep -Seconds 10
                             }
                         }
                         else {
                             $uri = $azAPIRequestConvertedFromJson.nextLink
                         }
-                        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
+                        if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
+                            if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: nextLink: $Uri" }
+                        }  
                     }
                     elseIf ($azAPIRequestConvertedFromJson."@oData.nextLink") {
                         $isMore = $true
@@ -781,15 +813,18 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                                 Write-Host "nextLinkLog: re-starting (#$($restartDueToDuplicateNextlinkCounter)) '$currentTask'"
                                 $apiCallResultsCollection = [System.Collections.ArrayList]@()
                                 $uri = $initialUri
-                                Start-Sleep -Seconds 1
+                                Start-Sleep -Seconds 10
                                 createBearerToken -targetEndPoint $targetEndpoint
-                                Start-Sleep -Seconds 1
+                                Start-Sleep -Seconds 10
                             }
                         }
                         else {
                             $uri = $azAPIRequestConvertedFromJson."@odata.nextLink"
                         }
-                        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: @oData.nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
+                        if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: @oData.nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
+                            if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: @oData.nextLink: $Uri" }
+                        }  
                     }
                     elseif ($azAPIRequestConvertedFromJson.properties.nextLink) {              
                         $isMore = $true
@@ -811,26 +846,35 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                                 Write-Host "nextLinkLog: re-starting (#$($restartDueToDuplicateNextlinkCounter)) '$currentTask'"
                                 $apiCallResultsCollection = [System.Collections.ArrayList]@()
                                 $uri = $initialUri
-                                Start-Sleep -Seconds 1
+                                Start-Sleep -Seconds 10
                                 createBearerToken -targetEndPoint $targetEndpoint
-                                Start-Sleep -Seconds 1
+                                Start-Sleep -Seconds 10
                             }
                         }
                         else {
                             $uri = $azAPIRequestConvertedFromJson.properties.nextLink
                         }
-                        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
+                        if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
+                            if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: nextLink: $Uri" }
+                        } 
                     }
                     else {
-                        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: NextLink: none" -ForegroundColor $debugForeGroundColor }
+                        if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: NextLink: none" -ForegroundColor $debugForeGroundColor }
+                            if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: NextLink: none" }
+                        } 
                     }
                 }
             }
         }
         else {
-            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: unexpectedError: notFalse" -ForegroundColor $debugForeGroundColor }
+            if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) { 
+                if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: unexpectedError: notFalse" -ForegroundColor $debugForeGroundColor }
+                if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: unexpectedError: notFalse" }
+            } 
             if ($tryCounterUnexpectedError -lt 13) {
-                $sleepSec = @(1, 2, 3, 5, 7, 10, 13, 17, 20, 30, 40, 50, 60)[$tryCounterUnexpectedError]
+                $sleepSec = @(1, 2, 3, 5, 7, 10, 13, 17, 20, 30, 40, 50, , 55, 60)[$tryCounterUnexpectedError]
                 Write-Host " $currentTask #$tryCounterUnexpectedError 'Unexpected Error' occurred (trying 10 times); sleep $sleepSec seconds"
                 Write-Host $catchResult
                 Start-Sleep -Seconds $sleepSec
@@ -855,7 +899,7 @@ $funcAzAPICall = $function:AzAPICall.ToString()
 #check required Az modules cmdlets
 #region testAzModules
 $testCommands = @('Get-AzContext')
-$azModules = @('Az.Accounts', 'Az.Resources')
+$azModules = @('Az.Accounts')
 
 Write-Host "Testing required Az modules cmdlets"
 foreach ($testCommand in $testCommands) {
@@ -880,9 +924,11 @@ foreach ($azModule in $azModules) {
     $azModuleVersion = (Get-InstalledModule -name "$azModule" -ErrorAction Ignore).Version
     if ($azModuleVersion) {
         Write-Host " Az Module $azModule Version: $azModuleVersion"
+        $resolvedAzModuleVersion = $azModuleVersion
     }
     else {
         Write-Host " Az Module $azModule Version: could not be assessed"
+        $resolvedAzModuleVersion = "could not be assessed"
     }
 }
 #endregion testAzModules
@@ -1013,15 +1059,14 @@ function resolveObectsById($objects, $targetHt) {
         
         $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/directoryObjects/getByIds?`$select=userType,id,displayName"
         $method = "POST"
-
         $body = @"
         {
             "ids":[$($nonResolvedIdentitiesToCheck)]
         }
 "@
-
         $currentTask = "Resolving Identities - Batch #$batchCnt/$($ObjectIdsBatchCount) ($(($batch.Group).Count) ObjectIds)"
         $resolvedIdentities = AzAPICall -uri $uri -method $method -body $body -currentTask $currentTask
+
         $t = 0
         foreach ($resolvedIdentity in $resolvedIdentities) {
             $t++
@@ -1108,10 +1153,9 @@ function dataCollection($mgId) {
         #MGCustomRolesRoles
         $currentTask = "Custom Role definitions '$($mgdetail.properties.displayName)' ('$($mgdetail.Name)')"
         $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleDefinitions?api-version=2015-07-01&`$filter=type%20eq%20'CustomRole'"
-        #$path = "/providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleDefinitions?api-version=2015-07-01&`$filter=type%20eq%20'CustomRole'"
         $method = "GET"
-            
-        $mgCustomRoleDefinitions = ((AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection"))
+        $mgCustomRoleDefinitions = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection"
+
         foreach ($mgCustomRoleDefinition in $mgCustomRoleDefinitions) {
             if (-not $($htCacheDefinitions).role[$mgCustomRoleDefinition.name]) {
                 ($script:htCacheDefinitions).role.$($mgCustomRoleDefinition.name) = @{}
@@ -1123,9 +1167,8 @@ function dataCollection($mgId) {
         #PIM RoleAssignmentSchedules
         $currentTask = "Role assignment schedules API '$($mgdetail.properties.displayName)' ('$($mgdetail.Name)')"
         $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignmentSchedules?api-version=2020-10-01-preview"
-        #$path = "/providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignmentSchedules?api-version=2020-10-01-preview"
         $method = "GET"
-        $roleAssignmentSchedulesFromAPI = ((AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection" -getRoleAssignmentSchedules $true))
+        $roleAssignmentSchedulesFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection" -getRoleAssignmentSchedules $true
         
         if ($roleAssignmentSchedulesFromAPI -eq "ResourceNotOnboarded" -or $roleAssignmentSchedulesFromAPI -eq "TenantNotOnboarded" -or $roleAssignmentSchedulesFromAPI -eq "InvalidResourceType") {
             #Write-Host "Scope '$($childMgSubDisplayName)' ('$childMgSubId') not onboarded in PIM"
@@ -1146,9 +1189,8 @@ function dataCollection($mgId) {
         #RoleAssignment API (system metadata e.g. createdOn)
         $currentTask = "Role assignments API '$($mgdetail.properties.displayName)' ('$($mgdetail.Name)')"
         $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignments?api-version=2015-07-01"
-        #$path = "/providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignments?api-version=2015-07-01"
         $method = "GET"
-        $roleAssignmentsFromAPI = ((AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection"))
+        $roleAssignmentsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection"
 
         if ($roleAssignmentsFromAPI.Count -gt 0) {
             foreach ($roleAssignmentFromAPI in $roleAssignmentsFromAPI) {
@@ -1290,10 +1332,9 @@ function dataCollection($mgId) {
                 #SubscriptionRoles
                 $currentTask = "Custom Role definitions '$($childMgSubDisplayName)' ('$childMgSubId')"
                 $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleDefinitions?api-version=2015-07-01&`$filter=type%20eq%20'CustomRole'"
-                #$path = "/subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleDefinitions?api-version=2015-07-01&`$filter=type%20eq%20'CustomRole'"
                 $method = "GET"
-                        
-                $subCustomRoleDefinitions = ((AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection"))
+                $subCustomRoleDefinitions = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection"
+
                 foreach ($subCustomRoleDefinition in $subCustomRoleDefinitions) {
                     if (-not $($htCacheDefinitions).role[$subCustomRoleDefinition.name]) {
                         ($script:htCacheDefinitions).role.$($subCustomRoleDefinition.name) = @{}
@@ -1304,9 +1345,9 @@ function dataCollection($mgId) {
                 #PIM RoleAssignmentSchedules
                 $currentTask = "Role assignment schedules API '$($childMgSubDisplayName)' ('$childMgSubId')"
                 $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleAssignmentSchedules?api-version=2020-10-01-preview"
-                #$path = "/providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignmentSchedules?api-version=2020-10-01-preview"
                 $method = "GET"
-                $roleAssignmentSchedulesFromAPI = ((AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection" -getRoleAssignmentSchedules $true))
+                $roleAssignmentSchedulesFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection" -getRoleAssignmentSchedules $true
+
                 if ($roleAssignmentSchedulesFromAPI -eq "ResourceNotOnboarded" -or $roleAssignmentSchedulesFromAPI -eq "TenantNotOnboarded" -or $roleAssignmentSchedulesFromAPI -eq "InvalidResourceType") {
                     #Write-Host "Scope '$($childMgSubDisplayName)' ('$childMgSubId') not onboarded in PIM"
                 }
@@ -1329,9 +1370,8 @@ function dataCollection($mgId) {
                 #RoleAssignment API (system metadata e.g. createdOn)
                 $currentTask = "Role assignments API '$($childMgSubDisplayName)' ('$childMgSubId')"
                 $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleAssignments?api-version=2015-07-01"
-                #$path = "/subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleAssignmentsUsageMetrics?api-version=2019-08-01-preview"
                 $method = "GET"
-                $roleAssignmentsFromAPI = ((AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection"))
+                $roleAssignmentsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller "CustomDataCollection"
 
                 if ($roleAssignmentsFromAPI.Count -gt 0) {
                     foreach ($roleAssignmentFromAPI in $roleAssignmentsFromAPI) {
@@ -1420,14 +1460,310 @@ function summary() {
     <div class="content TenantSummaryContent">
 "@)
 
-    $startCustPolLoop = get-date
-    Write-Host "  processing TenantSummary ServicePrincipals"
-
     if ($cu.Count -gt 0) {
+        $startCustPolLoop = get-date
+        Write-Host "  processing TenantSummary ServicePrincipals"
+
         $tfCount = $cu.Count
         $htmlTableId = "TenantSummary_ServicePrincipals"
+        $tf = "tf$($htmlTableId)"
+
+        $categoryColorsMax = @("rgb(1,0,103)","rgb(213,255,0)","rgb(255,0,86)","rgb(158,0,142)","rgb(14,76,161)","rgb(255,229,2)","rgb(0,95,57)","rgb(0,255,0)","rgb(149,0,58)","rgb(255,147,126)","rgb(164,36,0)","rgb(0,21,68)","rgb(145,208,203)","rgb(98,14,0)","rgb(107,104,130)","rgb(0,0,255)","rgb(0,125,181)","rgb(106,130,108)","rgb(0,0,0)","rgb(0,174,126)","rgb(194,140,159)","rgb(190,153,112)","rgb(0,143,156)","rgb(95,173,78)","rgb(255,0,0)","rgb(255,0,246)","rgb(255,2,157)","rgb(104,61,59)","rgb(255,116,163)","rgb(150,138,232)","rgb(152,255,82)","rgb(167,87,64)","rgb(1,255,254)","rgb(255,238,232)","rgb(254,137,0)","rgb(189,198,255)","rgb(1,208,255)","rgb(187,136,0)","rgb(117,68,177)","rgb(165,255,210)","rgb(255,166,254)","rgb(119,77,0)","rgb(122,71,130)","rgb(38,52,0)","rgb(0,71,84)","rgb(67,0,44)","rgb(181,0,255)","rgb(255,177,103)","rgb(255,219,102)","rgb(144,251,146)","rgb(126,45,210)","rgb(189,211,147)","rgb(229,111,254)","rgb(222,255,116)","rgb(0,255,120)","rgb(0,155,255)","rgb(0,100,1)","rgb(0,118,255)","rgb(133,169,0)","rgb(0,185,23)","rgb(120,130,49)","rgb(0,255,198)","rgb(255,110,65)","rgb(232,94,190)")
+
+        $groupedByOrg = $cu.SP.where( { $_.SPAppOwnerOrganizationId} ) | group-Object -Property SPAppOwnerOrganizationId
+
+        $arrOrgCounts = @()
+        $arrOrgIds = @()
+        foreach ($grp in $groupedByOrg | sort-object -property count -Descending){
+            $arrOrgCounts += $grp.Count
+            $arrOrgIds += $grp.Name
+        }
+        $OrgCounts = "'{0}'" -f ($arrOrgCounts -join "','")
+        $OrgIds = "'{0}'" -f ($arrOrgIds -join "','")
+        
+        $categoryColorsOrg = ($categoryColorsMax[0..(($arrOrgIds).Count -1)])
+        $categoryColorsSeperatedOrg = "'{0}'" -f ($categoryColorsOrg -join "','")
+
+        $groupedBySPType = $cu.SPType | group-Object
+
+        $arrSPTypeCounts = @()
+        $arrSPTypes = @()
+        foreach ($grp in $groupedBySPType | sort-object -property count -Descending){
+            $arrSPTypeCounts += $grp.Count
+            $arrSPTypes += $grp.Name
+        }
+        $SPTypeCounts = "'{0}'" -f ($arrSPTypeCounts -join "','")
+        $SPTypes = "'{0}'" -f ($arrSPTypes -join "','")
+        
+        $categoryColorsSPType = ($categoryColorsMax[($arrOrgIds.Count)..(($arrSPTypes).Count + ($arrOrgIds.Count) -1)])
+        $categoryColorsSeperatedSPType = "'{0}'" -f ($categoryColorsSPType -join "','")
+
+        $groupedByMIResourceType = $cu.where( { $_.SPType -like "SP MI*" } ).ManagedIdentity.resourceType | group-Object
+
+        $arrMIResTypeCounts = @()
+        $arrMIResTypes = @()
+        foreach ($grp in $groupedByMIResourceType | sort-object -property count -Descending){
+            $arrMIResTypeCounts += $grp.Count
+            $arrMIResTypes += $grp.Name -replace "Microsoft."
+        }
+        $MIResTypeCounts = "'{0}'" -f ($arrMIResTypeCounts -join "','")
+        $MIResTypes = "'{0}'" -f ($arrMIResTypes -join "','")
+
+        $categoryColorsMIResType = ($categoryColorsMax[($arrOrgIds.Count + $arrMIResTypes.Count)..(($arrSPTypes).Count + ($arrOrgIds.Count) + ($arrMIResTypes.Count) -1)])
+        $categoryColorsSeperatedMIResType = "'{0}'" -f ($categoryColorsMIResType -join "','")
+
+        $SPAppINT = $cu.where( { $_.SPType -eq "SP APP INT"} )
+        
+
+        #sp
+        $SPAppINTSPOwnerStatusLabel = "'{0}'" -f ((@('SP without owner', 'SP with owner')) -join "','")
+        $SPAppINTWithSPOwnerCount = ($SPAppInt.where( { $_.SPOwners.Count -gt 0 } )).Count
+        $SPAppINTWithoutSPOwnerCount = $SPAppINT.Count - $SPAppINTWithSPOwnerCount
+        $SPAppINTSPOwnerStatusData = "'{0}'" -f ((@($SPAppINTWithoutSPOwnerCount, $SPAppINTWithSPOwnerCount)) -join "','")
+        $categoryColorsSPAppINTSpOwnerStatus = ($categoryColorsMax[0..1])
+        $categoryColorsSeperatedSPAppINTSPOwnerStatus = "'{0}'" -f ($categoryColorsSPAppINTSpOwnerStatus -join "','")
+
+        #app
+        $SPAppINTAppOwnerStatusLabel = "'{0}'" -f ((@('App without owner', 'App with owner')) -join "','")
+        $SPAppINTWithAppOwnerCount = ($SPAppInt.where( { $_.APPAppOwners.Count -gt 0 } )).Count
+        $SPAppINTWithoutAppOwnerCount = $SPAppINT.Count - $SPAppINTWithAppOwnerCount
+        $SPAppINTAppOwnerStatusData = "'{0}'" -f ((@($SPAppINTWithoutAppOwnerCount, $SPAppINTWithAppOwnerCount)) -join "','")
+        $categoryColorsSPAppINTAppOwnerStatus = ($categoryColorsMax[2..3])
+        $categoryColorsSeperatedSPAppINTAppOwnerStatus = "'{0}'" -f ($categoryColorsSPAppINTAppOwnerStatus -join "','")
+
+    
         [void]$htmlTenantSummary.AppendLine(@"
-<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+        <div class="noFloat">
+            <button type="button" class="decollapsible">Charts</button>
+        
+            <div class="showContent chart-container">
+                <div class="chartDiv">
+                    <span>Organizations count: <b>$($arrOrgCounts.Count)</b></span>
+                    <canvas id="myChart" style="height:150px; width: 250px"></canvas>
+                </div>
+                <div class="chartDiv">
+                    <span>Service Principal types count: <b>$($arrSPTypeCounts.Count)</b></span>
+                    <canvas id="myChart2" style="height:150px; width: 250px"></canvas>
+                </div>
+                <div class="chartDiv">
+                    <span>Managed Identity Resource types count: <b>$($arrMIResTypeCounts.Count)</b></span> 
+                    <canvas id="myChart3" style="height:150px; width: 250px"></canvas>
+                </div>
+                <div class="chartDiv">
+                    <span>SP APP INT - SP/App Ownership</span> 
+                    <canvas id="myChart4" style="height:150px; width: 250px"></canvas>
+                </div>
+            </div>
+        </div>
+
+<script>
+var ctx = document.getElementById('myChart');
+var myChart = new Chart(ctx, {
+    type: 'pie',
+                data: {
+                    datasets: [
+                        {
+                            data: [$($OrgCounts)],
+                            backgroundColor: [$($categoryColorsSeperatedOrg)],
+                            labels: [$($OrgIds)],
+                            borderWidth:0.5,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: false,
+                    legend: {
+                        display: false,
+                    },
+                    tooltips: {
+                        bodyFontSize: 10,
+                        callbacks: {
+                            label: function (tooltipItem, data) {
+                                var dataset = data.datasets[tooltipItem.datasetIndex];
+                                var index = tooltipItem.index;
+                                window. datasetitem = tooltipItem.datasetIndex;
+                                window.target = dataset.labels[index];
+                                return dataset.labels[index] + ': ' + dataset.data[index];
+                            }
+                        }
+                    },
+
+                    onClick: (e) => {
+                        if (window. datasetitem == 0){
+                            window. targetcolumn = '4'
+                        }
+                        $($tf).clearFilters();
+                        $($tf).setFilterValue((window. targetcolumn), (window.target));
+                        $($tf).filter();
+
+                    }
+                }
+});
+
+var ctx = document.getElementById('myChart2');
+var myChart2 = new Chart(ctx, {
+    type: 'pie',
+                data: {
+                    datasets: [
+                        {
+                            data: [$($SPTypeCounts)],
+                            backgroundColor: [$($categoryColorsSeperatedSPType)],
+                            labels: [$($SPTypes)],
+                            borderWidth:0.5,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: false,
+                    legend: {
+                        display: false,
+                    },
+                    tooltips: {
+                        bodyFontSize: 10,
+                        callbacks: {
+                            label: function (tooltipItem, data) {
+                                var dataset = data.datasets[tooltipItem.datasetIndex];
+                                var index = tooltipItem.index;
+                                window. datasetitem = tooltipItem.datasetIndex;
+                                window.target = dataset.labels[index];
+                                return dataset.labels[index] + ': ' + dataset.data[index];
+                            }
+                        }
+                    },
+
+                    onClick: (e) => {
+                        if (window. datasetitem == 0){
+                            window. targetcolumn = '5'
+                        }
+                        $($tf).clearFilters();
+                        $($tf).setFilterValue((window. targetcolumn), (window.target));
+                        $($tf).filter();
+
+                    }
+                }
+});
+
+var ctx = document.getElementById('myChart3');
+var myChart3 = new Chart(ctx, {
+    type: 'pie',
+                data: {
+                    datasets: [
+                        {
+                            data: [$($MIResTypeCounts)],
+                            backgroundColor: [$($categoryColorsSeperatedMIResType)],
+                            labels: [$($MIResTypes)],
+                            borderWidth:0.5,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: false,
+                    legend: {
+                        display: false,
+                    },
+                    tooltips: {
+                        bodyFontSize: 10,
+                        callbacks: {
+                            label: function (tooltipItem, data) {
+                                var dataset = data.datasets[tooltipItem.datasetIndex];
+                                var index = tooltipItem.index;
+                                window. datasetitem = tooltipItem.datasetIndex;
+                                window.target = dataset.labels[index];
+                                return dataset.labels[index] + ': ' + dataset.data[index];
+                            }
+                        }
+                    },
+
+                    onClick: (e) => {
+                        if (window. datasetitem == 0){
+                            window. targetcolumn = '11'
+                        }
+                        $($tf).clearFilters();
+                        $($tf).setFilterValue((window. targetcolumn), (window.target));
+                        $($tf).filter();
+
+                    }
+                }
+});
+
+var ctx = document.getElementById('myChart4');
+var myChart4 = new Chart(ctx, {
+    type: 'pie',
+                data: {
+                    datasets: [
+                        {
+                            data: [$($SPAppINTSPOwnerStatusData)],
+                            backgroundColor: [$($categoryColorsSeperatedSPAppINTSPOwnerStatus)],
+                            labels: [$($SPAppINTSPOwnerStatusLabel)],
+                            borderWidth:0.5,
+                        },
+                        {
+                            data: [$($SPAppINTAppOwnerStatusData)],
+                            backgroundColor: [$($categoryColorsSeperatedSPAppINTAppOwnerStatus)],
+                            labels: [$($SPAppINTAppOwnerStatusLabel)],
+                            borderWidth:0.5,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: false,
+                    legend: {
+                        display: false,
+                    },
+                    tooltips: {
+                        bodyFontSize: 10,
+                        callbacks: {
+                            label: function (tooltipItem, data) {
+                                var dataset = data.datasets[tooltipItem.datasetIndex];
+                                var index = tooltipItem.index;
+                                window. datasetitem = tooltipItem.datasetIndex;
+                                window.target = dataset.labels[index];
+                                if (window.target == 'SP without owner'){
+                                    window.target = '[empty]'
+                                }
+                                if (window.target == 'SP with owner'){
+                                    window.target = '[nonempty]'
+                                }
+                                if (window.target == 'App without owner'){
+                                    window.target = '[empty]'
+                                }
+                                if (window.target == 'App with owner'){
+                                    window.target = '[nonempty]'
+                                }
+                                window.extratarget = 'SP APP INT';
+                                return dataset.labels[index] + ': ' + dataset.data[index];
+                            }
+                        }
+                    },
+
+                    onClick: (e) => {
+                        window. extratargetcolumn = '5'
+                        if (window. datasetitem == 0){
+                            window. targetcolumn = '3'
+                        }
+                        if (window. datasetitem == 1){
+                            window. targetcolumn = '9'
+                        }
+                        $($tf).clearFilters();
+                        $($tf).setFilterValue((window. extratargetcolumn), (window.extratarget));
+                        $($tf).setFilterValue((window. targetcolumn), (window.target));
+                        $($tf).filter();
+
+                    }
+                }
+});
+
+</script>
+"@)
+
+
+
+    
+
+        [void]$htmlTenantSummary.AppendLine(@"
+<div>
+<i class="padlx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+</div>
 <table id="$htmlTableId" class="summaryTable">
 <thead>
 <tr>
@@ -1581,8 +1917,8 @@ col_widths: ['7%', '7%', '11%', '10%', '7%', '7%', '7%', '7%', '11%', '10%', '5%
             ],
 extensions: [{ name: 'sort' }]
         };
-        var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
-        tf.init();
+        var $($tf) = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+        $($tf).init();
     </script>
 "@)
     }
@@ -1602,15 +1938,16 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYServicePrincipals
 
     #region SUMMARYServicePrincipalOwners
-    [void]$htmlTenantSummary.AppendLine(@"
-    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal Owners" /></button>
-    <div class="content TenantSummaryContent">
-"@)
 
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ServicePrincipal Owners"
 
     if ($cu.SPOwners.Count -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal Owners" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
         $tfCount = $cu.SPOwners.Count
         $htmlTableId = "TenantSummary_ServicePrincipalOwners"
         [void]$htmlTenantSummary.AppendLine(@"
@@ -1749,32 +2086,31 @@ extensions: [{ name: 'sort' }]
         tf.init();
     </script>
 "@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($cu.Count) Service Principals</span></p>
+    <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Service Principal Owners" /></button>
 "@)
     }
-
-    [void]$htmlTenantSummary.AppendLine(@"
-    </div>
-"@)
     
-
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalOwners
 
     #region SUMMARYApplicationOwners
-    [void]$htmlTenantSummary.AppendLine(@"
-    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Application Owners" /></button>
-    <div class="content TenantSummaryContent">
-"@)
-
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary Application Owners"
 
     if ($cu.APPAppOwners.Count -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Application Owners" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
         $tfCount = $cu.APPAppOwners.Count
         $htmlTableId = "TenantSummary_ApplicationOwners"
         [void]$htmlTenantSummary.AppendLine(@"
@@ -1914,16 +2250,16 @@ extensions: [{ name: 'sort' }]
         tf.init();
     </script>
 "@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($cu.Count) Service Principals</span></p>
+        <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Application Owners" /></button>
 "@)
     }
-
-    [void]$htmlTenantSummary.AppendLine(@"
-    </div>
-"@)
     
 
     $endCustPolLoop = get-date
@@ -1931,15 +2267,15 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYApplicationOwners
 
     #region SUMMARYServicePrincipalOwnedObjects
-    [void]$htmlTenantSummary.AppendLine(@"
-    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal Owned Objects" /></button>
-    <div class="content TenantSummaryContent">
-"@)
-
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ServicePrincipal Owned Objects"
 
     if ($cu.SPOwnedObjects.Count -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal Owned Objects" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
         $tfCount = $cu.SPOwnedObjects.Count
         $htmlTableId = "TenantSummary_ServicePrincipalOwnedObjects"
         [void]$htmlTenantSummary.AppendLine(@"
@@ -1964,7 +2300,7 @@ extensions: [{ name: 'sort' }]
             $spType = $sp.SPType
             $arrayOwnedObjects = @()
             foreach ($ownedObject in $sp.SPOwnedObjects | Sort-Object -Property type, typeDetailed, displayName){
-                $arrayOwnedObjects += "$($ownedObject.displayName) $($ownedObject.type) $($ownedObject.objectId)"
+                $arrayOwnedObjects += "$($ownedObject.displayName) <b>$($ownedObject.type)</b> $($ownedObject.objectId)"
             }
                   
             [void]$htmlTenantSummary.AppendLine(@"
@@ -2032,33 +2368,32 @@ extensions: [{ name: 'sort' }]
         tf.init();
     </script>
 "@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($cu.Count) Service Principals</span></p>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Service Principal Owned Objects" /></button>
 "@)
-    }
-
-    [void]$htmlTenantSummary.AppendLine(@"
-    </div>
-"@)
-    
+    }    
 
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalOwnedObjects
 
     #region SUMMARYServicePrincipalsAADRoleAssignments
-    [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Service Principals AAD RoleAssignments" /></button>
-<div class="content TenantSummaryContent">
-"@)
-
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ServicePrincipalsAADRoleAssignments"
     $servicePrincipalsAADRoleAssignments = $cu.where( { $_.SPAADRoleAssignments.Count -ne 0 } )
     $servicePrincipalsAADRoleAssignmentsCount = $servicePrincipalsAADRoleAssignments.Count
     if ($servicePrincipalsAADRoleAssignmentsCount -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Service Principals AAD RoleAssignments" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
         $tfCount = $servicePrincipalsAADRoleAssignmentsCount
         $htmlTableId = "TenantSummary_ServicePrincipalsAADRoleAssignments"
         [void]$htmlTenantSummary.AppendLine(@"
@@ -2086,7 +2421,12 @@ extensions: [{ name: 'sort' }]
                 if (($sp.SPAADRoleAssignments.count -gt 0)) {
                     $array = @()
                     foreach ($ra in $sp.SPAADRoleAssignments) {
-                        $array += "$($ra.roleDefinitionName)"
+                        if ($ra.scopeDetail){
+                            $array += "$($ra.roleDefinitionName) (scope: $($ra.scopeDetail))"
+                        }
+                        else{
+                            $array += "$($ra.roleDefinitionName)"
+                        }
                     }
                     $spAADRoleAssignments = "$(($sp.SPAADRoleAssignments).Count) ($($array -join "$CsvDelimiterOpposite "))"
 
@@ -2142,9 +2482,10 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
-col_widths: ['10%', '10%', '30%', '10%', '20%', '10%', '10%'],            
+col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
             locale: 'en-US',
             col_3: 'multiple',
+            col_4: 'select',
             col_types: [
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -2159,32 +2500,286 @@ extensions: [{ name: 'sort' }]
         tf.init();
     </script>
 "@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($servicePrincipalsAADRoleAssignmentsCount) Service Principals</span></p>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="Service Principals AAD RoleAssignments" /></button>
 "@)
     }
-    
-    [void]$htmlTenantSummary.AppendLine(@"
-    </div>
-"@)
 
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAADRoleAssignments
 
-    #region SUMMARYServicePrincipalsAppRoleAssignments
-    [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="Service Principals App RoleAssignments (API permissions Application)" /></button>
-<div class="content TenantSummaryContent">
+    #region SUMMARYServicePrincipalsAADRoleAssignedOn
+    $startCustPolLoop = get-date
+    Write-Host "  processing TenantSummary ServicePrincipalsAADRoleAssignedOn"
+    $servicePrincipalsAADRoleAssignedOn = $cu.where( { $_.SPAAADRoleAssignedOn.Count -ne 0 } )
+    $servicePrincipalsAADRoleAssignedOnCount = $servicePrincipalsAADRoleAssignedOn.Count
+    if ($servicePrincipalsAADRoleAssignedOnCount -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Service Principals AAD RoleAssignedOn" /></button>
+        <div class="content TenantSummaryContent">
 "@)
 
+        $tfCount = $servicePrincipalsAADRoleAssignedOnCount
+        $htmlTableId = "TenantSummary_ServicePrincipalsAADRoleAssignedOn"
+        [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>SP object Id</th>
+<th>SP application Id</th>
+<th>SP displayName</th>
+<th>SP type</th>
+<th>SP App Owner Organization Id</th>
+<th>SP AAD RoleAssignedOn</th>
+</tr>
+</thead>
+<tbody>
+"@)
+
+        foreach ($sp in ($servicePrincipalsAADRoleAssignedOn)) {
+
+            $spType = $sp.SPType
+
+            $SPAAADRoleAssignedOn = $null
+            if (($sp.SPAAADRoleAssignedOn)) {
+                if (($sp.SPAAADRoleAssignedOn.count -gt 0)) {
+                    $array = @()
+                    foreach ($rao in $sp.SPAAADRoleAssignedOn) {
+                        $array += "$($rao.roleName) ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
+                    }
+                    $SPAAADRoleAssignedOn = "$(($sp.SPAAADRoleAssignedOn).Count) ($($array -join "$CsvDelimiterOpposite "))"
+
+                }
+                else {
+                    $SPAAADRoleAssignedOn = $null
+                }
+            }
+        
+            [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($sp.SP.SPObjectId)</td>
+<td>$($sp.SP.SPappId)</td>
+<td class="breakwordall">$($sp.SP.SPdisplayName)</td>
+<td>$spType</td>
+<td>$($sp.SP.SPappOwnerOrganizationId)</td>
+<td class="breakwordall">$($SPAAADRoleAssignedOn)</td>
+</tr>
+"@)
+        }
+
+        [void]$htmlTenantSummary.AppendLine(@"
+            </tbody>
+        </table>
+
+    <script>
+        var tfConfig4$htmlTableId = {
+            base_path: 'https://www.azadvertizer.net/azgovvizv4/tablefilter/', rows_counter: true,       
+"@)      
+        if ($tfCount -gt 10) {
+            $spectrum = "10, $tfCount"
+            if ($tfCount -gt 50) {
+                $spectrum = "10, 25, 50, $tfCount"
+            }        
+            if ($tfCount -gt 100) {
+                $spectrum = "10, 30, 50, 100, $tfCount"
+            }
+            if ($tfCount -gt 500) {
+                $spectrum = "10, 30, 50, 100, 250, $tfCount"
+            }
+            if ($tfCount -gt 1000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+            }
+            if ($tfCount -gt 2000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+            }
+            if ($tfCount -gt 3000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+        }
+        [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
+col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
+            locale: 'en-US',
+            col_3: 'multiple',
+            col_4: 'select',
+            col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring'
+            ],
+extensions: [{ name: 'sort' }]
+        };
+        var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+        tf.init();
+    </script>
+"@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@"
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="Service Principals AAD RoleAssignedOn" /></button>
+"@)
+    }
+    
+    $endCustPolLoop = get-date
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    #endregion SUMMARYServicePrincipalsAADRoleAssignedOn
+
+    #region SUMMARYApplicationsAADRoleAssignedOn
+    $startCustPolLoop = get-date
+    Write-Host "  processing TenantSummary ApplicationsAADRoleAssignedOn"
+    $applicationsAADRoleAssignedOn = $cu.where( { $_.APPAAADRoleAssignedOn.Count -ne 0 } )
+    $applicationsAADRoleAssignedOnCount = $applicationsAADRoleAssignedOn.Count
+    if ($applicationsAADRoleAssignedOnCount -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Appications AAD RoleAssignedOn" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
+        $tfCount = $applicationsAADRoleAssignedOnCount
+        $htmlTableId = "TenantSummary_ApplicationsAADRoleAssignedOn"
+        [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>App object Id</th>
+<th>App application Id</th>
+<th>App displayName</th>
+<th>type</th>
+<th>SP App Owner Organization Id</th>
+<th>SP AAD RoleAssignedOn</th>
+</tr>
+</thead>
+<tbody>
+"@)
+
+        foreach ($sp in ($applicationsAADRoleAssignedOn)) {
+
+            $spType = $sp.SPType
+
+            $APPAAADRoleAssignedOn = $null
+            if (($sp.APPAAADRoleAssignedOn)) {
+                if (($sp.APPAAADRoleAssignedOn.count -gt 0)) {
+                    $array = @()
+                    foreach ($rao in $sp.APPAAADRoleAssignedOn) {
+                        $array += "$($rao.roleName) ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
+                    }
+                    $APPAAADRoleAssignedOn = "$(($sp.APPAAADRoleAssignedOn).Count) ($($array -join "$CsvDelimiterOpposite "))"
+
+                }
+                else {
+                    $APPAAADRoleAssignedOn = $null
+                }
+            }
+        
+            [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($sp.APP.APPObjectId)</td>
+<td>$($sp.APP.APPAppClientId)</td>
+<td class="breakwordall">$($sp.APP.APPDisplayName)</td>
+<td>$spType</td>
+<td>$($sp.SP.SPappOwnerOrganizationId)</td>
+<td class="breakwordall">$($APPAAADRoleAssignedOn)</td>
+</tr>
+"@)
+        }
+
+        [void]$htmlTenantSummary.AppendLine(@"
+            </tbody>
+        </table>
+
+    <script>
+        var tfConfig4$htmlTableId = {
+            base_path: 'https://www.azadvertizer.net/azgovvizv4/tablefilter/', rows_counter: true,       
+"@)      
+        if ($tfCount -gt 10) {
+            $spectrum = "10, $tfCount"
+            if ($tfCount -gt 50) {
+                $spectrum = "10, 25, 50, $tfCount"
+            }        
+            if ($tfCount -gt 100) {
+                $spectrum = "10, 30, 50, 100, $tfCount"
+            }
+            if ($tfCount -gt 500) {
+                $spectrum = "10, 30, 50, 100, 250, $tfCount"
+            }
+            if ($tfCount -gt 1000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+            }
+            if ($tfCount -gt 2000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+            }
+            if ($tfCount -gt 3000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+        }
+        [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
+col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
+            locale: 'en-US',
+            col_3: 'multiple',
+            col_4: 'select',
+            col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring'
+            ],
+extensions: [{ name: 'sort' }]
+        };
+        var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+        tf.init();
+    </script>
+"@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@"
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="Appications AAD RoleAssignedOn" /></button>
+"@)
+    }
+
+    $endCustPolLoop = get-date
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    #endregion SUMMARYServicePrincipalsAADRoleAssignedOn
+
+    #region SUMMARYServicePrincipalsAppRoleAssignments
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ServicePrincipalsAppRoleAssignments"
     $servicePrincipalsAppRoleAssignments = $cu.where( { $_.SPAppRoleAssignments.Count -ne 0 } )
     $servicePrincipalsAppRoleAssignmentsCount = $servicePrincipalsAppRoleAssignments.Count
     if ($servicePrincipalsAppRoleAssignmentsCount -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="Service Principals App RoleAssignments (API permissions Application)" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
         $tfCount = $servicePrincipalsAppRoleAssignmentsCount
         $htmlTableId = "TenantSummary_ServicePrincipalsAppRoleAssignments"
         [void]$htmlTenantSummary.AppendLine(@"
@@ -2267,9 +2862,10 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
-col_widths: ['10%', '10%', '30%', '10%', '20%', '10%', '10%'],            
+col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
             locale: 'en-US',
             col_3: 'multiple',
+            col_4: 'select',
             col_types: [
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -2284,20 +2880,148 @@ extensions: [{ name: 'sort' }]
         tf.init();
     </script>
 "@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($servicePrincipalsAppRoleAssignmentsCount) Service Principals</span></p>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions fontGrey" data-content="Service Principals App RoleAssignments (API permissions Application)" /></button>
 "@)
     }
     
-    [void]$htmlTenantSummary.AppendLine(@"
-    </div>
-"@)
-
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAppRoleAssignments
+
+    #region SUMMARYServicePrincipalsAppRoleAssignedTo
+    $startCustPolLoop = get-date
+    Write-Host "  processing TenantSummary ServicePrincipalsAppRoleAssignedTo"
+    $servicePrincipalsAppRoleAssignedTo = $cu.where( { $_.SPAppRoleAssignedTo.Count -ne 0 -and ($_.SPAppRoleAssignedTo.principalType -eq "User" -or $_.SPAppRoleAssignedTo.principalType -eq "Group") } )
+
+    #$servicePrincipalsAppRoleAssignedTo = $cu.where( { $_.SPAppRoleAssignedTo.Count -ne 0} )
+    $servicePrincipalsAppRoleAssignedToCount = $servicePrincipalsAppRoleAssignedTo.Count
+    if ($servicePrincipalsAppRoleAssignedToCount -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principals App RoleAssignedTo (Users and Groups)" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
+        $tfCount = $servicePrincipalsAppRoleAssignedToCount
+        $htmlTableId = "TenantSummary_ServicePrincipalsAppRoleAssignedTo"
+        [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>SP object Id</th>
+<th>SP application Id</th>
+<th>SP displayName</th>
+<th>SP type</th>
+<th>SP App Owner Organization Id</th>
+<th>SP App RoleAssignedTo</th>
+</tr>
+</thead>
+<tbody>
+"@)
+
+        foreach ($sp in ($servicePrincipalsAppRoleAssignedTo)) {
+
+            $spType = $sp.SPType
+
+            $SPAppRoleAssignedTo = $null
+            if (($sp.SPAppRoleAssignedTo)) {
+                if (($sp.SPAppRoleAssignedTo.count -gt 0)) {
+                    $array = @()
+                    foreach ($approleAssTo in $sp.SPAppRoleAssignedTo) {
+                        $array += "$($approleAssTo.principalDisplayName) ($($approleAssTo.principalType))"
+                    }
+                    $SPAppRoleAssignedTo = "$(($sp.SPAppRoleAssignedTo).Count) ($($array -join "$CsvDelimiterOpposite "))"
+                }
+                else {
+                    $SPAppRoleAssignedTo = $null
+                }
+            }
+                
+            [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($sp.SP.SPObjectId)</td>
+<td>$($sp.SP.SPappId)</td>
+<td class="breakwordall">$($sp.SP.SPdisplayName)</td>
+<td>$spType</td>
+<td>$($sp.SP.SPappOwnerOrganizationId)</td>
+<td class="breakwordall">$($SPAppRoleAssignedTo)</td>
+</tr>
+"@)
+        }
+
+        [void]$htmlTenantSummary.AppendLine(@"
+            </tbody>
+        </table>
+
+    <script>
+        var tfConfig4$htmlTableId = {
+            base_path: 'https://www.azadvertizer.net/azgovvizv4/tablefilter/', rows_counter: true,       
+"@)      
+        if ($tfCount -gt 10) {
+            $spectrum = "10, $tfCount"
+            if ($tfCount -gt 50) {
+                $spectrum = "10, 25, 50, $tfCount"
+            }        
+            if ($tfCount -gt 100) {
+                $spectrum = "10, 30, 50, 100, $tfCount"
+            }
+            if ($tfCount -gt 500) {
+                $spectrum = "10, 30, 50, 100, 250, $tfCount"
+            }
+            if ($tfCount -gt 1000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+            }
+            if ($tfCount -gt 2000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+            }
+            if ($tfCount -gt 3000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+        }
+        [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
+col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
+            locale: 'en-US',
+            col_3: 'multiple',
+            col_4: 'select',
+            col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring',
+                'caseinsensitivestring'
+            ],
+extensions: [{ name: 'sort' }]
+        };
+        var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+        tf.init();
+    </script>
+"@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@"
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Service Principals App RoleAssignedTo (Users and Groups)" /></button>
+"@)
+    }
+    
+    $endCustPolLoop = get-date
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    #endregion SUMMARYServicePrincipalsAppRoleAssignedTo
 
     #region SUMMARYServicePrincipalsOauth2PermissionGrants
     [void]$htmlTenantSummary.AppendLine(@"
@@ -2322,6 +3046,7 @@ extensions: [{ name: 'sort' }]
 <th>SP object Id</th>
 <th>SP application Id</th>
 <th>SP displayName</th>
+<th>SP type</th>
 <th>SP App Owner Organization Id</th>
 <th>SP Oauth Permission grants</th>
 </tr>
@@ -2331,7 +3056,7 @@ extensions: [{ name: 'sort' }]
 
         foreach ($sp in ($servicePrincipalsOauth2PermissionGrants)) {
 
-            $spType = $sp.SP.servicePrincipalType
+            $spType = $sp.SPType
 
             $SPOauth2PermissionGrants = $null
             if (($sp.SPOauth2PermissionGrants)) {
@@ -2352,6 +3077,7 @@ extensions: [{ name: 'sort' }]
 <td>$($sp.SP.SPObjectId)</td>
 <td>$($sp.SP.SPappId)</td>
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
+<td>$spType</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
 <td class="breakwordall">$($SPOauth2PermissionGrants)</td>
 </tr>
@@ -2392,9 +3118,12 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
-col_widths: ['10%', '10%', '30%', '10%', '20%', '10%', '10%'],            
+col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
             locale: 'en-US',
+            col_3: 'multiple',
+            col_4: 'select',
             col_types: [
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -2410,7 +3139,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($servicePrincipalsOauth2PermissionGrantsCount) Service Principals</span></p>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions fontGrey" data-content="Service Principals Oauth Permission grants (API permissions Delegated)" /></button>
 "@)
     }
     
@@ -2420,15 +3149,10 @@ extensions: [{ name: 'sort' }]
 
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
-    #endregion SUMMARYServicePrincipalsAppRoleAssignments
+    #endregion SUMMARYServicePrincipalsOauth2PermissionGrants
 
     if (-not $NoAzureRoleAssignments) {
         #region SUMMARYServicePrincipalsAzureRoleAssignments
-        [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment" data-content="Service Principals Azure RoleAssignments" /></button>
-<div class="content TenantSummaryContent">
-"@)
-
         $startCustPolLoop = get-date
         Write-Host "  processing TenantSummary ServicePrincipalsAzureRoleAssignments"
 
@@ -2436,6 +3160,11 @@ extensions: [{ name: 'sort' }]
         $servicePrincipalsAzureRoleAssignmentsCount = $servicePrincipalsAzureRoleAssignments.Count
 
         if ($servicePrincipalsAzureRoleAssignmentsCount -gt 0) {
+            [void]$htmlTenantSummary.AppendLine(@"
+            <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment" data-content="Service Principals Azure RoleAssignments" /></button>
+            <div class="content TenantSummaryContent">
+"@)
+
             $tfCount = $servicePrincipalsAzureRoleAssignmentsCount
             $htmlTableId = "TenantSummary_ServicePrincipalsAzureRoleAssignments"
             [void]$htmlTenantSummary.AppendLine(@"
@@ -2518,9 +3247,10 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
             }
             [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
-col_widths: ['10%', '10%', '30%', '10%', '20%', '10%', '10%'],            
+col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
             locale: 'en-US',
             col_3: 'multiple',
+            col_4: 'select',
             col_types: [
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -2535,34 +3265,28 @@ extensions: [{ name: 'sort' }]
         tf.init();
     </script>
 "@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
         }
         else {
             [void]$htmlTenantSummary.AppendLine(@"
-    <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($servicePrincipalsAzureRoleAssignmentsCount) Service Principals</span></p>
+                <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment fontGrey" data-content="Service Principals Azure RoleAssignments" /></button>
 "@)
         }
     
-        [void]$htmlTenantSummary.AppendLine(@"
-    </div>
-"@)
-
         $endCustPolLoop = get-date
         Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
         #endregion SUMMARYServicePrincipalsAzureRoleAssignments
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Service Principals Azure RoleAssignments / excluded by parameter '-NoAzureRoleAssignments'" /></button>
-        <div class="content TenantSummaryContent"></div>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment fontGrey" data-content="Service Principals Azure RoleAssignments" /></button>
 "@)
     }
 
-    #region SUMMARYServicePrincipalsGroupMemberships
-    [void]$htmlTenantSummary.AppendLine(@"
-    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principals Group memberships" /></button>
-    <div class="content TenantSummaryContent">
-"@)
-    
+    #region SUMMARYServicePrincipalsGroupMemberships  
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ServicePrincipalsGroupMemberships"
     
@@ -2570,6 +3294,11 @@ extensions: [{ name: 'sort' }]
     $servicePrincipalsGroupMembershipsCount = $servicePrincipalsGroupMemberships.Count
     
     if ($servicePrincipalsGroupMembershipsCount -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principals Group memberships" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
         $tfCount = $servicePrincipalsGroupMembershipsCount
         $htmlTableId = "TenantSummary_ServicePrincipalsGroupMemberships"
         [void]$htmlTenantSummary.AppendLine(@"
@@ -2580,6 +3309,7 @@ extensions: [{ name: 'sort' }]
     <th>SP object Id</th>
     <th>SP application Id</th>
     <th>SP displayName</th>
+    <th>SP type</th>
     <th>SP App Owner Organization Id</th>
     <th>SP Group memberships</th>
     </tr>
@@ -2589,7 +3319,7 @@ extensions: [{ name: 'sort' }]
     
         foreach ($sp in ($servicePrincipalsGroupMemberships)) {
     
-            $spType = $sp.SP.servicePrincipalType
+            $spType = $sp.SPType
     
             $SPGroupMemberships = $null
             if (($sp.SPGroupMemberships)) {
@@ -2610,6 +3340,7 @@ extensions: [{ name: 'sort' }]
     <td>$($sp.SP.SPObjectId)</td>
     <td>$($sp.SP.SPappId)</td>
     <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
+    <td>$($spType)</td>
     <td>$($sp.SP.SPappOwnerOrganizationId)</td>
     <td class="breakwordall">$($SPGroupMemberships)</td>
     </tr>
@@ -2650,9 +3381,12 @@ extensions: [{ name: 'sort' }]
         }
         [void]$htmlTenantSummary.AppendLine(@"
     btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
-    col_widths: ['10%', '10%', '30%', '10%', '20%', '10%', '10%'],            
+    col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
                 locale: 'en-US',
+                col_3: 'multiple',
+                col_4: 'select',
                 col_types: [
+                    'caseinsensitivestring',
                     'caseinsensitivestring',
                     'caseinsensitivestring',
                     'caseinsensitivestring',
@@ -2665,45 +3399,126 @@ extensions: [{ name: 'sort' }]
             tf.init();
         </script>
 "@)
+
+[void]$htmlTenantSummary.AppendLine(@"
+</div>
+"@)
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-        <p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($servicePrincipalsGroupMembershipsCount) Service Principals</span></p>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Service Principals Group memberships" /></button>
 "@)
     }
-        
-    [void]$htmlTenantSummary.AppendLine(@"
-        </div>
-"@)
     
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
-    #endregion SUMMARYServicePrincipalsAzureRoleAssignments
+    #endregion SUMMARYServicePrincipalsGroupMemberships
 
     #region SUMMARYApplicationSecrets
     $applicationSecrets = $cu.where( { $_.APPPasswordCredentials.Count -gt 0 } )
     $applicationSecretsCount = $applicationSecrets.Count
-    $applicationSecretsExpireSoon = $applicationSecrets.APPPasswordCredentials.expiryInfo.where( { $_ -like "expires soon*" } )
-    $applicationSecretsExpireSoonCount = $applicationSecretsExpireSoon.Count
 
-    if ($applicationSecretsExpireSoonCount -gt 0){
-        [void]$htmlTenantSummary.AppendLine(@"
+    if ($applicationSecretsCount -gt 0) {
+
+        $tfCount = $applicationSecretsCount
+        $htmlTableId = "TenantSummary_ApplicationSecrets"
+        $tf = "tf$($htmlTableId)"
+
+        $applicationSecretsExpireSoon = $applicationSecrets.APPPasswordCredentials.expiryInfo.where( { $_ -like "expires soon*" } )
+        $applicationSecretsExpireSoonCount = $applicationSecretsExpireSoon.Count
+
+        if ($applicationSecretsExpireSoonCount -gt 0) {
+            [void]$htmlTenantSummary.AppendLine(@"
         <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Secrets ($applicationSecretsExpireSoonCount expire soon)" /></button>
         <div class="content TenantSummaryContent">
 "@)
-    }
-    else{
-        [void]$htmlTenantSummary.AppendLine(@"
+        }
+        else {
+            [void]$htmlTenantSummary.AppendLine(@"
         <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Secrets" /></button>
         <div class="content TenantSummaryContent">
 "@)
-    }
+        }
 
+        $groupedExpiryNoteWorthy = $applicationSecrets.APPPasswordCredentials.expiryInfo.where( { $_ -like "expires soon*" -or $_ -eq "expired" } ) | group-Object
+        if (($groupedExpiryNoteWorthy | Measure-Object).Count -gt 0){
+            $arrExpiryNoteWorthyCounts = @()
+            $arrExpiryNoteWorthyStates = @()
+            foreach ($grp in $groupedExpiryNoteWorthy | sort-object -property count -Descending){
+                $arrExpiryNoteWorthyCounts += $grp.Count
+                $arrExpiryNoteWorthyStates += $grp.Name
+            }
+            $ExpiryNoteWorthyCounts = "'{0}'" -f ($arrExpiryNoteWorthyCounts -join "','")
+            $ExpiryNoteWorthyStates = "'{0}'" -f ($arrExpiryNoteWorthyStates -join "','")
 
-    $startCustPolLoop = get-date
-    Write-Host "  processing TenantSummary ApplicationSecrets"
+            $categoryColoreExpiryNoteWorthy = ($categoryColorsMax[0..1])
+            $categoryColorsSeperatedExpiryNoteWorthy = "'{0}'" -f ($categoryColoreExpiryNoteWorthy -join "','")
 
-    if ($applicationSecretsCount -gt 0) {
+            [void]$htmlTenantSummary.AppendLine(@"
+        <div class="noFloat">
+            <button type="button" class="decollapsible">Charts</button>
+        
+            <div class="showContent chart-container">
+                <div class="chartDiv">
+                    <span>Noteworthy expiry states count: <b>$($arrExpiryNoteWorthyCounts.Count)</b></span>
+                    <canvas id="chartSecretExpiryNoteWorthy" style="height:150px; width: 250px"></canvas>
+                </div>
+            </div>
+        </div>
+
+<script>
+var ctx = document.getElementById('chartSecretExpiryNoteWorthy');
+var chartSecretExpiryNoteWorthy = new Chart(ctx, {
+    type: 'pie',
+                data: {
+                    datasets: [
+                        {
+                            data: [$($ExpiryNoteWorthyCounts)],
+                            backgroundColor: [$($categoryColorsSeperatedExpiryNoteWorthy)],
+                            labels: [$($ExpiryNoteWorthyStates)],
+                            borderWidth:0.5,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: false,
+                    legend: {
+                        display: false,
+                    },
+                    tooltips: {
+                        bodyFontSize: 10,
+                        callbacks: {
+                            label: function (tooltipItem, data) {
+                                var dataset = data.datasets[tooltipItem.datasetIndex];
+                                var index = tooltipItem.index;
+                                window. datasetitem = tooltipItem.datasetIndex;
+                                window.target = dataset.labels[index];
+                                return dataset.labels[index] + ': ' + dataset.data[index];
+                            }
+                        }
+                    },
+
+                    onClick: (e) => {
+                        if (window. datasetitem == 0){
+                            window. targetcolumn = '7'
+                        }
+                        $($tf).clearFilters();
+                        $($tf).setFilterValue((window. targetcolumn), (window.target));
+                        $($tf).filter();
+
+                    }
+                }
+});
+
+</script>
+"@)
+    
+        }
+
+        $startCustPolLoop = get-date
+        Write-Host "  processing TenantSummary ApplicationSecrets"
+
+        #if ($applicationSecretsCount -gt 0) {
         $tfCount = $applicationSecretsCount
         $htmlTableId = "TenantSummary_ApplicationSecrets"
         [void]$htmlTenantSummary.AppendLine(@"
@@ -2736,7 +3551,7 @@ extensions: [{ name: 'sort' }]
                     if (($sp.APPPasswordCredentials.count -gt 0)) {
                         $array = @()
                         foreach ($secret in $sp.APPPasswordCredentials) {
-                            $array += "$($secret.keyId)/$($secret.displayName) ($($secret.expiryInfo))"
+                            $array += "$($secret.keyId)/$($secret.displayName) ($($secret.expiryInfo); $($secret.endDateTimeFormated))"
                         }
                         $APPPasswordCredentials = "$(($sp.APPPasswordCredentials).Count) ($($array -join "$CsvDelimiterOpposite "))"
                     }
@@ -2808,20 +3623,20 @@ col_widths: ['10%', '10%', '15%', '10%', '10%', '10%', '15%', '10%'],
         ],
 extensions: [{ name: 'sort' }]
     };
-    var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
-    tf.init();
+    var $tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+    $($tf).init();
 </script>
+"@)
+
+        [void]$htmlTenantSummary.AppendLine(@"
+</div>
 "@)
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-<p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($applicationSecretsCount) Service Principals</span></p>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="Application Secrets" /></button>
 "@)
     }
-
-    [void]$htmlTenantSummary.AppendLine(@"
-</div>
-"@)
 
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
@@ -2830,28 +3645,108 @@ extensions: [{ name: 'sort' }]
     #region SUMMARYApplicationCertificates
     $applicationCertificates = $cu.where( { $_.APPKeyCredentials.Count -gt 0 } )
     $applicationCertificatesCount = $applicationCertificates.Count
-    $applicationCertificatesExpireSoon = $applicationCertificates.APPKeyCredentials.expiryInfo.where( { $_ -like "expires soon*" } )
-    $applicationCertificatesExpireSoonCount = $applicationCertificatesExpireSoon.Count
 
-    if ($applicationCertificatesExpireSoonCount -gt 0){
-        [void]$htmlTenantSummary.AppendLine(@"
+    if ($applicationCertificatesCount -gt 0) {
+
+        $tfCount = $applicationCertificatesCount
+        $htmlTableId = "TenantSummary_ApplicationCertificates"
+        $tf = "tf$($htmlTableId)"
+
+        $applicationCertificatesExpireSoon = $applicationCertificates.APPKeyCredentials.expiryInfo.where( { $_ -like "expires soon*" } )
+        $applicationCertificatesExpireSoonCount = $applicationCertificatesExpireSoon.Count
+
+        if ($applicationCertificatesExpireSoonCount -gt 0) {
+            [void]$htmlTenantSummary.AppendLine(@"
         <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates ($applicationCertificatesExpireSoonCount expire soon)" /></button>
         <div class="content TenantSummaryContent">
 "@)
-    }
-    else{
-        [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates" /></button>
-        <div class="content TenantSummaryContent">
+        }
+        else {
+            [void]$htmlTenantSummary.AppendLine(@"
+                <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates" /></button>
+                <div class="content TenantSummaryContent">
 "@) 
-    }
+        }
 
-    $startCustPolLoop = get-date
-    Write-Host "  processing TenantSummary ApplicationCertificates"
+        $groupedExpiryNoteWorthy = $applicationCertificates.APPKeyCredentials.expiryInfo.where( { $_ -like "expires soon*" -or $_ -eq "expired" } ) | group-Object
+        if (($groupedExpiryNoteWorthy | Measure-Object).Count -gt 0) {
+            $arrExpiryNoteWorthyCounts = @()
+            $arrExpiryNoteWorthyStates = @()
+            foreach ($grp in $groupedExpiryNoteWorthy | sort-object -property count -Descending) {
+                $arrExpiryNoteWorthyCounts += $grp.Count
+                $arrExpiryNoteWorthyStates += $grp.Name
+            }
+            $ExpiryNoteWorthyCounts = "'{0}'" -f ($arrExpiryNoteWorthyCounts -join "','")
+            $ExpiryNoteWorthyStates = "'{0}'" -f ($arrExpiryNoteWorthyStates -join "','")
 
-    if ($applicationCertificatesCount -gt 0) {
-        $tfCount = $applicationCertificatesCount
-        $htmlTableId = "TenantSummary_ApplicationCertificates"
+            $categoryColoreExpiryNoteWorthy = ($categoryColorsMax[0..1])
+            $categoryColorsSeperatedExpiryNoteWorthy = "'{0}'" -f ($categoryColoreExpiryNoteWorthy -join "','")
+
+            [void]$htmlTenantSummary.AppendLine(@"
+    <div class="noFloat">
+        <button type="button" class="decollapsible">Charts</button>
+    
+        <div class="showContent chart-container">
+            <div class="chartDiv">
+                <span>Noteworthy expiry states count: <b>$($arrExpiryNoteWorthyCounts.Count)</b></span>
+                <canvas id="chartCertExpiryNoteWorthy" style="height:150px; width: 250px"></canvas>
+            </div>
+        </div>
+    </div>
+
+<script>
+var ctx = document.getElementById('chartCertExpiryNoteWorthy');
+var chartCertExpiryNoteWorthy = new Chart(ctx, {
+type: 'pie',
+            data: {
+                datasets: [
+                    {
+                        data: [$($ExpiryNoteWorthyCounts)],
+                        backgroundColor: [$($categoryColorsSeperatedExpiryNoteWorthy)],
+                        labels: [$($ExpiryNoteWorthyStates)],
+                        borderWidth:0.5,
+                    }
+                ]
+            },
+            options: {
+                responsive: false,
+                legend: {
+                    display: false,
+                },
+                tooltips: {
+                    bodyFontSize: 10,
+                    callbacks: {
+                        label: function (tooltipItem, data) {
+                            var dataset = data.datasets[tooltipItem.datasetIndex];
+                            var index = tooltipItem.index;
+                            window. datasetitem = tooltipItem.datasetIndex;
+                            window.target = dataset.labels[index];
+                            return dataset.labels[index] + ': ' + dataset.data[index];
+                        }
+                    }
+                },
+
+                onClick: (e) => {
+                    if (window. datasetitem == 0){
+                        window. targetcolumn = '7'
+                    }
+                    $($tf).clearFilters();
+                    $($tf).setFilterValue((window. targetcolumn), (window.target));
+                    $($tf).filter();
+
+                }
+            }
+});
+
+</script>
+"@)
+
+        }
+
+        $startCustPolLoop = get-date
+        Write-Host "  processing TenantSummary ApplicationCertificates"
+
+
         [void]$htmlTenantSummary.AppendLine(@"
 <i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
 <table id="$htmlTableId" class="summaryTable">
@@ -2883,7 +3778,7 @@ extensions: [{ name: 'sort' }]
                     if (($sp.APPKeyCredentials.count -gt 0)) {
                         $array = @()
                         foreach ($key in $sp.APPKeyCredentials) {
-                            $array += "$($key.keyId)($($key.customKeyIdentifier))/$($key.displayName) ($($key.expiryInfo))"
+                            $array += "$($key.keyId)($($key.customKeyIdentifier))/$($key.displayName) ($($key.expiryInfo); $($key.endDateTimeFormated))"
                         }
                         $APPKeyCredentials = "$(($sp.APPKeyCredentials).Count) ($($array -join "$CsvDelimiterOpposite "))"
                     }
@@ -2955,20 +3850,20 @@ col_widths: ['10%', '10%', '10%', '10%', '10%', '10%', '10%', '20%'],
         ],
 extensions: [{ name: 'sort' }]
     };
-    var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
-    tf.init();
+    var $tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+    $($tf).init();
 </script>
+"@)
+
+        [void]$htmlTenantSummary.AppendLine(@"
+</div>
 "@)
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-<p><i class="padlx fa fa-ban" aria-hidden="true"></i> <span class="valignMiddle">$($applicationCertificatesCount) Service Principals</span></p>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="Application Certificates" /></button>
 "@)
     }
-
-    [void]$htmlTenantSummary.AppendLine(@"
-</div>
-"@)
 
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
@@ -3009,7 +3904,8 @@ if ($htParameters.AzureDevOpsWikiAsCode -eq $true -or $accountType -eq "ServiceP
     $currentTask = "Test AAD Users Read permission"
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/users?`$count=true&`$top=1"
     $method = "GET"
-    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -validateAccess $true
+    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -validate $true
+
     if ($res -eq "failed") {
         $permissionCheckResults += "AAD Users Read permission check FAILED"
         $permissionsCheckFailed = $true
@@ -3021,7 +3917,8 @@ if ($htParameters.AzureDevOpsWikiAsCode -eq $true -or $accountType -eq "ServiceP
     $currentTask = "Test AAD Groups Read permission"
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/groups?`$count=true&`$top=1"
     $method = "GET"
-    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -validateAccess $true
+    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -validate $true
+
     if ($res -eq "failed") {
         $permissionCheckResults += "AAD Groups Read permission check FAILED"
         $permissionsCheckFailed = $true
@@ -3033,7 +3930,8 @@ if ($htParameters.AzureDevOpsWikiAsCode -eq $true -or $accountType -eq "ServiceP
     $currentTask = "Test AAD ServicePrincipals Read permission"
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals?`$count=true&`$top=1"
     $method = "GET"
-    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -validateAccess $true
+    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -validate $true
+
     if ($res -eq "failed") {
         $permissionCheckResults += "AAD ServicePrincipals Read permission check FAILED"
         $permissionsCheckFailed = $true
@@ -3045,7 +3943,8 @@ if ($htParameters.AzureDevOpsWikiAsCode -eq $true -or $accountType -eq "ServiceP
     $currentTask = "Test AAD RoleManagement Read permission"
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/roleManagement/directory/roleDefinitions"
     $method = "GET"
-    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -validateAccess $true
+    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -validate $true
+
     if ($res -eq "failed") {
         $permissionCheckResults += "AAD RoleManagement Read permission check FAILED"
         $permissionsCheckFailed = $true
@@ -3063,7 +3962,8 @@ if (-not $NoAzureRoleAssignments) {
     Write-Host $currentTask
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementGroups/$($ManagementGroupId)?api-version=2020-05-01"
     $method = "GET"
-    $selectedManagementGroupId = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn "Content" -validateAccess $true
+    $selectedManagementGroupId = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn "Content" -validate $true
+
     if ($selectedManagementGroupId -eq "failed") {
         $permissionCheckResults += "MG Reader permission check FAILED"
         $permissionsCheckFailed = $true
@@ -3100,6 +4000,7 @@ if (-not $NoAzureRoleAssignments) {
         $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/me?`$select=userType"
         $method = "GET"
         $checkUserType = AzAPICall -uri $uri -method $method -listenOn "Content" -currentTask $currentTask
+
         if ($checkUserType -eq "unknown") {
             $userType = $checkUserType
         }
@@ -3117,8 +4018,7 @@ if (-not $NoAzureRoleAssignments) {
     #https://management.azure.com/providers/Microsoft.Management/getEntities?api-version=2020-02-01
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/getEntities?api-version=2020-02-01"
     $method = "POST"
-
-    $arrayEntitiesFromAPI = ((AzAPICall -uri $uri -method $method -currentTask $currentTask))
+    $arrayEntitiesFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask
 
     $htSubscriptionsMgPath = @{ }
     $htManagementGroupsMgPath = @{ }
@@ -3183,27 +4083,6 @@ if (-not $NoAzureRoleAssignments) {
     Write-Host "Getting Entities duration: $((NEW-TIMESPAN -Start $startEntities -End $endEntities).TotalSeconds) seconds"
     #endregion GettingEntities
 
-    #region GetTenantDetails
-    if ($htParameters.AzureDevOpsWikiAsCode -eq $false) {
-        $currentTask = "Get Tenant details"
-        Write-Host $currentTask
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)tenants?api-version=2020-01-01"
-        #$path = "/tenants?api-version=2020-01-01"
-        $method = "GET"
-
-        $tenantDetailsResult = ((AzAPICall -uri $uri -method $method -currentTask $currentTask))
-        if (($tenantDetailsResult | measure-object).count -gt 0) {
-            $tenantDetails = $tenantDetailsResult | Where-Object { $_.tenantId -eq ($checkContext).Tenant.Id }
-            $tenantDisplayName = $tenantDetails.displayName
-            $tenantDefaultDomain = $tenantDetails.defaultDomain
-            Write-Host " Tenant DisplayName: $tenantDisplayName"
-        }
-        else {
-            Write-Host " something unexpected"
-        }
-    }
-    #endregion GetTenantDetails
-
     #region subscriptions
     $startGetSubscriptions = get-date
     $currentTask = "Getting all Subscriptions"
@@ -3211,8 +4090,8 @@ if (-not $NoAzureRoleAssignments) {
     #https://management.azure.com/subscriptions?api-version=2020-01-01
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions?api-version=2019-10-01"
     $method = "GET"
+    $requestAllSubscriptionsAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask
 
-    $requestAllSubscriptionsAPI = ((AzAPICall -uri $uri -method $method -currentTask $currentTask))
     foreach ($subscription in $requestAllSubscriptionsAPI) {   
         $htAllSubscriptionsFromAPI.($subscription.subscriptionId) = @{ }
         $htAllSubscriptionsFromAPI.($subscription.subscriptionId).subDetails = $subscription
@@ -3337,8 +4216,8 @@ if (-not $NoAzureRoleAssignments) {
     Write-Host " $currentTask"
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$($checkContext.Subscription.Id)/providers/Microsoft.Authorization/roleDefinitions?api-version=2018-07-01&`$filter=type eq 'BuiltInRole'"
     $method = "GET"
+    $requestRoleDefinitionAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask
 
-    $requestRoleDefinitionAPI = ((AzAPICall -uri $uri -method $method -currentTask $currentTask))
     foreach ($roleDefinition in $requestRoleDefinitionAPI) {
         ($htCacheDefinitions).role.($roleDefinition.name) = @{ }
         ($htCacheDefinitions).role.($roleDefinition.name).definition = ($roleDefinition)
@@ -3403,20 +4282,23 @@ else {
 
 #region AADSP
 
+#PW in this region the data gets collected (search: ForEach-Object -Parallel)
 #region dataColletionAADSP
 $start = get-date
 Write-Host "Getting Service Principal count"
 $currentTask = "getSPCount"
 $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/`$count"
 $method = "GET"
-$spCount = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn "Content" -consistencyLevel "eventual" -getSp $true
+$spCount = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn "Content" -consistencyLevel "eventual"
+
 Write-Host "API `$Count returned $spCount Service Principals count"
 
 $currentTask = "Get all Service Principals"
 $start = get-date
 $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals"
 $method = "GET"
-$getServicePrincipalsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual" -getSp $true -getSPShowProgress $spCount
+$getServicePrincipalsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual"
+
 Write-Host "API returned count: $($getServicePrincipalsFromAPI.Count)"
 $getServicePrincipals = $getServicePrincipalsFromAPI | Sort-Object -Property id -Unique
 Write-Host "Sorting unique by Id count: $($getServicePrincipalsFromAPI.Count)"
@@ -3425,8 +4307,7 @@ $duration = NEW-TIMESPAN -Start $start -End $end
 Write-Host "Getting $($getServicePrincipals.Count) Service Principals duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 
 if ($getServicePrincipals.Count -eq 0) {
-    Write-Host " No SPs found"
-    break
+    throw "No SPs found"
 }
 else {
     $htServicePrincipalsEnriched = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
@@ -3445,6 +4326,7 @@ else {
     $htAppOwners = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htOwnedBy = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htProcessedTracker = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
+    $htMeanwhileDeleted = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
 
     Write-Host "Creating mapping AppRoles & PublishedPermissionScopes"
     foreach ($sp in $getServicePrincipals) {
@@ -3480,13 +4362,40 @@ else {
     Write-Host "Getting all AAD Role definitions"
     $currentTask = "get AAD RoleDefinitions"
     $htAadRoleDefinitions = @{}
-    #$uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleDefinitions?expand=inheritsPermissionsFrom"
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/roleManagement/directory/roleDefinitions"
     $method = "GET"
-    $aadRoleDefinitions = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true 
+    $aadRoleDefinitions = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true 
+
     foreach ($aadRoleDefinition in $aadRoleDefinitions) {
         $htAadRoleDefinitions.($aadRoleDefinition.id) = $aadRoleDefinition
-    }    
+    }   
+    
+    Write-Host "Validating Identity Governance state"
+    $currentTask = "Validate roleAssignmentScheduleInstance"
+    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$count=true&`$top=1"
+    $method = "GET"
+    $getRoleAssignmentScheduleInstance = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true -validate $true -getRoleAssignmentScheduledInstances $true
+    if ($getRoleAssignmentScheduleInstance -eq "InvalidResource"){
+        Write-Host "Identity Governance state: n/a"
+        $identityGovernance = "false"
+    }
+    else{
+        Write-Host "Identity Governance state: available"
+        $identityGovernance = "true"
+    }
+
+    $currentTask = "Validate roleAssignmentSchedules"
+    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignmentSchedules?`$count=true&`$top=1"
+    $method = "GET"
+    $getRoleAssignmentSchedules = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true -validate $true -getRoleAssignmentSchedules $true
+    if ($getRoleAssignmentSchedules -eq "InvalidResource"){
+        Write-Host "Identity Governance state: n/a"
+        $identityGovernance = "false"
+    }
+    else{
+        Write-Host "Identity Governance state: available"
+        $identityGovernance = "true"
+    }
     
     Write-Host "Collecting data for all Service Principals"
     $startForeachSP = get-date
@@ -3529,12 +4438,17 @@ else {
         $htAppOwners = $using:htAppOwners
         $htOwnedBy = $using:htOwnedBy
         $htProcessedTracker = $using:htProcessedTracker
+        $htMeanwhileDeleted = $using:htMeanwhileDeleted
         #func
         $function:AzAPICall = $using:funcAzAPICall
         $function:createBearerToken = $using:funcCreateBearerToken
         $function:GetJWTDetails = $using:funcGetJWTDetails
+        #var
+        $identityGovernance = $using:identityGovernance
 
         #write-host "processing $($sp.id) - $($sp.displayName) (type: $($sp.servicePrincipalType) org: $($sp.appOwnerOrganizationId))"
+
+        $meanwhileDeleted = $false
 
         $script:htServicePrincipalsEnriched.($sp.id) = @{}
         $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal = [ordered] @{}
@@ -3549,56 +4463,166 @@ else {
 
         #region spownedObjects
         $currentTask = "getSP OwnedObjects $($sp.id)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/$($sp.id)/ownedObjects"
+        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($sp.id)/ownedObjects"
         $method = "GET"
-        $getSPOwnedObjects = AzAPICall -uri $uri -method $method -currentTask $currentTask
-        if ($getSPOwnedObjects.Count -gt 0) {
-            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalOwnedObjects = $getSPOwnedObjects | Select-Object '@odata.type', displayName, id
+        $getSPOwnedObjects = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+
+        if ($getSPOwnedObjects -eq "Request_ResourceNotFound"){
+            if (-not $htMeanwhileDeleted.($sp.id)){
+                write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                $script:htMeanwhileDeleted.($sp.id) = @{}
+                $meanwhileDeleted = $true
+            }
+        }
+        else{
+            if ($getSPOwnedObjects.Count -gt 0) {
+                $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalOwnedObjects = $getSPOwnedObjects | Select-Object '@odata.type', displayName, id
+            }
         }
         #endregion spownedObjects
 
         #region spAADRoleAssignments
-        $currentTask = "getSP AADRoleAssignments $($sp.id)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignments?`$filter=principalId eq '$($sp.id)'"
-        $method = "GET"
-        $getSPAADRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true 
-        if ($getSPAADRoleAssignments.Count -gt 0) {
-            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalAADRoleAssignments = $getSPAADRoleAssignments
-        }
+        #if ($identityGovernance -eq "false"){
+            if (-not $meanwhileDeleted){
+                $currentTask = "getSP AADRoleAssignments $($sp.id)"
+                #v1 does not return principalOrganizationId, resourceScope
+                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignments?`$filter=principalId eq '$($sp.id)'"
+                $method = "GET"
+                $getSPAADRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true 
+        
+                if ($getSPAADRoleAssignments -eq "Request_ResourceNotFound"){
+                    if (-not $htMeanwhileDeleted.($sp.id)){
+                        write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                        $script:htMeanwhileDeleted.($sp.id) = @{}
+                        $meanwhileDeleted = $true
+                    }
+                }
+                else{
+                    if ($getSPAADRoleAssignments.Count -gt 0) {
+                        $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalAADRoleAssignments = $getSPAADRoleAssignments
+                    }
+                }
+            }
+        #}
         #endregion spAADRoleAssignments
 
+        #test later
+        if (1 -ne 1){
+        if ($identityGovernance -eq "true"){
+            #region AADRoleAssignmentSchedules
+            if (-not $meanwhileDeleted){
+                $currentTask = "getSP AADRoleAssignmentSchedules $($sp.id)"
+                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignmentSchedules?`$filter=principalId eq '$($sp.id)'"
+                $method = "GET"
+                $getSPAADRoleAssignmentSchedules = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true 
+        
+                if ($getSPAADRoleAssignmentSchedules -eq "Request_ResourceNotFound"){
+                    if (-not $htMeanwhileDeleted.($sp.id)){
+                        write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                        $script:htMeanwhileDeleted.($sp.id) = @{}
+                        $meanwhileDeleted = $true
+                    }
+                }
+                else{
+                    if ($getSPAADRoleAssignmentSchedules.Count -gt 0) {
+                        $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalAADRoleAssignmentSchedules = $getSPAADRoleAssignmentSchedules
+                    }
+                }
+            }
+            #endregion AADRoleAssignmentSchedules
+
+            #region AADRoleAssignmentScheduleInstances
+            if (-not $meanwhileDeleted){
+                $currentTask = "getSP AADRoleAssignmentScheduleInstances $($sp.id)"
+                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$($sp.id)'"
+                $method = "GET"
+                $getSPAADRoleAssignmentScheduleInstances = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true 
+        
+                if ($getSPAADRoleAssignmentScheduleInstances -eq "Request_ResourceNotFound"){
+                    if (-not $htMeanwhileDeleted.($sp.id)){
+                        write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                        $script:htMeanwhileDeleted.($sp.id) = @{}
+                        $meanwhileDeleted = $true
+                    }
+                }
+                else{
+                    if ($getSPAADRoleAssignmentScheduleInstances.Count -gt 0) {
+                        $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalAADRoleAssignmentScheduleInstances = $getSPAADRoleAssignmentScheduleInstances
+                    }
+                }
+            }
+            #endregion AADRoleAssignmentScheduleInstances
+        }
+        }
+
+        <#
+        #test compare ra vs rasi
+        if ($getSPAADRoleAssignments.Count -ne $getSPAADRoleAssignmentScheduleInstances.Count){
+            Write-Host "processing $($sp.id) - $($sp.displayName) (type: $($sp.servicePrincipalType) ra: $($getSPAADRoleAssignments.Count) rasi: $($getSPAADRoleAssignmentScheduleInstances.Count)"
+        }
+
+        #test compare rasi vs ras
+        if ($getSPAADRoleAssignmentScheduleInstances.Count -ne $getSPAADRoleAssignmentSchedules.Count){
+            Write-Host "processing $($sp.id) - $($sp.displayName) (type: $($sp.servicePrincipalType) rasi: $($getSPAADRoleAssignmentScheduleInstances.Count) ras: $($getSPAADRoleAssignmentSchedules.Count)"
+        }
+        #>
+
         #region spAppRoleAssignments
-        $currentTask = "getSP AppRoleAssignments $($sp.id)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/$($sp.id)/appRoleAssignments"
-        $method = "GET"
-        $getSPAppRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true 
-        if ($getSPAppRoleAssignments.Count -gt 0) {
-            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalAppRoleAssignments = $getSPAppRoleAssignments
-            foreach ($SPAppRoleAssignment in $getSPAppRoleAssignments) {
-                if (-not $htAppRoleAssignments.($SPAppRoleAssignment.id)) {
-                    $script:htAppRoleAssignments.($SPAppRoleAssignment.id) = $SPAppRoleAssignment
+        if (-not $meanwhileDeleted){
+            $currentTask = "getSP AppRoleAssignments $($sp.id)"
+            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($sp.id)/appRoleAssignments"
+            $method = "GET"
+            $getSPAppRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true 
+    
+            if ($getSPAppRoleAssignments -eq "Request_ResourceNotFound"){
+                if (-not $htMeanwhileDeleted.($sp.id)){
+                    write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                    $script:htMeanwhileDeleted.($sp.id) = @{}
+                    $meanwhileDeleted = $true
+                }
+            }
+            else{
+                if ($getSPAppRoleAssignments.Count -gt 0) {
+                    $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalAppRoleAssignments = $getSPAppRoleAssignments
+                    foreach ($SPAppRoleAssignment in $getSPAppRoleAssignments) {
+                        if (-not $htAppRoleAssignments.($SPAppRoleAssignment.id)) {
+                            $script:htAppRoleAssignments.($SPAppRoleAssignment.id) = $SPAppRoleAssignment
+                        }
+                    }
                 }
             }
         }
         #endregion spAppRoleAssignments
 
         #region spAppRoleAssignedTo
-        $currentTask = "getSP appRoleAssignedTo $($sp.id)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/$($sp.id)/appRoleAssignedTo"
-        $method = "GET"
-        $getSPAppRoleAssignedTo = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true 
-        if ($getSPAppRoleAssignedTo.Count -gt 0) {
-            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalAppRoleAssignedTo = $getSPAppRoleAssignedTo
-            foreach ($SPAppRoleAssignedTo in $getSPAppRoleAssignedTo) {
-                if ($SPAppRoleAssignedTo.principalType -eq "User" -or $SPAppRoleAssignedTo.principalType -eq "Group") {
-                    if ($SPAppRoleAssignedTo.principalType -eq "User") {
-                        if (-not $htUsersAndGroupsToCheck4AppRoleAssignments."User".($SPAppRoleAssignedTo.principalId)) {
-                            $script:htUsersAndGroupsToCheck4AppRoleAssignments."User".($SPAppRoleAssignedTo.principalId) = @{}
-                        }
-                    }
-                    if ($SPAppRoleAssignedTo.principalType -eq "Group") {
-                        if (-not $htUsersAndGroupsToCheck4AppRoleAssignments."Group".($SPAppRoleAssignedTo.principalId)) {
-                            $script:htUsersAndGroupsToCheck4AppRoleAssignments."Group".($SPAppRoleAssignedTo.principalId) = @{}
+        if (-not $meanwhileDeleted){
+            $currentTask = "getSP appRoleAssignedTo $($sp.id)"
+            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($sp.id)/appRoleAssignedTo"
+            $method = "GET"
+            $getSPAppRoleAssignedTo = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true 
+    
+            if ($getSPAppRoleAssignedTo -eq "Request_ResourceNotFound"){
+                if (-not $htMeanwhileDeleted.($sp.id)){
+                    write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                    $script:htMeanwhileDeleted.($sp.id) = @{}
+                    $meanwhileDeleted = $true
+                }
+            }
+            else{
+                if ($getSPAppRoleAssignedTo.Count -gt 0) {
+                    $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalAppRoleAssignedTo = $getSPAppRoleAssignedTo
+                    foreach ($SPAppRoleAssignedTo in $getSPAppRoleAssignedTo) {
+                        if ($SPAppRoleAssignedTo.principalType -eq "User" -or $SPAppRoleAssignedTo.principalType -eq "Group") {
+                            if ($SPAppRoleAssignedTo.principalType -eq "User") {
+                                if (-not $htUsersAndGroupsToCheck4AppRoleAssignments."User".($SPAppRoleAssignedTo.principalId)) {
+                                    $script:htUsersAndGroupsToCheck4AppRoleAssignments."User".($SPAppRoleAssignedTo.principalId) = @{}
+                                }
+                            }
+                            if ($SPAppRoleAssignedTo.principalType -eq "Group") {
+                                if (-not $htUsersAndGroupsToCheck4AppRoleAssignments."Group".($SPAppRoleAssignedTo.principalId)) {
+                                    $script:htUsersAndGroupsToCheck4AppRoleAssignments."Group".($SPAppRoleAssignedTo.principalId) = @{}
+                                }
+                            }
                         }
                     }
                 }
@@ -3607,55 +4631,79 @@ else {
         #endregion spAppRoleAssignedTo
 
         #region spGetMemberGroups
-        $currentTask = "getSP GroupMemberships $($sp.id)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/$($sp.id)/getMemberGroups"
-        $method = "POST"
-        $body = @"
-        {
-            "securityEnabledOnly": false
-        }
+        if (-not $meanwhileDeleted){
+            $currentTask = "getSP GroupMemberships $($sp.id)"
+            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($sp.id)/getMemberGroups"
+            $method = "POST"
+            $body = @"
+            {
+                "securityEnabledOnly": false
+            }
 "@
-        $getSPGroupMemberships = AzAPICall -uri $uri -method $method -body $body -currentTask $currentTask
-        if ($getSPGroupMemberships.Count -gt 0) {
-            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalGroupMemberships = $getSPGroupMemberships
-            foreach ($aadGroupId in $getSPGroupMemberships) {
-                if (-not $script:htAadGroupsToResolve.($aadGroupId)) {
-                    $script:htAadGroupsToResolve.($aadGroupId) = @{}
+            $getSPGroupMemberships = AzAPICall -uri $uri -method $method -body $body -currentTask $currentTask -getSP $true
+    
+            if ($getSPGroupMemberships -eq "Request_ResourceNotFound"){
+                if (-not $htMeanwhileDeleted.($sp.id)){
+                    write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                    $script:htMeanwhileDeleted.($sp.id) = @{}
+                    $meanwhileDeleted = $true
+                }
+            }
+            else{
+                if ($getSPGroupMemberships.Count -gt 0) {
+                    $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalGroupMemberships = $getSPGroupMemberships
+                    foreach ($aadGroupId in $getSPGroupMemberships) {
+                        if (-not $script:htAadGroupsToResolve.($aadGroupId)) {
+                            $script:htAadGroupsToResolve.($aadGroupId) = @{}
+                        }
+                    }
                 }
             }
         }
         #endregion spGetMemberGroups
 
         #region spDelegatedPermissions
-        $currentTask = "getSP oauth2PermissionGrants $($sp.id)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/$($sp.id)/oauth2PermissionGrants"
-        $method = "GET"
-        $getSPOauth2PermissionGrants = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true 
-
-        if ($getSPOauth2PermissionGrants.Count -gt 0) {
-            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalOauth2PermissionGrants = $getSPOauth2PermissionGrants
-            foreach ($permissionGrant in $getSPOauth2PermissionGrants) {
-                $splitPermissionGrant = ($permissionGrant.scope).split(" ")
-                foreach ($permissionscope in $splitPermissionGrant) {
-                    if (-not [string]::IsNullOrEmpty($permissionscope) -and -not [string]::IsNullOrWhiteSpace($permissionscope)) {
-                        $permissionGrantArray = [System.Collections.ArrayList]@()
-                        $null = $permissionGrantArray.Add([PSCustomObject]@{
-                                '@odata.id' = $permissionGrant
-                                clientId    = $permissionGrant.clientId
-                                consentType = $permissionGrant.consentType
-                                expiryTime  = $permissionGrant.expiryTime
-                                id          = $permissionGrant.id
-                                principalId = $permissionGrant.principalId
-                                resourceId  = $permissionGrant.resourceId
-                                scope       = $permissionscope
-                                startTime   = $permissionGrant.startTime
-                            })
-
-                        if (-not $htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId)) {
-                            $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId) = [array]$permissionGrantArray
-                        }
-                        else {
-                            $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId) += $permissionGrantArray
+        if (-not $meanwhileDeleted){
+            $currentTask = "getSP oauth2PermissionGrants $($sp.id)"
+            #v1 does not return startTime, expiryTime
+            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/$($sp.id)/oauth2PermissionGrants"
+            $method = "GET"
+            $getSPOauth2PermissionGrants = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true 
+    
+            if ($getSPOauth2PermissionGrants -eq "Request_ResourceNotFound"){
+                if (-not $htMeanwhileDeleted.($sp.id)){
+                    write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                    $script:htMeanwhileDeleted.($sp.id) = @{}
+                    $meanwhileDeleted = $true
+                }
+            }
+            else{
+                if ($getSPOauth2PermissionGrants.Count -gt 0) {
+                    $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ServicePrincipalOauth2PermissionGrants = $getSPOauth2PermissionGrants
+                    foreach ($permissionGrant in $getSPOauth2PermissionGrants) {
+                        $splitPermissionGrant = ($permissionGrant.scope).split(" ")
+                        foreach ($permissionscope in $splitPermissionGrant) {
+                            if (-not [string]::IsNullOrEmpty($permissionscope) -and -not [string]::IsNullOrWhiteSpace($permissionscope)) {
+                                $permissionGrantArray = [System.Collections.ArrayList]@()
+                                $null = $permissionGrantArray.Add([PSCustomObject]@{
+                                        '@odata.id' = $permissionGrant
+                                        clientId    = $permissionGrant.clientId
+                                        consentType = $permissionGrant.consentType
+                                        expiryTime  = $permissionGrant.expiryTime
+                                        id          = $permissionGrant.id
+                                        principalId = $permissionGrant.principalId
+                                        resourceId  = $permissionGrant.resourceId
+                                        scope       = $permissionscope
+                                        startTime   = $permissionGrant.startTime
+                                    })
+        
+                                if (-not $htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId)) {
+                                    $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId) = [array]$permissionGrantArray
+                                }
+                                else {
+                                    $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId) += $permissionGrantArray
+                                }
+                            }
                         }
                     }
                 }
@@ -3682,146 +4730,177 @@ else {
         #>
         
         #region spOwner 
-        $currentTask = "getSPOwner $($sp.id)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($sp.id)/owners"
-        $method = "GET"
-        $getSPOwner = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
-        if ($getSPOwner.Count -gt 0) {
-            foreach ($spOwner in $getSPOwner) {
-
-                if (-not $htOwnedBy.($sp.id)) {
-                    $script:htOwnedBy.($sp.id) = @{}
-                    $script:htOwnedBy.($sp.id).ownedBy = [array]$($spOwner | select-Object id, displayName, '@odata.type')
+        if (-not $meanwhileDeleted){
+            $currentTask = "getSPOwner $($sp.id)"
+            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($sp.id)/owners"
+            $method = "GET"
+            $getSPOwner = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+            
+            if ($getSPOwner -eq "Request_ResourceNotFound"){
+                if (-not $htMeanwhileDeleted.($sp.id)){
+                    write-host "  $($sp.displayName) ($($sp.id)) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                    $script:htMeanwhileDeleted.($sp.id) = @{}
+                    $meanwhileDeleted = $true
+                }
+            }
+            else{
+                if ($getSPOwner.Count -gt 0) {
+                    foreach ($spOwner in $getSPOwner) {
+        
+                        if (-not $htOwnedBy.($sp.id)) {
+                            $script:htOwnedBy.($sp.id) = @{}
+                            $script:htOwnedBy.($sp.id).ownedBy = [array]$($spOwner | select-Object id, displayName, '@odata.type')
+                        }
+                        else {
+                            $array = [array]($htOwnedBy.($sp.id).ownedBy)
+                            $array += $spOwner | select-Object id, displayName, '@odata.type'
+                            $script:htOwnedBy.($sp.id).ownedBy = $array
+                        }
+                    }
+                    if (-not $htSPOwners.($sp.id)) {
+                        $script:htSPOwners.($sp.id) = $getSPOwner | select-Object id, displayName, '@odata.type'
+                    }
                 }
                 else {
-                    $array = [array]($htOwnedBy.($sp.id).ownedBy)
-                    $array += $spOwner | select-Object id, displayName, '@odata.type'
-                    $script:htOwnedBy.($sp.id).ownedBy = $array
+                    $script:htOwnedBy.($sp.id) = @{}
+                    $script:htOwnedBy.($sp.id).ownedBy = "noOwner"
                 }
             }
-            if (-not $htSPOwners.($sp.id)) {
-                $script:htSPOwners.($sp.id) = $getSPOwner | select-Object id, displayName, '@odata.type'
-            }
-        }
-        else {
-            $script:htOwnedBy.($sp.id) = @{}
-            $script:htOwnedBy.($sp.id).ownedBy = "noOwner"
         }
         #endregion spOwner 
         
         #region spApp
-        if ($sp.servicePrincipalType -eq "Application") {
+        if (-not $meanwhileDeleted){
+            if ($sp.servicePrincipalType -eq "Application") {
 
-            $spType = "APP"
-            
-            $currentTask = "getApp $($sp.appId)"
-            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/applications?`$filter=appId eq '$($sp.appId)'"
-            $method = "GET"
-            $getApplication = AzAPICall -uri $uri -method $method -currentTask $currentTask -getApp $true
-
-            if ($getApplication.Count -gt 0) {
-                $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application = @{}
-                $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationDetails = $getApplication
-                $script:htApplications.($getApplication.id) = $getApplication
-
-                #region getAppOwner
-                $currentTask = "getAppOwner $($getApplication.id)"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/applications/$($getApplication.id)/owners"
+                $spType = "APP"
+                
+                $currentTask = "getApp $($sp.appId)"
+                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/applications?`$filter=appId eq '$($sp.appId)'"
                 $method = "GET"
-                $getAppOwner = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true        
-                if ($getAppOwner.Count -gt 0) {
-                    if (-not $htAppOwners.($getApplication.id)) {
-                        $script:htAppOwners.($getApplication.id) = $getAppOwner | select-Object id, displayName, '@odata.type'
-                    }
-                }
-                #endregion getAppOwner
+                $getApplication = AzAPICall -uri $uri -method $method -currentTask $currentTask -getApp $true
 
-                #region spAppKeyCredentials
-                if (($getApplication.keyCredentials).Count -gt 0) {
-                    $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationKeyCredentials = @{}
-                    foreach ($keyCredential in $getApplication.keyCredentials) {
-                        $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationKeyCredentials.($keyCredential.keyId) = $keyCredential
+                if ($getApplication -eq "Request_ResourceNotFound"){
+                    if (-not $htMeanwhileDeleted.($sp.id)){
+                        write-host "  $($sp.displayName) ($($sp.id)) AppId $($sp.appId) - Request_ResourceNotFound, marking as 'meanwhile deleted'"
+                        $script:htMeanwhileDeleted.($sp.id) = @{}
+                        $meanwhileDeleted = $true
                     }
                 }
-                #endregion spAppKeyCredentials
-
-                #region spAppPasswordCredentials
-                if (($getApplication.passwordCredentials).Count -gt 0) {
-                    $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationPasswordCredentials = @{}
-                    foreach ($passwordCredential in $getApplication.passwordCredentials) {
-                        $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationPasswordCredentials.($passwordCredential.keyId) = $passwordCredential
+                else{
+                    if ($getApplication.Count -gt 0) {
+                        $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application = @{}
+                        $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationDetails = $getApplication
+                        $script:htApplications.($getApplication.id) = $getApplication
+        
+                        #region getAppOwner
+                        $currentTask = "getAppOwner $($getApplication.id)"
+                        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/applications/$($getApplication.id)/owners"              
+                        $method = "GET"
+                        $getAppOwner = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+        
+                        if ($getAppOwner.Count -gt 0) {
+                            if (-not $htAppOwners.($getApplication.id)) {
+                                $script:htAppOwners.($getApplication.id) = $getAppOwner | select-Object id, displayName, '@odata.type'
+                            }
+                        }
+                        #endregion getAppOwner
+        
+                        #region spAppKeyCredentials
+                        if (($getApplication.keyCredentials).Count -gt 0) {
+                            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationKeyCredentials = @{}
+                            foreach ($keyCredential in $getApplication.keyCredentials) {
+                                $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationKeyCredentials.($keyCredential.keyId) = $keyCredential
+                            }
+                        }
+                        #endregion spAppKeyCredentials
+        
+                        #region spAppPasswordCredentials
+                        if (($getApplication.passwordCredentials).Count -gt 0) {
+                            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationPasswordCredentials = @{}
+                            foreach ($passwordCredential in $getApplication.passwordCredentials) {
+                                $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.Application.ApplicationPasswordCredentials.($passwordCredential.keyId) = $passwordCredential
+                            }
+                        }
+                        #endregion spAppPasswordCredentials
                     }
                 }
-                #endregion spAppPasswordCredentials
             }
         }
         #endregion spApp
 
         #region spManagedIdentity
-        if ($sp.servicePrincipalType -eq "ManagedIdentity") {
-            $spType = "MI"
+        if (-not $meanwhileDeleted){
+            if ($sp.servicePrincipalType -eq "ManagedIdentity") {
+                $spType = "MI"
 
-            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ManagedIdentity = @{}
-            $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ManagedIdentityDetails = $sp
-        
-            if (($sp.alternativeNames).Count -gt 0) {
-                $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ManagedIdentity.ManagedIdentityAlternativeNames = $sp.alternativeNames
-            }
-
-            $miType = "unknown"
-            foreach ($altName in $sp.alternativeNames) {
-                if ($altName -like "isExplicit=*") {
-                    $splitAltName = $altName.split("=")
-                    if ($splitAltName[1] -eq "true") {
-                        $miType = "User assigned"
-                    }
-                    if ($splitAltName[1] -eq "false") {
-                        $miType = "System assigned"
-                    }
+                $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ManagedIdentity = @{}
+                $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ManagedIdentityDetails = $sp
+            
+                if (($sp.alternativeNames).Count -gt 0) {
+                    $script:htServicePrincipalsEnriched.($sp.id).ServicePrincipal.ManagedIdentity.ManagedIdentityAlternativeNames = $sp.alternativeNames
                 }
-                else {
-                    $s1 = $altName -replace ".*/providers/"; $rm = $s1 -replace ".*/"; $resourceType = $s1 -replace "/$($rm)"              
-                    $miResourceType = $resourceType
-                    $altNameSplit = $altName.split('/')
-                    if ($altName -like "/subscriptions/*"){
-                        if ($resourceType -eq "Microsoft.Authorization/policyAssignments"){
-                            if ($altName -like "/subscriptions/*/resourceGroups/*"){
-                                $miResourceScope = "Sub $($altNameSplit[2]) RG $($altNameSplit[4])"
+
+                $miType = "unknown"
+                foreach ($altName in $sp.alternativeNames) {
+                    if ($altName -like "isExplicit=*") {
+                        $splitAltName = $altName.split("=")
+                        if ($splitAltName[1] -eq "true") {
+                            $miType = "User assigned"
+                        }
+                        if ($splitAltName[1] -eq "false") {
+                            $miType = "System assigned"
+                        }
+                    }
+                    else {
+                        $s1 = $altName -replace ".*/providers/"; $rm = $s1 -replace ".*/"; $resourceType = $s1 -replace "/$($rm)"              
+                        $miResourceType = $resourceType
+                        $altNameSplit = $altName.split('/')
+                        if ($altName -like "/subscriptions/*"){
+                            if ($resourceType -eq "Microsoft.Authorization/policyAssignments"){
+                                if ($altName -like "/subscriptions/*/resourceGroups/*"){
+                                    $miResourceScope = "Sub $($altNameSplit[2]) RG $($altNameSplit[4])"
+                                }
+                                else{
+                                    $miResourceScope = "Sub $($altNameSplit[2])"
+                                }
                             }
                             else{
                                 $miResourceScope = "Sub $($altNameSplit[2])"
                             }
                         }
                         else{
-                            $miResourceScope = "Sub $($altNameSplit[2])"
+                            $miResourceScope = "MG $($altNameSplit[4])"
                         }
-                    }
-                    else{
-                        $miResourceScope = "MG $($altNameSplit[4])"
-                    }
-                }              
+                    }              
+                }
             }
         }
         #endregion spManagedIdentity
 
 
-        if ($spType -eq "APP") {
-            $script:htServicePrincipalsEnriched.($sp.id).spTypeConcatinated = "SP $($spType) $($spTypeINTEXT)"
-            $script:htServicePrincipalsEnriched.($sp.id).type = $spType
-            $script:htServicePrincipalsEnriched.($sp.id).subtype = $spTypeINTEXT
+        if (-not $meanwhileDeleted){
+            if ($spType -eq "APP") {
+                $script:htServicePrincipalsEnriched.($sp.id).spTypeConcatinated = "SP $($spType) $($spTypeINTEXT)"
+                $script:htServicePrincipalsEnriched.($sp.id).type = $spType
+                $script:htServicePrincipalsEnriched.($sp.id).subtype = $spTypeINTEXT
+            }
+            elseif ($spType -eq "MI") {
+                $script:htServicePrincipalsEnriched.($sp.id).spTypeConcatinated = "SP $($spType) $($miType)"
+                $script:htServicePrincipalsEnriched.($sp.id).type = $spType
+                $script:htServicePrincipalsEnriched.($sp.id).subtype = $miType
+                $script:htServicePrincipalsEnriched.($sp.id).altname = $altName
+                $script:htServicePrincipalsEnriched.($sp.id).resourceType = $miResourceType
+                $script:htServicePrincipalsEnriched.($sp.id).resourceScope = $miResourceScope
+            }
+            else {
+                $script:htServicePrincipalsEnriched.($sp.id).spTypeConcatinated = "SP $($spTypeINTEXT)"
+                $script:htServicePrincipalsEnriched.($sp.id).type = "SP"
+                $script:htServicePrincipalsEnriched.($sp.id).subtype = $spTypeINTEXT
+            }
         }
-        elseif ($spType -eq "MI") {
-            $script:htServicePrincipalsEnriched.($sp.id).spTypeConcatinated = "SP $($spType) $($miType)"
-            $script:htServicePrincipalsEnriched.($sp.id).type = $spType
-            $script:htServicePrincipalsEnriched.($sp.id).subtype = $miType
-            $script:htServicePrincipalsEnriched.($sp.id).altname = $altName
-            $script:htServicePrincipalsEnriched.($sp.id).resourceType = $miResourceType
-            $script:htServicePrincipalsEnriched.($sp.id).resourceScope = $miResourceScope
-        }
-        else {
-            $script:htServicePrincipalsEnriched.($sp.id).spTypeConcatinated = "SP $($spTypeINTEXT)"
-            $script:htServicePrincipalsEnriched.($sp.id).type = "SP"
-            $script:htServicePrincipalsEnriched.($sp.id).subtype = $spTypeINTEXT
+        else{
+            $script:htServicePrincipalsEnriched.($sp.id).MeanWhileDeleted = $true
         }
 
         $processedServicePrincipalsCount = ($script:htServicePrincipalsEnriched.Keys).Count
@@ -3839,6 +4918,7 @@ else {
     $endForeachSP = get-date
     $duration = NEW-TIMESPAN -Start $startForeachSP -End $endForeachSP
     Write-Host " Collecting data for all Service Principals ($($getServicePrincipals.Count)) duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
+    Write-Host " Service Principals that have been meanwhile deleted: $($htMeanwhileDeleted.Keys.Count)"
 }
 $end = get-date
 $duration = NEW-TIMESPAN -Start $start -End $end
@@ -3877,9 +4957,10 @@ if ($htUsersAndGroupsToCheck4AppRoleAssignments.User.Keys.Count -gt 0) {
         $function:GetJWTDetails = $using:funcGetJWTDetails
 
         $currentTask = "getUser AppRoleAssignments $($userObjectId)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/users/$($userObjectId)/appRoleAssignments"
+        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/users/$($userObjectId)/appRoleAssignments"
         $method = "GET"
         $getUserAppRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask
+
         if ($getUserAppRoleAssignments.Count -gt 0) {
             foreach ($userAppRoleAssignment in $getUserAppRoleAssignments) {
                 if (-not $htUsersAndGroupsRoleAssignments.User.($userObjectId).($userAppRoleAssignment.id)) {
@@ -3914,9 +4995,10 @@ if ($htUsersAndGroupsToCheck4AppRoleAssignments.Group.Keys.Count -gt 0) {
         $function:GetJWTDetails = $using:funcGetJWTDetails
 
         $currentTask = "getGroup AppRoleAssignments $($groupObjectId)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/Groups/$($groupObjectId)/appRoleAssignments"
+        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/Groups/$($groupObjectId)/appRoleAssignments"
         $method = "GET"
         $getGroupAppRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask
+
         if ($getGroupAppRoleAssignments.Count -gt 0) {
             foreach ($groupAppRoleAssignment in $getGroupAppRoleAssignments) {
                 if (-not $htUsersAndGroupsRoleAssignments.Group.($groupObjectId).($groupAppRoleAssignment.id)) {
@@ -3962,15 +5044,17 @@ if (($htAadGroupsToResolve.Keys).Count -gt 0) {
             
         #Write-Host "resolving AAD Group: $aadGroupId"
         $currentTask = "get AAD Group $($aadGroupId)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/groups/$($aadGroupId)"
+        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/groups/$($aadGroupId)"
         $method = "GET"
         $getAadGroup = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn "Content"
+
         $script:htAadGroups.($aadGroupId) = @{}
         $script:htAadGroups.($aadGroupId).groupDetails = $getAadGroup
 
         $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/groups/$($aadGroupId)/transitivemembers/microsoft.graph.group?`$count=true"
         $method = "GET"
         $getNestedGroups = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual"
+
         if ($getNestedGroups) {
             write-host " $aadGroupId -> has nested Groups $($getNestedGroups.Count)"
             $script:htAadGroups.($aadGroupId).nestedGroups = $getNestedGroups
@@ -4019,7 +5103,6 @@ foreach ($batch in $objectIdsBatch) {
     $currentTask = " Resolving identity type Group - Batch #$batchCnt/$($objectIdsBatchCount) ($(($batch.Group).Count)"
     $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/directoryObjects/getByIds"
     $method = "POST"
-        
     $body = @"
         {
             "ids":[$($objectIdsToCheckIfGroup)],
@@ -4035,6 +5118,7 @@ foreach ($batch in $objectIdsBatch) {
         $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/groups/$($group.id)/transitivemembers/microsoft.graph.group?`$count=true"
         $method = "GET"
         $getNestedGroups = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual"
+
         if ($getNestedGroups) {
             write-host " -> has nested Groups $($getNestedGroups.Count)"
             $script:htAadGroups.($group.id).nestedGroups = $getNestedGroups
@@ -4432,7 +5516,8 @@ Write-Host "Enrichment starting"
 $indicator = 100
 $processedServicePrincipalsCount = 0
 $startEnrichmentSP = get-date
-foreach ($sp in $htServicePrincipalsEnriched.values) {
+#foreach ($sp in $htServicePrincipalsEnriched.values) {
+foreach ($sp in ($htServicePrincipalsEnriched.values).where( { -not $_.MeanWhileDeleted } )) {
 
     #Write-host "processing SP:" $sp.ServicePrincipal.ServicePrincipalDetails.displayName "objId: $($sp.ServicePrincipal.ServicePrincipalDetails.id)" "appId: $($sp.ServicePrincipal.ServicePrincipalDetails.appId)"
 
@@ -4532,6 +5617,37 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
     }
     #endregion ServicePrincipalAADRoleAssignments
 
+    <#region ServicePrincipalAADRoleAssignmentScheduleInstances
+    $arrayServicePrincipalAADRoleAssignmentScheduleInstancesOpt = [System.Collections.ArrayList]@()
+    if ($sp.ServicePrincipal.ServicePrincipalAADRoleAssignmentScheduleInstances) {
+        foreach ($servicePrincipalAADRoleAssignmentScheduleInstance in $sp.ServicePrincipal.ServicePrincipalAADRoleAssignmentScheduleInstances) {
+            $hlper = $htAadRoleDefinitions.($servicePrincipalAADRoleAssignmentScheduleInstance.roleDefinitionId)
+            if ($hlper.isBuiltIn) {
+                $roleType = "BuiltIn"
+            }
+            else {
+                $roleType = "Custom"
+            }
+
+            $htOptInfo = [ordered] @{}
+            $htOptInfo.id = $servicePrincipalAADRoleAssignmentScheduleInstance.id
+            $htOptInfo.roleDefinitionId = $servicePrincipalAADRoleAssignmentScheduleInstance.roleDefinitionId
+            $htOptInfo.roleDefinitionName = $hlper.displayName
+            $htOptInfo.roleDefinitionDescription = $hlper.description
+            $htOptInfo.roleType = $roleType
+            $htOptInfo.directoryScopeId = $servicePrincipalAADRoleAssignmentScheduleInstance.directoryScopeId
+            $htOptInfo.resourceScope = $servicePrincipalAADRoleAssignmentScheduleInstance.resourceScope
+            if ($servicePrincipalAADRoleAssignmentScheduleInstance.resourceScope -ne "/") {
+                if ($htSPandAPPHelper4AADRoleAssignmentsWithScope.($servicePrincipalAADRoleAssignmentScheduleInstance.resourceScope -replace "/")) {
+                    $htOptInfo.scopeDetail = $htSPandAPPHelper4AADRoleAssignmentsWithScope.($servicePrincipalAADRoleAssignmentScheduleInstance.resourceScope -replace "/")
+                }
+            }
+            $null = $arrayServicePrincipalAADRoleAssignmentScheduleInstancesOpt.Add($htOptInfo)
+        }
+    }
+    #endregion ServicePrincipalAADRoleAssignmentScheduleInstances
+    #>
+
     #region ServicePrincipalAADRoleAssignedOn
     $arrayServicePrincipalAADRoleAssignedOnOpt = [System.Collections.ArrayList]@()
     if ($htAADRoleAssignmentOnSPOrAPP.SP.($sp.ServicePrincipal.ServicePrincipalDetails.id)) {
@@ -4615,7 +5731,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
             $htOptInfo.AppRoleAssignmentId = $servicePrincipalAppRoleAssignment.id
             $htOptInfo.AppRoleAssignmentResourceId = $servicePrincipalAppRoleAssignment.resourceId
             $htOptInfo.AppRoleAssignmentResourceDisplayName = $servicePrincipalAppRoleAssignment.resourceDisplayName
-            $htOptInfo.AppRoleAssignmentCreationTimestamp = $servicePrincipalAppRoleAssignment.creationTimestamp
+            $htOptInfo.AppRoleAssignmentCreatedDateTime = $servicePrincipalAppRoleAssignment.createdDateTime
             $htOptInfo.AppRoleId = $hlper.id
             $htOptInfo.AppRoleAllowedMemberTypes = $hlper.allowedMemberTypes
             $htOptInfo.AppRoleOrigin = $hlper.origin
@@ -4937,6 +6053,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
                     $htOptInfo.displayName = $displayName
                     $htOptInfo.expiryInfo = $expiryApplicationPasswordCredential
                     $htOptInfo.endDateTime = $hlperApplicationPasswordCredential.endDateTime
+                    $htOptInfo.endDateTimeFormated = ($hlperApplicationPasswordCredential.endDateTime).ToString("dd-MMM-yyyy HH:mm:ss")
                     $null = $arrayApplicationPasswordCredentialsOpt.Add($htOptInfo)
                 }
             }
@@ -4980,6 +6097,7 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
                     $htOptInfo.customKeyIdentifier = $hlperApplicationKeyCredential.customKeyIdentifier
                     $htOptInfo.expiryInfo = $expiryApplicationKeyCredential
                     $htOptInfo.endDateTime = $hlperApplicationKeyCredential.endDateTime
+                    $htOptInfo.endDateTimeFormated = $hlperApplicationKeyCredential.endDateTime.ToString("dd-MMM-yyyy HH:mm:ss")
                     $null = $arrayApplicationKeyCredentialsOpt.Add($htOptInfo)
                 }
             }
@@ -5005,23 +6123,25 @@ foreach ($sp in $htServicePrincipalsEnriched.values) {
     
     $spArray = [System.Collections.ArrayList]@()
     $null = $spArray.Add([PSCustomObject]@{ 
-        SPObjectId                  = $sp.ServicePrincipal.ServicePrincipalDetails.id
-        SPAppId                     = $sp.ServicePrincipal.ServicePrincipalDetails.appId
-        SPDisplayName               = $sp.ServicePrincipal.ServicePrincipalDetails.displayName
-        SPDescription               = $sp.ServicePrincipal.ServicePrincipalDetails.description
-        SPNotes                     = $sp.ServicePrincipal.ServicePrincipalDetails.notes
-        SPAppOwnerOrganizationId    = $sp.ServicePrincipal.ServicePrincipalDetails.appOwnerOrganizationId
-        SPServicePrincipalType      = $sp.ServicePrincipal.ServicePrincipalDetails.servicePrincipalType
-        SPAccountEnabled            = $sp.ServicePrincipal.ServicePrincipalDetails.accountEnabled
-        SPCreatedDateTime           = $sp.ServicePrincipal.ServicePrincipalDetails.createdDateTime
-        #SPPublisherName             = $sp.ServicePrincipal.ServicePrincipalDetails.publisherName
-        SPVerifiedPublisher         = $sp.ServicePrincipal.ServicePrincipalDetails.verifiedPublisher
-        SPHomepage                  = $sp.ServicePrincipal.ServicePrincipalDetails.homepage
-        SPErrorUrl                  = $sp.ServicePrincipal.ServicePrincipalDetails.errorUrl
-        SPLoginUrl                  = $sp.ServicePrincipal.ServicePrincipalDetails.loginUrl
-        SPLogoutUrl                 = $sp.ServicePrincipal.ServicePrincipalDetails.logoutUrl
-        SPPreferredSingleSignOnMode = $sp.ServicePrincipal.ServicePrincipalDetails.preferredSingleSignOnMode
-    })
+            SPObjectId                  = $sp.ServicePrincipal.ServicePrincipalDetails.id
+            SPAppId                     = $sp.ServicePrincipal.ServicePrincipalDetails.appId
+            SPDisplayName               = $sp.ServicePrincipal.ServicePrincipalDetails.displayName
+            SPDescription               = $sp.ServicePrincipal.ServicePrincipalDetails.description
+            SPNotes                     = $sp.ServicePrincipal.ServicePrincipalDetails.notes
+            SPAppOwnerOrganizationId    = $sp.ServicePrincipal.ServicePrincipalDetails.appOwnerOrganizationId
+            SPServicePrincipalType      = $sp.ServicePrincipal.ServicePrincipalDetails.servicePrincipalType
+            SPAccountEnabled            = $sp.ServicePrincipal.ServicePrincipalDetails.accountEnabled
+            SPCreatedDateTime           = $sp.ServicePrincipal.ServicePrincipalDetails.createdDateTime
+            #SPPublisherName             = $sp.ServicePrincipal.ServicePrincipalDetails.publisherName
+            SPVerifiedPublisher         = $sp.ServicePrincipal.ServicePrincipalDetails.verifiedPublisher
+            SPHomepage                  = $sp.ServicePrincipal.ServicePrincipalDetails.homepage
+            SPErrorUrl                  = $sp.ServicePrincipal.ServicePrincipalDetails.errorUrl
+            SPLoginUrl                  = $sp.ServicePrincipal.ServicePrincipalDetails.loginUrl
+            SPLogoutUrl                 = $sp.ServicePrincipal.ServicePrincipalDetails.logoutUrl
+            SPPreferredSingleSignOnMode = $sp.ServicePrincipal.ServicePrincipalDetails.preferredSingleSignOnMode
+            SPAppRoles                  = $sp.ServicePrincipal.ServicePrincipalDetails.appRoles
+            SPOauth2PermissionScopes    = $sp.ServicePrincipal.ServicePrincipalDetails.oauth2PermissionScopes
+        })
 
     if ($sp.ServicePrincipal.Application) {
         #Write-Host "$($sp.ServicePrincipal.ServicePrincipalDetails.displayName) is App"
@@ -5184,7 +6304,7 @@ $html += @"
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>$($Product)</title>
-    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_004.css">
+    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_005.css">
     <script src="https://www.azadvertizer.net/azgovvizv4/js/jquery-1.12.1.js"></script>
     <script src="https://www.azadvertizer.net/azgovvizv4/js/jquery-ui-1.12.1.js"></script>
     <script type="text/javascript" src="https://www.azadvertizer.net/azgovvizv4/js/highlight_v004_002.js"></script>
@@ -5193,6 +6313,7 @@ $html += @"
     <link rel="stylesheet" href="https://www.azadvertizer.net/azgovvizv4/css/highlight-10.5.0.min.css">
     <script src="https://www.azadvertizer.net/azgovvizv4/js/highlight-10.5.0.min.js"></script>
     <script>hljs.initHighlightingOnLoad();</script>
+    <script src="https://www.chartjs.org/dist/2.8.0/Chart.min.js"></script>
 
     <script>
         `$(window).load(function() {
@@ -5339,7 +6460,7 @@ $html += @"
 $html += @"
     </div>
     <script src="https://www.azadvertizer.net/azgovvizv4/js/toggle_v004_004.js"></script>
-    <script src="https://www.azadvertizer.net/azgovvizv4/js/collapsetable_v004_001.js"></script>
+    <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/collapsetable_v004_002.js"></script>
     <script src="https://www.azadvertizer.net/azgovvizv4/js/fitty_v004_001.min.js"></script>
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/version_v001_001.js"></script>
     <script src="https://www.azadvertizer.net/azgovvizv4/js/autocorrectOff_v004_001.js"></script>
@@ -5385,6 +6506,164 @@ if ($Error.Count -gt 0) {
 else {
     Write-Host "Error count is 0"
 }
+
+#region Stats
+if (-not $StatsOptOut) {
+
+    if ($htParameters.AzureDevOpsWikiAsCode) {
+        if ($env:BUILD_REPOSITORY_ID){
+            $hashTenantIdOrRepositoryId = [string]($env:BUILD_REPOSITORY_ID)
+        }
+        else{
+            $hashTenantIdOrRepositoryId = [string]($checkContext.Tenant.Id)
+        }
+    }
+    else{
+        $hashTenantIdOrRepositoryId = [string]($checkContext.Tenant.Id)
+    }
+
+    $hashAccId = [string]($checkContext.Account.Id)
+
+    $hasher384 = [System.Security.Cryptography.HashAlgorithm]::Create('sha384')
+    $hasher512 = [System.Security.Cryptography.HashAlgorithm]::Create('sha512')
+
+    $hashTenantIdOrRepositoryIdSplit = $hashTenantIdOrRepositoryId.split("-")
+    $hashAccIdSplit = $hashAccId.split("-")
+
+    if (($hashTenantIdOrRepositoryIdSplit[0])[0] -match "[a-z]") {
+        $hashTenantIdOrRepositoryIdUse = "$(($hashTenantIdOrRepositoryIdSplit[0]).substring(2))$($hashAccIdSplit[2])"
+        $hashTenantIdOrRepositoryIdUse = $hasher512.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hashTenantIdOrRepositoryIdUse))
+        $hashTenantIdOrRepositoryIdUse = "$(([System.BitConverter]::ToString($hashTenantIdOrRepositoryIdUse)) -replace '-')"
+    }
+    else {
+        $hashTenantIdOrRepositoryIdUse = "$(($hashTenantIdOrRepositoryIdSplit[4]).substring(6))$($hashAccIdSplit[1])"
+        $hashTenantIdOrRepositoryIdUse = $hasher384.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hashTenantIdOrRepositoryIdUse))
+        $hashTenantIdOrRepositoryIdUse = "$(([System.BitConverter]::ToString($hashTenantIdOrRepositoryIdUse)) -replace '-')"
+    }
+
+    if (($hashAccIdSplit[0])[0] -match "[a-z]") {
+        $hashAccIdUse = "$($hashAccIdSplit[0].substring(2))$($hashTenantIdOrRepositoryIdSplit[2])"
+        $hashAccIdUse = $hasher512.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hashAccIdUse))
+        $hashAccIdUse = "$(([System.BitConverter]::ToString($hashAccIdUse)) -replace '-')"
+        $hashUse = "$($hashAccIdUse)$($hashTenantIdOrRepositoryIdUse)"
+    }
+    else {
+        $hashAccIdUse = "$($hashAccIdSplit[4].substring(6))$($hashTenantIdOrRepositoryIdSplit[1])"
+        $hashAccIdUse = $hasher384.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hashAccIdUse))
+        $hashAccIdUse = "$(([System.BitConverter]::ToString($hashAccIdUse)) -replace '-')"
+        $hashUse = "$($hashTenantIdOrRepositoryIdUse)$($hashAccIdUse)"
+    }
+
+    $identifierBase = $hasher512.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hashUse))
+    $identifier = "$(([System.BitConverter]::ToString($identifierBase)) -replace '-')"
+
+    $platform = "Console"
+    if ($htParameters.AzureDevOpsWikiAsCode) {
+        if ($env:SYSTEM_TEAMPROJECTID) {
+            $platform = "AzureDevOps"
+        }
+        else {
+            $platform = "unclear"
+        }
+    }
+
+    $accountInfo = "$($accountType)$($userType)"
+    if ($accountType -eq "ServicePrincipal") {
+        $accountInfo = $accountType
+    }
+
+    $statsCountSubscriptions = "less than 100"
+    if (($htSubscriptionsMgPath.Keys).Count -ge 100) {
+        $statsCountSubscriptions = "more than 100"
+    }
+
+    $statsCountSPs = "less than 1000"
+    if ($cu.Count -ge 1000) {
+        $statsCountSPs = "more than 1000"
+    }
+
+    $tryCounter = 0
+    do {
+        if ($tryCounter -gt 0) {
+            start-sleep -seconds ($tryCounter * 3)
+        }
+        $tryCounter++
+        $statsSuccess = $true
+        try {
+            $statusBody = @"
+{
+    "name": "Microsoft.ApplicationInsights.Event",
+    "time": "$((Get-Date).ToUniversalTime())",
+    "iKey": "ffcd6b2e-1a5e-429f-9495-e3492decfe06",
+    "data": {
+        "baseType": "EventData",
+        "baseData": {
+            "name": "$($Product)",
+            "ver": 2,
+            "properties": {
+                "accType": "$($accountInfo)",
+                "azCloud": "$($checkContext.Environment.Name)",
+                "identifier": "$($identifier)",
+                "platform": "$($platform)",
+                "productVersion": "$($ProductVersion)",
+                "psAzAccountsVersion": "$($resolvedAzModuleVersion)",
+                "psVersion": "$($PSVersionTable.PSVersion)",
+                "statsCountErrors": "$($Error.Count)",
+                "statsCountSPs": "$($statsCountSPs)",
+                "statsCountSubscriptions": "$($statsCountSubscriptions)",
+                "statsTry": "$($tryCounter)"
+            }
+        }
+    }
+}
+"@
+            $stats = Invoke-WebRequest -Uri 'https://dc.services.visualstudio.com/v2/track' -Method 'POST' -body $statusBody
+        }
+        catch {
+            $statsSuccess = $false
+        }
+    }
+    until($statsSuccess -eq $true -or $tryCounter -gt 5)
+}
+else {
+    #noStats
+    $identifier = (New-Guid).Guid
+
+    $tryCounter = 0
+    do {
+        if ($tryCounter -gt 0) {
+            start-sleep -seconds ($tryCounter * 3)
+        }
+        $tryCounter++
+        $statsSuccess = $true
+        try {
+            $statusBody = @"
+{
+    "name": "Microsoft.ApplicationInsights.Event",
+    "time": "$((Get-Date).ToUniversalTime())",
+    "iKey": "ffcd6b2e-1a5e-429f-9495-e3492decfe06",
+    "data": {
+        "baseType": "EventData",
+        "baseData": {
+            "name": "$($Product)",
+            "ver": 2,
+            "properties": {
+                "identifier": "$($identifier)",
+                "statsTry": "$($tryCounter)"
+            }
+        }
+    }
+}
+"@
+            $stats = Invoke-WebRequest -Uri 'https://dc.services.visualstudio.com/v2/track' -Method 'POST' -body $statusBody
+        }
+        catch {
+            $statsSuccess = $false
+        }
+    }
+    until($statsSuccess -eq $true -or $tryCounter -gt 5)
+}
+#endregion Stats
 
 if ($DoTranscript) {
     Stop-Transcript
