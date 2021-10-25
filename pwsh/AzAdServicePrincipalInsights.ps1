@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzAdServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20211021_2_POC",
+    [string]$ProductVersion = "v1_20211025_1_POC",
     [string]$GithubRepository = "aka.ms/AzAdServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
@@ -444,7 +444,9 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                     ($getDiagnosticSettingsMg -and $catchResult.error.code -eq "InvalidResourceType") -or
                     ($catchResult.error.code -eq "InsufficientPermissions") -or
                     $catchResult.error.code -eq "ClientCertificateValidationFailure" -or
-                    ($validate -and $catchResult.error.code -eq "Authorization_RequestDenied")
+                    ($validate -and $catchResult.error.code -eq "Authorization_RequestDenied") -or
+                    $catchResult.error.code -eq "GatewayAuthenticationFailed" -or
+                    $catchResult.message -eq "An error has occurred."
                 ) {
                     if ($getPolicyCompliance -and $catchResult.error.code -like "*ResponseTooLarge*") {
                         Write-Host "Info: $currentTask - (StatusCode: '$($azAPIRequest.StatusCode)') Response too large, skipping this scope."
@@ -643,7 +645,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         return "InvalidResourceType"
                     }
 
-                    if ($catchResult.error.code -eq "InsufficientPermissions" -or $catchResult.error.code -eq "ClientCertificateValidationFailure") {
+                    if ($catchResult.error.code -eq "InsufficientPermissions" -or $catchResult.error.code -eq "ClientCertificateValidationFailure" -or $catchResult.error.code -eq "GatewayAuthenticationFailed" -or $catchResult.message -eq "An error has occurred.") {
                         $maxTries = 5
                         $sleepSec = @(1, 3, 5, 7, 10, 12, 20, 30)[$tryCounter]
                         if ($tryCounter -gt $maxTries) {
@@ -2767,7 +2769,7 @@ extensions: [{ name: 'sort' }]
 
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
-    #endregion SUMMARYServicePrincipalsAADRoleAssignedOn
+    #endregion SUMMARYApplicationsAADRoleAssignedOn
 
     #region SUMMARYServicePrincipalsAppRoleAssignments
     $startCustPolLoop = get-date
@@ -2775,8 +2777,18 @@ extensions: [{ name: 'sort' }]
     $servicePrincipalsAppRoleAssignments = $cu.where( { $_.SPAppRoleAssignments.Count -ne 0 } )
     $servicePrincipalsAppRoleAssignmentsCount = $servicePrincipalsAppRoleAssignments.Count
     if ($servicePrincipalsAppRoleAssignmentsCount -gt 0) {
+        $classifiedCritical = $servicePrincipalsAppRoleAssignments.SPAppRoleAssignments.where( { $_.AppRolePermissionSensitivity -eq "critical"} )
+        $classifiedCriticalCount = $classifiedCritical.Count
+
+        if ($classifiedCriticalCount -gt 0){
+            $buttonDataContent = "Service Principals App RoleAssignments (API permissions Application) [critical permissions: $classifiedCriticalCount]"
+        }
+        else{
+            $buttonDataContent = "Service Principals App RoleAssignments (API permissions Application)"
+        }
+
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="Service Principals App RoleAssignments (API permissions Application)" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="$buttonDataContent" /></button>
         <div class="content TenantSummaryContent">
 "@)
 
@@ -2792,6 +2804,7 @@ extensions: [{ name: 'sort' }]
 <th>SP displayName</th>
 <th>SP type</th>
 <th>SP App Owner Organization Id</th>
+<th>Classification</th>
 <th>SP App RoleAssignments</th>
 </tr>
 </thead>
@@ -2804,10 +2817,18 @@ extensions: [{ name: 'sort' }]
 
             $SPAppRoleAssignments = $null
             if (($sp.SPAppRoleAssignments)) {
+                $classification = "unclassified"
                 if (($sp.SPAppRoleAssignments.count -gt 0)) {
                     $array = @()
                     foreach ($approleAss in $sp.SPAppRoleAssignments) {
-                        $array += "$($approleAss.AppRoleAssignmentResourceDisplayName) ($($approleAss.AppRolePermission))"
+                        if ($approleAss.AppRolePermissionSensitivity -eq "critical"){
+                            $classification = "critical"
+                            $array += "$($approleAss.AppRoleAssignmentResourceDisplayName) (<span class=`"critical`">$($approleAss.AppRolePermission)</span>)"
+                        }
+                        else{
+                            $array += "$($approleAss.AppRoleAssignmentResourceDisplayName) ($($approleAss.AppRolePermission))"
+                        }
+                        
                     }
                     $SPAppRoleAssignments = "$(($sp.SPAppRoleAssignments).Count) ($($array -join "$CsvDelimiterOpposite "))"
                 }
@@ -2823,6 +2844,7 @@ extensions: [{ name: 'sort' }]
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
+<td>$($classification)</td>
 <td class="breakwordall">$($SPAppRoleAssignments)</td>
 </tr>
 "@)
@@ -2862,11 +2884,13 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
-col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
+col_widths: ['10%', '10%', '10%', '10%', '10%', '5%', '45%'],            
             locale: 'en-US',
             col_3: 'multiple',
             col_4: 'select',
+            col_5: 'select',
             col_types: [
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -3024,18 +3048,28 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYServicePrincipalsAppRoleAssignedTo
 
     #region SUMMARYServicePrincipalsOauth2PermissionGrants
-    [void]$htmlTenantSummary.AppendLine(@"
-<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="Service Principals Oauth Permission grants (API permissions Delegated)" /></button>
-<div class="content TenantSummaryContent">
-"@)
-
     $startCustPolLoop = get-date
     Write-Host "  processing TenantSummary ServicePrincipalsOauth2PermissionGrants"
 
     $servicePrincipalsOauth2PermissionGrants = $cu.where( { $_.SPOauth2PermissionGrants.Count -ne 0 } )
     $servicePrincipalsOauth2PermissionGrantsCount = $servicePrincipalsOauth2PermissionGrants.Count
 
+    $classifiedCritical = $servicePrincipalsOauth2PermissionGrants.SPOauth2PermissionGrants.where( { $_.permissionSensitivity -eq "critical"} )
+    $classifiedCriticalCount = $classifiedCritical.Count
+
+    if ($classifiedCriticalCount -gt 0){
+        $buttonDataContent = "Service Principals Oauth Permission grants (API permissions Delegated) [critical permissions: $classifiedCriticalCount]"
+    }
+    else{
+        $buttonDataContent = "Service Principals Oauth Permission grants (API permissions Delegated)"
+    }
+
     if ($servicePrincipalsOauth2PermissionGrantsCount -gt 0) {
+        [void]$htmlTenantSummary.AppendLine(@"
+            <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="$buttonDataContent" /></button>
+            <div class="content TenantSummaryContent">
+"@)
+
         $tfCount = $servicePrincipalsOauth2PermissionGrantsCount
         $htmlTableId = "TenantSummary_ServicePrincipalsOauth2PermissionGrants"
         [void]$htmlTenantSummary.AppendLine(@"
@@ -3048,6 +3082,7 @@ extensions: [{ name: 'sort' }]
 <th>SP displayName</th>
 <th>SP type</th>
 <th>SP App Owner Organization Id</th>
+<th>Classification</th>
 <th>SP Oauth Permission grants</th>
 </tr>
 </thead>
@@ -3060,10 +3095,17 @@ extensions: [{ name: 'sort' }]
 
             $SPOauth2PermissionGrants = $null
             if (($sp.SPOauth2PermissionGrants)) {
+                $classification = "unclassified"
                 if (($sp.SPOauth2PermissionGrants.count -gt 0)) {
                     $array = @()
-                    foreach ($oauthGrant in $sp.SPOauth2PermissionGrants) {
-                        $array += "$($oauthGrant.SPDisplayName) ($($oauthGrant.permission))"
+                    foreach ($oauthGrant in $sp.SPOauth2PermissionGrants | Sort-Object -Property SPDisplayName, type, permission) {
+                        if ($oauthGrant.permissionSensitivity -eq "critical"){
+                            $classification = "critical"
+                            $array += "$($oauthGrant.SPDisplayName) (<span class=`"critical`">$($oauthGrant.permission)</span> - $($oauthGrant.type))"
+                        }
+                        else{
+                            $array += "$($oauthGrant.SPDisplayName) ($($oauthGrant.permission) - $($oauthGrant.type))"
+                        }
                     }
                     $SPOauth2PermissionGrants = "$(($sp.SPOauth2PermissionGrants).Count) ($($array -join "$CsvDelimiterOpposite "))"
                 }
@@ -3079,6 +3121,7 @@ extensions: [{ name: 'sort' }]
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
+<td>$($classification)</td>
 <td class="breakwordall">$($SPOauth2PermissionGrants)</td>
 </tr>
 "@)
@@ -3118,11 +3161,13 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true,
-col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
+col_widths: ['10%', '10%', '10%', '10%', '10%', '5%', '50%'],            
             locale: 'en-US',
             col_3: 'multiple',
             col_4: 'select',
+            col_5: 'select',
             col_types: [
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -5681,6 +5726,34 @@ foreach ($sp in ($htServicePrincipalsEnriched.values).where( { -not $_.MeanWhile
                     $htOptInfo.SPDisplayName = $hlperServicePrincipalsPublishedPermissionScope.spdetails.displayName
                     $htOptInfo.scope = $scope
                     $htOptInfo.permission = $hlperPublishedPermissionScope.value
+                    $oauth2PermissionSensitivity = "unclassified"
+                    if (
+                        $hlperPublishedPermissionScope.value -eq "Application.ReadWrite.All" -or
+                        $hlperPublishedPermissionScope.value -eq "Directory.ReadWrite.All" -or
+                        $hlperPublishedPermissionScope.value -like "Domain.ReadWrite.All*" -or
+                        $hlperPublishedPermissionScope.value -like "EduRoster.ReadWrite.All*" -or
+                        $hlperPublishedPermissionScope.value -eq "Group.ReadWrite.All" -or
+                        $hlperPublishedPermissionScope.value -like "Member.Read.Hidden*" -or
+                        $hlperPublishedPermissionScope.value -eq "RoleManagement.ReadWrite.Directory" -or
+                        $hlperPublishedPermissionScope.value -like "User.ReadWrite.All*" -or
+                        $hlperPublishedPermissionScope.value -eq "User.ManageCreds.All" -or
+                        $hlperPublishedPermissionScope.value -like "*write*"
+                    ){
+                        $oauth2PermissionSensitivity = "critical"
+                    }
+                    <#
+                    Application.ReadWrite.All
+                    Directory.ReadWrite.All
+                    Domain.ReadWrite.All*
+                    EduRoster.ReadWrite.All*
+                    Group.ReadWrite.All
+                    Member.Read.Hidden*
+                    RoleManagement.ReadWrite.Directory
+                    User.ReadWrite.All*
+                    User.ManageCreds.All
+                    All other AppOnly permissions that allow write access
+                    #>
+                    $htOptInfo.permissionSensitivity = $oauth2PermissionSensitivity
                     $htOptInfo.id = $hlperPublishedPermissionScope.id
                     $htOptInfo.type = $hlperPublishedPermissionScope.type
                     $htOptInfo.adminConsentDisplayName = $hlperPublishedPermissionScope.adminConsentDisplayName
@@ -5736,6 +5809,31 @@ foreach ($sp in ($htServicePrincipalsEnriched.values).where( { -not $_.MeanWhile
             $htOptInfo.AppRoleAllowedMemberTypes = $hlper.allowedMemberTypes
             $htOptInfo.AppRoleOrigin = $hlper.origin
             $htOptInfo.AppRolePermission = $hlper.value
+            #https://m365internals.com/2021/07/24/everything-about-service-principals-applications-and-api-permissions/ -> What applications are considered critical?
+            $appRolePermissionSensitivity = "unclassified"
+            if (
+                ($hlper.value -like "Mail.*" -and $hlper.value -notlike "Mail.ReadBasic*") -or
+                $hlper.value -like "Contacts.*" -or
+                $hlper.value -like "MailboxSettings.*" -or
+                $hlper.value -like "People.*" -or
+                $hlper.value -like "Files.*" -or
+                $hlper.value -like "Notes.*" -or
+                $hlper.value -eq "Directory.AccessAsUser.All" -or
+                $hlper.value -eq "User_Impersonation"
+            ){
+                $appRolePermissionSensitivity = "critical"
+            }
+            <#
+            Mail.* (including Mail.Send*, but not Mail.ReadBasic*)
+            Contacts. *
+            MailboxSettings.*
+            People.*
+            Files.*
+            Notes.*
+            Directory.AccessAsUser.All
+            User_Impersonation
+            #>
+            $htOptInfo.AppRolePermissionSensitivity = $appRolePermissionSensitivity
             $htOptInfo.AppRoleDisplayName = $hlper.displayName
             $htOptInfo.AppRoleDescription = $hlper.description
             $null = $arrayServicePrincipalAppRoleAssignmentsOpt.Add($htOptInfo)
@@ -6304,7 +6402,7 @@ $html += @"
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>$($Product)</title>
-    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_005.css">
+    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_006.css">
     <script src="https://www.azadvertizer.net/azgovvizv4/js/jquery-1.12.1.js"></script>
     <script src="https://www.azadvertizer.net/azgovvizv4/js/jquery-ui-1.12.1.js"></script>
     <script type="text/javascript" src="https://www.azadvertizer.net/azgovvizv4/js/highlight_v004_002.js"></script>
