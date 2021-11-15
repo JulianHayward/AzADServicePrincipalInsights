@@ -1,4 +1,4 @@
-# AzAdServicePrincipalInsights
+# AzADServicePrincipalInsights
 
 Insights and tracking on Azure Active Directory Service Principals
 
