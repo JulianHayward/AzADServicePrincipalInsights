@@ -9,12 +9,12 @@ parameters:
     - undefined
 
 variables:
-  ServiceConnection: AzAdServicePrincipalInsights
+  ServiceConnection: AzADServicePrincipalInsights
   SubscriptionQuotaIdWhitelist: ${{ join(',',parameters.subscriptionQuotaIdWhitelistParameters) }}
   WikiDir: wiki
   CsvDelimiter: ;
   ScriptDir: pwsh
-  Script: AzAdServicePrincipalInsights.ps1
+  Script: AzADServicePrincipalInsights.ps1
 
 schedules:
 - cron: "0 6,16 * * *"
@@ -25,7 +25,7 @@ schedules:
     - master
 
 jobs:
-- job: AzAdServicePrincipalInsights  
+- job: AzADServicePrincipalInsights  
   timeoutInMinutes: 0
 
   pool:
@@ -47,18 +47,18 @@ jobs:
       scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(Script)'
       scriptArguments: '-OutputPath $(WikiDir) -AzureDevOpsWikiAsCode -ThrottleLimit 10 -ThrottleLimitGraph 10'
       azurePowerShellVersion: latestVersion
-    displayName: 'Run AzAdServicePrincipalInsights v1'
+    displayName: 'Run AzADServicePrincipalInsights v1'
   - powershell: |
       write-host "#################################"
-      write-host "Push AzAdServicePrincipalInsights output to repository"
+      write-host "Push AzADServicePrincipalInsights output to repository"
       write-host "#################################"
       $executionDateTimeInternationalReadable = get-date -format "dd-MMM-yyyy HH:mm:ss"
       $currentTimeZone = (Get-TimeZone).Id
-      git config --global user.email "AzAdServicePrincipalInsightsPipeline@azdo.com"
+      git config --global user.email "AzADServicePrincipalInsightsPipeline@azdo.com"
       $PipelineInfo = "Pipeline: '$(Build.DefinitionName)' 'rev $(Build.BuildNumber)' (Project: $([uri]::EscapeDataString("$(System.TeamProject)")); Repository: $(Build.Repository.Name); Branch: $(Build.SourceBranchName) Commit: $(Build.SourceVersion))"
       git config --global user.name "$PipelineInfo"
       git config pull.rebase false
       git add --all
       git commit -m "wiki $executionDateTimeInternationalReadable ($currentTimeZone)"
       git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin HEAD:$(Build.SourceBranchName)
-    displayName: 'Push AzAdServicePrincipalInsights v1 output to repository'
+    displayName: 'Push AzADServicePrincipalInsights v1 output to repository'
