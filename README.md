@@ -40,7 +40,7 @@ Microsoft Graph API | Application | __User.Read.All__
 
 ### Azure DevOps
 
-The Build Service Account or Project Collection Build Service Account (which ever you use) requires 'contribute' permissions on the repository
+The Build Service Account or Project Collection Build Service Account (which ever you use) requires __Contribute__ permissions on the repository (Project settings - Repos - Security)
 
 ## Exexute as Service Principal / Application
 
