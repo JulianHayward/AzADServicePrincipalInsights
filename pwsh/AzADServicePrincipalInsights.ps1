@@ -1687,7 +1687,7 @@ var myChart3 = new Chart(ctx, {
 
                     onClick: (e) => {
                         if (window. datasetitem == 0){
-                            window. targetcolumn = '11'
+                            window. targetcolumn = '12'
                         }
                         $($tf).clearFilters();
                         $($tf).setFilterValue((window. targetcolumn), (window.target));
