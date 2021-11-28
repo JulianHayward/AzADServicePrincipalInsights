@@ -42,7 +42,7 @@ Microsoft Graph API | Application | __User.Read.All__
 
 The Build Service Account or Project Collection Build Service Account (which ever you use) requires __Contribute__ permissions on the repository (Project settings - Repos - Security)
 
-## Exexute as Service Principal / Application
+## Execute as Service Principal / Application
 
 #USER: 'Application (client) ID' of the App registration OR 'Application ID' of the Service Principal (Enterprise Application)  
 #PASSWORD: Secret of the App registration  
