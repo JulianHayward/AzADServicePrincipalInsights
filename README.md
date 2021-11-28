@@ -42,6 +42,16 @@ Microsoft Graph API | Application | __User.Read.All__
 
 The Build Service Account or Project Collection Build Service Account (which ever you use) requires 'contribute' permissions on the repository
 
+## Exexute as Service Principal / Application
+
+#USER: 'Application (client) ID' of the App registration OR 'Application ID' of the Service Principal (Enterprise Application)  
+#PASSWORD: Secret of the App registration  
+
+```
+$pscredential = Get-Credential
+Connect-AzAccount -ServicePrincipal -TenantId "<tenantId>" -Credential $pscredential
+```
+
 ## Preview
 
 ![previewHTML](img/preview.png)  
