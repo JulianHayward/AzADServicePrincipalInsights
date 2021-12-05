@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzADServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20211128_1_POC",
+    [string]$ProductVersion = "v1_20211204_6_POC",
     [string]$GithubRepository = "aka.ms/AzADServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
     [switch]$DebugAzAPICall,
@@ -26,6 +26,8 @@ Param
     [int]$ApplicationCertificateExpiryWarning = 14,
     [int]$ApplicationCertificateExpiryMax = 730
 )
+
+#userType not member; not Guest = MemberSynced
 
 $Error.clear()
 $ErrorActionPreference = "Stop"
@@ -446,7 +448,8 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                     $catchResult.error.code -eq "ClientCertificateValidationFailure" -or
                     ($validate -and $catchResult.error.code -eq "Authorization_RequestDenied") -or
                     $catchResult.error.code -eq "GatewayAuthenticationFailed" -or
-                    $catchResult.message -eq "An error has occurred."
+                    $catchResult.message -eq "An error has occurred." -or
+                    $catchResult.error.code -eq "Request_UnsupportedQuery"
                 ) {
                     if ($getPolicyCompliance -and $catchResult.error.code -like "*ResponseTooLarge*") {
                         Write-Host "Info: $currentTask - (StatusCode: '$($azAPIRequest.StatusCode)') Response too large, skipping this scope."
@@ -495,10 +498,12 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         }
 
                     }
+
                     if ($catchResult.error.code -like "*ExpiredAuthenticationToken*" -or $catchResult.error.code -like "*Authentication_ExpiredToken*" -or $catchResult.error.code -like "*InvalidAuthenticationToken*") {
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' - requesting new bearer token ($targetEndpoint)"
                         createBearerToken -targetEndPoint $targetEndpoint
                     }
+
                     if (
                         ($getConsumption -and $catchResult.error.code -eq 404) -or 
                         ($getConsumption -and $catchResult.error.code -eq "AccountCostDisabled") -or 
@@ -538,7 +543,6 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         if ($getConsumption -and $catchResult.error.code -eq "NotFound" -and $catchResult.error.message -like "Cost management data is not supported for subscription(s)*") {
                             return "NotFoundNotSupported"
                         }
-
                         if ($getConsumption -and $catchResult.error.code -eq "IndirectCostDisabled") {
                             return "IndirectCostDisabled"
                         }
@@ -547,18 +551,22 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain Group status - skipping for now :)"
                         return "Request_ResourceNotFound"
                     }
+
                     if (($getGroupMembersCount) -and $catchResult.error.code -like "*Request_ResourceNotFound*") {
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain Group status - skipping for now :)"
                         return "Request_ResourceNotFound"
                     }
+
                     if (($getApp -or $getSP) -and $catchResult.error.code -like "*Request_ResourceNotFound*") {
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain ServicePrincipal status - skipping for now :)"
                         return "Request_ResourceNotFound"
                     }
+
                     if ($currentTask -eq "Checking AAD UserType" -and $catchResult.error.code -like "*Authorization_RequestDenied*") {
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) cannot get the executing user´s userType information (member/guest) - proceeding as 'unknown'"
                         return "unknown"
                     }
+
                     if ((($getApp -or $getSP) -and $catchResult.error.code -like "*Authorization_RequestDenied*") -or ($getGuests -and $catchResult.error.code -like "*Authorization_RequestDenied*")) {
                         if ($userType -eq "Guest" -or $userType -eq "unknown") {
                             Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult)"
@@ -592,10 +600,12 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                             }
                         }
                     }
+
                     if ($catchResult.error.code -like "*BlueprintNotFound*") {
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) seems Blueprint definition is gone - skipping for now :)"
                         return "BlueprintNotFound"
                     }
+
                     if ($catchResult.error.code -eq "ResourceRequestsThrottled" -or $catchResult.error.code -eq "429") {
                         $sleepSeconds = 11
                         if ($catchResult.error.code -eq "ResourceRequestsThrottled") {
@@ -664,6 +674,17 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                     if ($validate -and $catchResult.error.code -eq "Authorization_RequestDenied") {
                         #Write-Host "$currentTask failed ('$($catchResult.error.code)' | '$($catchResult.error.message)')" -ForegroundColor DarkRed
                         return "failed"
+                    }
+
+                    if ($catchResult.error.code -eq "Request_UnsupportedQuery") {
+                        $sleepSec = @(1, 3, 7, 10, 15, 20, 30)[$tryCounter]
+                        $maxTries = 5
+                        if ($tryCounter -gt $maxTries) {
+                            Write-Host " $currentTask - capitulation after $maxTries attempts"
+                            return "Request_UnsupportedQuery"
+                        }
+                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - try again (trying $maxTries times) in $sleepSec second(s)"
+                        Start-Sleep -Seconds $sleepSec
                     }
 
                 }
@@ -1079,9 +1100,15 @@ function resolveObectsById($objects, $targetHt) {
             }
 
             if ($targetHt -eq "htPrincipalsResolved") {
+                if ([string]::IsNullOrEmpty($resolvedIdentity.userType)){
+                    $principalUserType = "MemberSynced"
+                }
+                else{
+                    $principalUserType = $resolvedIdentity.userType
+                }
                 $script:htPrincipalsResolved.($resolvedIdentity.id) = @{}
-                $script:htPrincipalsResolved.($resolvedIdentity.id).full = "$($type) ($($resolvedIdentity.userType)), DisplayName: $($resolvedIdentity.displayName), Id: $(($resolvedIdentity.id))"
-                $script:htPrincipalsResolved.($resolvedIdentity.id).typeOnly = "$($type) ($($resolvedIdentity.userType))"
+                $script:htPrincipalsResolved.($resolvedIdentity.id).full = "$($type) ($($principalUserType)), DisplayName: $($resolvedIdentity.displayName), Id: $(($resolvedIdentity.id))"
+                $script:htPrincipalsResolved.($resolvedIdentity.id).typeOnly = "$($type) ($($principalUserType))"
             }
 
         }
@@ -1217,7 +1244,7 @@ function dataCollection($mgId) {
                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScope = "MG"
                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScopeId = "/providers/Microsoft.Management/managementGroups/$($splitAssignment[4])"
                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScopeName = "$($htManagementGroupsMgPath.($splitAssignment[4]).DisplayName)"
-                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceType = "Management Group"
+                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceType = "ManagementGroup"
                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceName = $splitAssignment[4]
                     }
 
@@ -1396,16 +1423,16 @@ function dataCollection($mgId) {
                                     if ($roleAssignmentFromAPI.properties.scope -like "/subscriptions/*/resourcegroups/*" -and $roleAssignmentFromAPI.properties.scope -notlike "/subscriptions/*/resourcegroups/*/providers*") {
                                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScope = "RG"
                                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScopeId = "$($splitAssignment[2])/$($splitAssignment[4])"
-                                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScopeName = "$($htSubscriptionsMgPath.($splitAssignment[2]).DisplayName)/$($splitAssignment[4])"
+                                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScopeName = "$($htSubscriptionsMgPath.($splitAssignment[2]).DisplayName) ($($splitAssignment[2]))/$($splitAssignment[4])"
                                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceType = "ResourceGroup"
                                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceName = $splitAssignment[4]
                                     }
                                     if ($roleAssignmentFromAPI.properties.scope -like "/subscriptions/*/resourcegroups/*/providers*") {
                                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScope = "Res"
                                         ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScopeId = "$($splitAssignment[2])/$($splitAssignment[4])/$($splitAssignment[8])"
-                                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScopeName = "$($htSubscriptionsMgPath.($splitAssignment[2]).DisplayName)/$($splitAssignment[4])/$($splitAssignment[8])"
-                                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceType = "$($splitAssignment[6])/$($splitAssignment[7])"
-                                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceName = $splitAssignment[8]
+                                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentScopeName = "$($htSubscriptionsMgPath.($splitAssignment[2]).DisplayName) ($($splitAssignment[2]))/$($splitAssignment[4])/$($splitAssignment[6])/$($splitAssignment[7])/$($splitAssignment[8])"
+                                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceType = "Resource"
+                                        ($htCacheAssignmentsRole).($roleAssignmentFromAPI.id).assignmentResourceName = "$($splitAssignment[6])/$($splitAssignment[7])/$($splitAssignment[8])"
                                     }
                                 }
                                 else {
@@ -2432,7 +2459,10 @@ extensions: [{ name: 'sort' }]
 <tbody>
 "@)
 
+        $cntRow = 0
         foreach ($sp in ($servicePrincipalsAADRoleAssignments)) {
+            $cntRow++
+            $cnt = 0
 
             $spType = $sp.ObjectType
 
@@ -2440,12 +2470,30 @@ extensions: [{ name: 'sort' }]
             if (($sp.SPAADRoleAssignments)) {
                 if (($sp.SPAADRoleAssignments.count -gt 0)) {
                     $array = @()
+                    $cnt = 0
                     foreach ($ra in $sp.SPAADRoleAssignments) {
+                        $cnt++
+                        if ($cntRow % 2 -eq 0){
+                            if ($cnt % 2 -eq 0){
+                                $class = 'class="odd"'
+                            } 
+                            else{
+                                $class = 'class="even"'
+                            }
+                        }
+                        else{
+                            if ($cnt % 2 -eq 0){
+                                $class = 'class="even"'
+                            } 
+                            else{
+                                $class = 'class="odd"'
+                            }
+                        }
                         if ($ra.scopeDetail) {
-                            $array += "$($ra.roleDefinitionName) (scope: $($ra.scopeDetail))"
+                            $array += "<span $class><b>$($ra.roleType)</b> '$($ra.roleDefinitionName)' $($ra.roleDefinitionId) (scope: $($ra.scopeDetail))</span>"
                         }
                         else {
-                            $array += "$($ra.roleDefinitionName)"
+                            $array += "<span $class><b>$($ra.roleType)</b> '$($ra.roleDefinitionName)' $($ra.roleDefinitionId)</span>"
                         }
                     }
                     $spAADRoleAssignments = "$(($sp.SPAADRoleAssignments).Count) ($($array -join "$CsvDelimiterOpposite "))"
@@ -3240,6 +3288,7 @@ extensions: [{ name: 'sort' }]
 <th>SP displayName</th>
 <th>SP type</th>
 <th>SP App Owner Organization Id</th>
+<th>#</th>
 <th>SP Azure RoleAssignments</th>
 </tr>
 </thead>
@@ -3254,10 +3303,23 @@ extensions: [{ name: 'sort' }]
                 if (($sp.SPAzureRoleAssignments)) {
                     if (($sp.SPAzureRoleAssignments.count -gt 0)) {
                         $array = @()
-                        foreach ($azureroleAss in $sp.SPAzureRoleAssignments) {
-                            $array += "$($azureroleAss.roleName) ($($azureroleAss.roleAssignmentAssignmentResourceType) $($azureroleAss.roleAssignmentAssignmentScopeName))"
+                        $importance = "ManagementGroup", "Subscription", "ResourceGroup", "Resource"
+                        foreach ($azureroleAss in $sp.SPAzureRoleAssignments | Sort-Object @{Expression = { $importance.IndexOf($_.roleAssignmentAssignmentResourceType) }}, @{Expression = { $_.roleAssignmentAssignmentScopeName}}, @{Expression = { $_.roleName}}) {
+                            if ($azureroleAss.roleType -eq "BuiltInRole"){
+                                $roleName = "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azrolesadvertizer/$($azureroleAss.roleId).html`" target=`"_blank`">$($azureroleAss.roleName)</a>"
+                            }
+                            else{
+                                $roleName = $azureroleAss.roleName
+                            }
+                            if ($azureroleAss.roleAssignmentApplicability -eq "indirect"){
+                                $indirectRef = " [$($azureroleAss.roleAssignmentApplicability) - $($azureroleAss.roleAssignmentAppliesThrough)]"
+                            }
+                            else{
+                                $indirectRef = ""
+                            }
+                            $array += "$($roleName) (<b>$($azureroleAss.roleAssignmentAssignmentResourceType)</b> $($azureroleAss.roleAssignmentAssignmentScopeName))$($indirectRef)"
                         }
-                        $SPAzureRoleAssignments = "$(($sp.SPAzureRoleAssignments).Count) ($($array -join "$CsvDelimiterOpposite "))"
+                        $SPAzureRoleAssignments = "$($array -join "<br>")"
                     }
                     else {
                         $SPAzureRoleAssignments = $null
@@ -3271,6 +3333,7 @@ extensions: [{ name: 'sort' }]
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
+<td>$(($sp.SPAzureRoleAssignments).Count)</td>
 <td class="breakwordall">$($SPAzureRoleAssignments)</td>
 </tr>
 "@)
@@ -3310,7 +3373,7 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
             }
             [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],            
+col_widths: ['10%', '10%', '10%', '10%', '10%', '4%', '46%'],            
             locale: 'en-US',
             col_3: 'multiple',
             col_4: 'select',
@@ -3320,6 +3383,7 @@ col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
+                'number',
                 'caseinsensitivestring'
             ],
 extensions: [{ name: 'sort' }]
@@ -4727,11 +4791,17 @@ else {
                     foreach ($SPAADRoleAssignedOn in $getSPAADRoleAssignedOn) {
                         if ($SPAADRoleAssignedOn.principal.'@odata.type' -eq "#microsoft.graph.user") {
 
+                            if ([string]::IsNullOrEmpty($SPAADRoleAssignedOn.principal.userType)){
+                                $principalUserType = "MemberSynced"
+                            }
+                            else{
+                                $principalUserType = $SPAADRoleAssignedOn.principal.userType
+                            }
                             if (-not $htPrincipalsResolved.($SPAADRoleAssignedOn.principal.id)) {
                                 $type = "User"
                                 $script:htPrincipalsResolved.($SPAADRoleAssignedOn.principal.id) = @{}
-                                $script:htPrincipalsResolved.($SPAADRoleAssignedOn.principal.id).full = "$($type) ($($SPAADRoleAssignedOn.principal.userType)), DisplayName: $($SPAADRoleAssignedOn.principal.displayName), Id: $(($SPAADRoleAssignedOn.principal.id))"
-                                $script:htPrincipalsResolved.($SPAADRoleAssignedOn.principal.id).typeOnly = "$($type) ($($SPAADRoleAssignedOn.principal.userType))" 
+                                $script:htPrincipalsResolved.($SPAADRoleAssignedOn.principal.id).full = "$($type) ($($principalUserType)), DisplayName: $($SPAADRoleAssignedOn.principal.displayName), Id: $(($SPAADRoleAssignedOn.principal.id))"
+                                $script:htPrincipalsResolved.($SPAADRoleAssignedOn.principal.id).typeOnly = "$($type) ($($principalUserType))" 
                             }
 
                             $null = $tmpArray.Add([PSCustomObject]@{
@@ -4742,7 +4812,7 @@ else {
                                     directoryScopeId        = $SPAADRoleAssignedOn.directoryScopeId
                                     roleDefinitionId        = $SPAADRoleAssignedOn.roleDefinitionId
                                     principalType           = "User"
-                                    principalUserType       = "User ($($SPAADRoleAssignedOn.principal.userType))"
+                                    principalUserType       = "User ($($principalUserType))"
                                     principalDisplayName    = $SPAADRoleAssignedOn.principal.displayName
                                 })
                         }
@@ -4996,11 +5066,17 @@ else {
                             foreach ($AppAADRoleAssignedOn in $getAppAADRoleAssignedOn) {
                                 if ($AppAADRoleAssignedOn.principal.'@odata.type' -eq "#microsoft.graph.user") {
 
+                                    if ([string]::IsNullOrEmpty($AppAADRoleAssignedOn.principal.userType)){
+                                        $principalUserType = "MemberSynced"
+                                    }
+                                    else{
+                                        $principalUserType = $AppAADRoleAssignedOn.principal.userType
+                                    }
                                     if (-not $htPrincipalsResolved.($AppAADRoleAssignedOn.principal.id)) {
                                         $type = "User"
                                         $script:htPrincipalsResolved.($AppAADRoleAssignedOn.principal.id) = @{}
-                                        $script:htPrincipalsResolved.($AppAADRoleAssignedOn.principal.id).full = "$($type) ($($AppAADRoleAssignedOn.principal.userType)), DisplayName: $($AppAADRoleAssignedOn.principal.displayName), Id: $(($AppAADRoleAssignedOn.principal.id))"
-                                        $script:htPrincipalsResolved.($AppAADRoleAssignedOn.principal.id).typeOnly = "$($type) ($($AppAADRoleAssignedOn.principal.userType))" 
+                                        $script:htPrincipalsResolved.($AppAADRoleAssignedOn.principal.id).full = "$($type) ($($principalUserType)), DisplayName: $($AppAADRoleAssignedOn.principal.displayName), Id: $(($AppAADRoleAssignedOn.principal.id))"
+                                        $script:htPrincipalsResolved.($AppAADRoleAssignedOn.principal.id).typeOnly = "$($type) ($($principalUserType))" 
                                     }
 
                                     $null = $tmpArray.Add([PSCustomObject]@{
@@ -5011,7 +5087,7 @@ else {
                                             directoryScopeId        = $AppAADRoleAssignedOn.directoryScopeId
                                             roleDefinitionId        = $AppAADRoleAssignedOn.roleDefinitionId
                                             principalType           = "User"
-                                            principalUserType       = "User ($($AppAADRoleAssignedOn.principal.userType))"
+                                            principalUserType       = "User ($($principalUserType))"
                                             principalDisplayName    = $AppAADRoleAssignedOn.principal.displayName
                                         })
                                 }
@@ -5171,10 +5247,15 @@ else {
         if (-not $meanwhileDeleted) {
             if ($hlperType -eq "SP") {
                 $script:htSpLookup.($object.id).spDisplayName = $object.displayName
+                $script:htSpLookup.($object.id).spId = $object.id
+                $script:htSpLookup.($object.id).spAppId = $object.appId
                 $script:htServicePrincipalsAndAppsOnlyEnriched.($object.id).SPOrAppOnly = "SP"
                 if ($spType -eq "APP") {
                     $script:htServicePrincipalsAndAppsOnlyEnriched.($object.id).objectTypeConcatinated = "SP $($spType) $($spTypeINTEXT)"
                     $script:htSpLookup.($object.id).objectTypeConcatinated = "SP $($spType) $($spTypeINTEXT)"
+                    $script:htSpLookup.($object.id).appDisplayName = $getApplication.displayName
+                    $script:htSpLookup.($object.id).appId = $getApplication.id
+                    $script:htSpLookup.($object.id).appAppId = $getApplication.appId
                     $script:htServicePrincipalsAndAppsOnlyEnriched.($object.id).type = $spType
                     $script:htServicePrincipalsAndAppsOnlyEnriched.($object.id).subtype = $spTypeINTEXT
                 }
@@ -5370,6 +5451,7 @@ if (($htAadGroupsToResolve.Keys).Count -gt 0) {
         $htBearerAccessToken = $using:htBearerAccessToken
         $arrayAPICallTracking = $using:arrayAPICallTracking
         $htAadGroups = $using:htAadGroups
+        $htParameters = $using:htParameters
         #func
         $function:AzAPICall = $using:funcAzAPICall
         $function:createBearerToken = $using:funcCreateBearerToken
@@ -5381,18 +5463,30 @@ if (($htAadGroupsToResolve.Keys).Count -gt 0) {
         $method = "GET"
         $getAadGroup = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn "Content"
 
-        $script:htAadGroups.($aadGroupId) = @{}
-        $script:htAadGroups.($aadGroupId).groupDetails = $getAadGroup
-
-        #v1 does not return ServicePrincipals
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/groups/$($aadGroupId)/transitivemembers/microsoft.graph.group?`$count=true"
-        $method = "GET"
-        $getNestedGroups = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual"
-
-        if ($getNestedGroups) {
-            write-host " $aadGroupId -> has nested Groups $($getNestedGroups.Count)"
-            $script:htAadGroups.($aadGroupId).nestedGroups = $getNestedGroups
+        if ($getAadGroup -eq "Request_UnsupportedQuery"){
+            Write-Host "skipping Group $($aadGroupId)"
         }
+        else{
+            $script:htAadGroups.($aadGroupId) = @{}
+            $script:htAadGroups.($aadGroupId).groupDetails = $getAadGroup
+    
+            #v1 does not return ServicePrincipals
+            $currentTask = "get transitive members for AAD Group $($aadGroupId)"
+            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/groups/$($aadGroupId)/transitivemembers/microsoft.graph.group?`$count=true"
+            $method = "GET"
+            $getNestedGroups = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel "eventual"
+    
+            if ($getNestedGroups) {
+                if ($getNestedGroups -eq "Request_UnsupportedQuery"){
+                    Write-Host "skipping transitive members for Group $($aadGroupId)"
+                }
+                else{
+                    write-host " $aadGroupId -> has nested Groups $($getNestedGroups.Count)"
+                    $script:htAadGroups.($aadGroupId).nestedGroups = $getNestedGroups
+                }
+            }
+        }
+
     } -ThrottleLimit $ThrottleLimitGraph
 
     $end = get-date
@@ -5479,7 +5573,6 @@ Write-Host "Getting all AAD Groups duration: $($duration.TotalMinutes) minutes (
 Write-Host "Processing SP/App Owners"
 
 #UsersToResolveGuestMember
-#$htPrincipalsResolved = @{}
 foreach ($spOwner in $htSPOwners.Values) {
     foreach ($owner in $spOwner) {
         if ($owner.'@odata.type' -eq "#microsoft.graph.user") {
@@ -5714,31 +5807,18 @@ if (-not $NoAzureRoleAssignments) {
     $startAzureRoleAssignmentMapping = get-date
 
     #resolving createdby/updatedby
-    #$htPrincipalsResolved = @{}
     $htCreatedByUpdatedByObjectIdsToBeResolved = @{}
     foreach ($createdByItem in ($htCacheAssignmentsRole).values.assignment.properties.createdBy | Sort-Object -Unique) {
         
         if ([guid]::TryParse(($createdByItem), $([ref][guid]::Empty))) {
             if (-not $htPrincipalsResolved.($createdByItem)) {            
                 if ($getServicePrincipals.id -contains $createdByItem) {
-                    <#if ($htServicePrincipalsAndAppsOnlyEnriched.($createdByItem)) {
-                        $hlper = $htServicePrincipalsAndAppsOnlyEnriched.($createdByItem)
-                        $htPrincipalsResolved.($createdByItem) = @{}
-                        $htPrincipalsResolved.($createdByItem).full = "$($hlper.objectTypeConcatinated), DisplayName: $($hlper.ServicePrincipalDetails.displayName), Id: $($createdByItem)"
-                        $htPrincipalsResolved.($createdByItem).typeOnly = $hlper.objectTypeConcatinated
-                    }#>
+                    #
                 }
                 else {
-                    <#if ($htPrincipalsResolved.($createdByItem)){
-                        $htPrincipalsResolved.($createdByItem) = @{}
-                        $htPrincipalsResolved.($createdByItem).full = $htPrincipalsResolved.($createdByItem).full
-                        $htPrincipalsResolved.($createdByItem).typeOnly = $htPrincipalsResolved.($createdByItem).typeOnly
-                    }
-                    else{#>
                     if (-not $htCreatedByUpdatedByObjectIdsToBeResolved.($createdByItem)) {
                         $htCreatedByUpdatedByObjectIdsToBeResolved.($createdByItem) = @{}
                     }
-                    #}
                 }
             }
         }
@@ -5816,10 +5896,6 @@ $appKeyCredentialsExpiryOKCount = 0
 $appKeyCredentialsExpiryOKMoreThanMaxCount = 0
 
 $htSPandAPPHelper4AADRoleAssignmentsWithScope = @{}
-<#$htAADRoleAssignmentOnSPOrAPP = @{}
-$htAADRoleAssignmentOnSPOrAPP.SP = @{}
-$htAADRoleAssignmentOnSPOrAPP.APP = @{}
-#>
 foreach ($aadRoleAssignment in $htServicePrincipalsAndAppsOnlyEnriched.values.ServicePrincipalAADRoleAssignments) {
     if ($aadRoleAssignment.resourceScope -ne "/") {
         
@@ -5864,23 +5940,17 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]@()
 foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).where( { -not $_.MeanWhileDeleted } )) {
     $object = $spOrAppWithoutSP
     if ($spOrAppWithoutSP.SPOrAppOnly -eq "SP") {
-            
         $spId = $object.ServicePrincipalDetails.id
         #Write-host "processing SP:" $object.ServicePrincipalDetails.displayName "objId: $($spId)" "appId: $($object.ServicePrincipalDetails.appId)"
-    
-    
     }
     elseif ($spOrAppWithoutSP.SPOrAppOnly -eq "AppOnly") {
         $objId = $object.Application.ApplicationDetails.id
         Write-host "processing AppOnly:" $object.Application.ApplicationDetails.displayName "objId: $($objId)" "appId: $($object.Application.ApplicationDetails.appId)"
-    
     }
     else {
         Write-Host "unexpected"
         throw
     }
-    
-        
     
     if ($processedServicePrincipalsCount -gt 0 -and $processedServicePrincipalsCount % $indicator -eq 0) {
         Write-Host "$processedServicePrincipalsCount ServicePrincipals processed"
@@ -5914,9 +5984,8 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 $null = $arrayServicePrincipalOwnedObjectsOpt.Add($htOptInfo)
                 #Write-Host "SP OwnedObjects             : $($type) $($ownedObject.displayName) ($($ownedObject.id))"
             }
-            $durationPerfTrackServicePrincipalOwnedObjects = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackServicePrincipalOwnedObjects = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
-        
         #endregion ServicePrincipalOwnedObjects
         
         #region ServicePrincipalOwners
@@ -5951,7 +6020,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 
                 $null = $arrayServicePrincipalOwnerOpt.Add($htOptInfo)
             }
-            $durationPerfTrackServicePrincipalOwners = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackServicePrincipalOwners = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ServicePrincipalOwners
     
@@ -5983,7 +6052,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 }
                 $null = $arrayServicePrincipalAADRoleAssignmentsOpt.Add($htOptInfo)
             }
-            $durationPerfTrackServicePrincipalAADRoleAssignments = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackServicePrincipalAADRoleAssignments = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ServicePrincipalAADRoleAssignments
     
@@ -6036,7 +6105,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 $htOptInfo.principalType = $hlperSP.objectTypeConcatinated
                 $null = $arrayServicePrincipalAADRoleAssignedOnOpt.Add($htOptInfo)
             }
-            $durationPerfTrackServicePrincipalAADRoleAssignedOn = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackServicePrincipalAADRoleAssignedOn = V(NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ServicePrincipalAADRoleAssignedOn
         #>
@@ -6069,7 +6138,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 
                 $null = $arrayServicePrincipalAADRoleAssignedOnOpt.Add($htOptInfo)
             }
-            $durationPerfTrackServicePrincipalAADRoleAssignedOn = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackServicePrincipalAADRoleAssignedOn = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ServicePrincipalAADRoleAssignedOn
     
@@ -6129,7 +6198,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                     }
                 }
             }
-            $durationPerfTrackServicePrincipalOauth2PermissionGrants = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackServicePrincipalOauth2PermissionGrants = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ServicePrincipalOauth2PermissionGrants
     
@@ -6139,16 +6208,18 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
         if ($htSPOauth2PermissionGrantedTo.($spId)) {
             foreach ($SPOauth2PermissionGrantedTo in $htSPOauth2PermissionGrantedTo.($spId) | Sort-Object -Property clientId, id) {
                 foreach ($SPOauth2PermissionGrantedToScope in $SPOauth2PermissionGrantedTo.scope | Sort-Object) {
-                    $hlper = $htServicePrincipalsAndAppsOnlyEnriched.($SPOauth2PermissionGrantedTo.clientId).ServicePrincipal
-                    $spHlper = $hlper.ServicePrincipalDetails
-                    $appHlper = $hlper.Application
+                    #$hlper = $htServicePrincipalsAndAppsOnlyEnriched.($SPOauth2PermissionGrantedTo.clientId).ServicePrincipal
+                    #$spHlper = $hlper.ServicePrincipalDetails #| Select-Object displayName, id, appId
+                    #$appHlperApplicationDetails = $hlper.Application.ApplicationDetails #| Select-Object displayName, id, appId
+                    $hlper = $htSpLookup.($SPOauth2PermissionGrantedTo.clientId)
+                    #$appHlperApplicationDetails = $appHlper.ApplicationDetails
                     $htOptInfo = [ordered] @{}
-                    $htOptInfo.servicePrincipalDisplayName = $spHlper.displayName
-                    $htOptInfo.servicePrincipalObjectId = $spHlper.id
-                    $htOptInfo.servicePrincipalAppId = $spHlper.appId
-                    $htOptInfo.applicationDisplayName = $appHlper.ApplicationDetails.displayName
-                    $htOptInfo.applicationObjectId = $appHlper.ApplicationDetails.id
-                    $htOptInfo.applicationAppId = $appHlper.ApplicationDetails.appId
+                    $htOptInfo.servicePrincipalDisplayName = $hlper.spDisplayName
+                    $htOptInfo.servicePrincipalObjectId = $hlper.spId
+                    $htOptInfo.servicePrincipalAppId = $hlper.spAppId
+                    $htOptInfo.applicationDisplayName = $hlper.appDisplayName
+                    $htOptInfo.applicationObjectId = $hlper.appId
+                    $htOptInfo.applicationAppId = $hlper.appAppId
                     $htOptInfo.clientId = $SPOauth2PermissionGrantedTo.clientId
                     $htOptInfo.id = $SPOauth2PermissionGrantedTo.id
                     $htOptInfo.permissionId = $htPublishedPermissionScopes.($SPOauth2PermissionGrantedTo.resourceId).($SPOauth2PermissionGrantedTo.scope).id
@@ -6160,7 +6231,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 }
             }
             #$arraySPOauth2PermissionGrantedTo.servicePrincipalObjectId
-            $durationPerfTrackSPOauth2PermissionGrantedTo = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackSPOauth2PermissionGrantedTo = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion SPOauth2PermissionGrantedTo
             
@@ -6214,7 +6285,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 $htOptInfo.AppRoleDescription = $hlper.description
                 $null = $arrayServicePrincipalAppRoleAssignmentsOpt.Add($htOptInfo)
             }
-            $durationPerfTrackServicePrincipalAppRoleAssignments = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackServicePrincipalAppRoleAssignments = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ServicePrincipalAppRoleAssignments
     
@@ -6289,7 +6360,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 }
                 $null = $arrayServicePrincipalAppRoleAssignedToOpt.Add($htOptInfo)
             }
-            $durationPerfTrackServicePrincipalAppRoleAssignedTo = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackServicePrincipalAppRoleAssignedTo = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ServicePrincipalAppRoleAssignedTo
     
@@ -6297,25 +6368,28 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
         if (-not $NoAzureRoleAssignments) {
     
             $start = get-date
-            #region AzureRoleAssignmentsPrep
             $htSPAzureRoleAssignments = @{}
+
+            #region AzureRoleAssignmentsPrep
             $arrayServicePrincipalGroupMembershipsOpt = [System.Collections.ArrayList]@()
             if ($object.ServicePrincipalGroupMemberships) {
+
                 foreach ($servicePrincipalGroupMembership in $object.ServicePrincipalGroupMemberships | Sort-Object) {
                     $htOptInfo = [ordered] @{}
                     if ($htAaDGroups.($servicePrincipalGroupMembership)) {
                         $htOptInfo.DisplayName = $htAaDGroups.($servicePrincipalGroupMembership).groupDetails.displayName
-                        $htOptInfo.ObjectId = $servicePrincipalGroupMembership
                     }
                     else {
                         $htOptInfo.DisplayName = "<n/a>"
-                        $htOptInfo.ObjectId = $servicePrincipalGroupMembership
                     }
+                    $htOptInfo.ObjectId = $servicePrincipalGroupMembership
                     $null = $arrayServicePrincipalGroupMembershipsOpt.Add($htOptInfo)
     
+                    <#
                     if ($htAadGroups.($servicePrincipalGroupMembership).nestedGroups) {
                         foreach ($nestegGroupId in $htAadGroups.($servicePrincipalGroupMembership).nestedGroups.id) {
                             if ($htGroupRoleAssignmentThroughNesting.($nestegGroupId).RoleAssignmentsInherited) {
+                                Write-Host "************ HERE????? ++++++++++++++++++"
                                 foreach ($roleAssignmentThroughNesting in $htGroupRoleAssignmentThroughNesting.($nestegGroupId).RoleAssignmentsInherited) {
                                     if (-not $htSPAzureRoleAssignments.($roleAssignmentThroughNesting.id)) {
                                         $htSPAzureRoleAssignments.($roleAssignmentThroughNesting.id) = @{}
@@ -6330,9 +6404,8 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                             }
                         }
                     }
-                }
-                #raSPThroughGroup
-                foreach ($servicePrincipalGroupMembership in $object.ServicePrincipalGroupMemberships) {
+                    #>
+
                     if ($htAssignmentsByPrincipalId."groups".($servicePrincipalGroupMembership)) {
                         foreach ($roleAssignmentSPThroughGroup in $htAssignmentsByPrincipalId."groups".($servicePrincipalGroupMembership)) {
                             if (-not $htSPAzureRoleAssignments.($roleAssignmentSPThroughGroup.assignment.id)) {
@@ -6343,12 +6416,12 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                             $htTemp.roleAssignment = $roleAssignmentSPThroughGroup.assignment.id
                             $htTemp.roleAssignmentFull = $roleAssignmentSPThroughGroup
                             $htTemp.appliesThrough = "$($htAaDGroups.($servicePrincipalGroupMembership).groupDetails.displayName) ($servicePrincipalGroupMembership)"
-                            $htTemp.applicability = "indirect (Group)"
+                            $htTemp.applicability = "indirect"
                             $null = ($htSPAzureRoleAssignments.($roleAssignmentSPThroughGroup.assignment.id).results).Add($htTemp)
                         }
                     }
                 }
-                $durationPerfTrackAzureRoleAssignmentsPrep = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+                $durationPerfTrackAzureRoleAssignmentsPrep = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
             }
             #endregion AzureRoleAssignmentsPrep
     
@@ -6356,19 +6429,18 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
             $start = get-date
             if ($htAssignmentsByPrincipalId."servicePrincipals".($spId)) {
                 foreach ($roleAssignmentSP in $htAssignmentsByPrincipalId."servicePrincipals".($spId)) {
-                    $roleAssignmentSPAssignmentId = $roleAssignmentSP.assignment.id
-                    if (-not $htSPAzureRoleAssignments.($roleAssignmentSPAssignmentId)) {
-                        $htSPAzureRoleAssignments.($roleAssignmentSPAssignmentId) = @{}
-                        $htSPAzureRoleAssignments.($roleAssignmentSPAssignmentId).results = [System.Collections.ArrayList]@()
+                    if (-not $htSPAzureRoleAssignments.($roleAssignmentSP.assignment.id)) {
+                        $htSPAzureRoleAssignments.($roleAssignmentSP.assignment.id) = @{}
+                        $htSPAzureRoleAssignments.($roleAssignmentSP.assignment.id).results = [System.Collections.ArrayList]@()
                     }
                     $htTemp = @{}
-                    $htTemp.roleAssignment = $roleAssignmentSPAssignmentId
+                    $htTemp.roleAssignment = $roleAssignmentSP.assignment.id
                     $htTemp.roleAssignmentFull = $roleAssignmentSP
                     $htTemp.appliesThrough = ""
                     $htTemp.applicability = "direct"
-                    $null = ($htSPAzureRoleAssignments.($roleAssignmentSPAssignmentId).results).Add($htTemp)
+                    $null = ($htSPAzureRoleAssignments.($roleAssignmentSP.assignment.id).results).Add($htTemp)
                 }
-                $durationPerfTrackAzureRoleAssignmentsOpt1 = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+                $durationPerfTrackAzureRoleAssignmentsOpt1 = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
             }
     
             $start = get-date
@@ -6376,9 +6448,9 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
             if ($htSPAzureRoleAssignments.Keys.Count -gt 0) {
                 foreach ($roleAssignment in $htSPAzureRoleAssignments.Values.results | sort-object -Property roleAssignment) {
                     
-                    #foreach ($result in $htSPAzureRoleAssignments.($roleAssignment).results) {
+                    $hlproleAssignmentFull = $roleAssignment.roleAssignmentFull
                     $htOptInfo = [ordered] @{}
-                    if ($roleAssignment.roleAssignmentFull.assignmentPIMDetails) {
+                    if ($hlproleAssignmentFull.assignmentPIMDetails) {
                         $pimBased = $true                
                     }
                     else {
@@ -6386,29 +6458,29 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                     }
                     $htOptInfo.priviledgedIdentityManagementBased = $pimBased
                     $htOptInfo.roleAssignmentId = $roleAssignment.roleAssignment
-                    $htOptInfo.roleName = $roleAssignment.roleAssignmentFull.roleName
-                    $htOptInfo.roleId = $roleAssignment.roleAssignmentFull.roleId
-                    $htOptInfo.roleType = $roleAssignment.roleAssignmentFull.type
+                    $htOptInfo.roleName = $hlproleAssignmentFull.roleName
+                    $htOptInfo.roleId = $hlproleAssignmentFull.roleId
+                    $htOptInfo.roleType = $hlproleAssignmentFull.type
                     $htOptInfo.roleAssignmentApplicability = $roleAssignment.applicability
                     $htOptInfo.roleAssignmentAppliesThrough = $roleAssignment.appliesThrough
-                    $htOptInfo.roleAssignmentAssignmentScope = $roleAssignment.roleAssignmentFull.assignmentScope
-                    $htOptInfo.roleAssignmentAssignmentScopeId = $roleAssignment.roleAssignmentFull.assignmentScopeId
-                    $htOptInfo.roleAssignmentAssignmentScopeName = $roleAssignment.roleAssignmentFull.assignmentScopeName
-                    $htOptInfo.roleAssignmentAssignmentResourceName = $roleAssignment.roleAssignmentFull.assignmentResourceName
-                    $htOptInfo.roleAssignmentAssignmentResourceType = $roleAssignment.roleAssignmentFull.assignmentResourceType
-                    $htOptInfo.roleAssignment = $roleAssignment.roleAssignmentFull.assignment.properties
+                    $htOptInfo.roleAssignmentAssignmentScope = $hlproleAssignmentFull.assignmentScope
+                    $htOptInfo.roleAssignmentAssignmentScopeId = $hlproleAssignmentFull.assignmentScopeId
+                    $htOptInfo.roleAssignmentAssignmentScopeName = $hlproleAssignmentFull.assignmentScopeName
+                    $htOptInfo.roleAssignmentAssignmentResourceName = $hlproleAssignmentFull.assignmentResourceName
+                    $htOptInfo.roleAssignmentAssignmentResourceType = $hlproleAssignmentFull.assignmentResourceType
+                    $htOptInfo.roleAssignment = $hlproleAssignmentFull.assignment.properties
                     if ($pimBased) {
                         $htOptInfo.priviledgedIdentityManagement = [ordered] @{}
-                        $htOptInfo.priviledgedIdentityManagement.assignmentType = $roleAssignment.roleAssignmentFull.assignmentPIMDetails.assignmentType
-                        $htOptInfo.priviledgedIdentityManagement.startDateTime = $roleAssignment.roleAssignmentFull.assignmentPIMDetails.startDateTime
-                        $htOptInfo.priviledgedIdentityManagement.endDateTime = $roleAssignment.roleAssignmentFull.assignmentPIMDetails.endDateTime
-                        $htOptInfo.priviledgedIdentityManagement.createdOn = $roleAssignment.roleAssignmentFull.assignmentPIMDetails.createdOn
-                        $htOptInfo.priviledgedIdentityManagement.updatedOn = $roleAssignment.roleAssignmentFull.assignmentPIMDetails.updatedOn                  
+                        $hlproleAssignmentFullAssignmentPIMDetails = $hlproleAssignmentFull.assignmentPIMDetails
+                        $htOptInfo.priviledgedIdentityManagement.assignmentType = $hlproleAssignmentFullAssignmentPIMDetails.assignmentType
+                        $htOptInfo.priviledgedIdentityManagement.startDateTime = $hlproleAssignmentFullAssignmentPIMDetails.startDateTime
+                        $htOptInfo.priviledgedIdentityManagement.endDateTime = $hlproleAssignmentFullAssignmentPIMDetails.endDateTime
+                        $htOptInfo.priviledgedIdentityManagement.createdOn = $hlproleAssignmentFullAssignmentPIMDetails.createdOn
+                        $htOptInfo.priviledgedIdentityManagement.updatedOn = $hlproleAssignmentFullAssignmentPIMDetails.updatedOn                  
                     }
                     $null = $arrayServicePrincipalAzureRoleAssignmentsOpt.Add($htOptInfo)
-                    #}
                 }
-                $durationPerfTrackAzureRoleAssignmentsOpt2 = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+                $durationPerfTrackAzureRoleAssignmentsOpt2 = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
             }
             #endregion AzureRoleAssignmentsOpt
     
@@ -6445,12 +6517,14 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
 
                 $relict = $false
                 if ($altName -notlike "isExplicit=*") {
-                    $s1 = $altName -replace ".*/providers/"; $rm = $s1 -replace ".*/"; $resourceType = $s1 -replace "/$($rm)"              
-                    $miResourceType = $resourceType
+                    $s1 = $altName -replace ".*/providers/"
+                    $rm = $s1 -replace ".*/"
+                    $resourceType = $s1 -replace "/$($rm)"
+
                     $altNameSplit = $altName.split('/')
                     if ($altName -like "/subscriptions/*") {
                         if ($resourceType -eq "Microsoft.Authorization/policyAssignments") {
-                            if (-not $NoAzureRoleAssignments){
+                            if (-not $NoAzureRoleAssignments) {
                                 if (-not $htCacheAssignmentsPolicy.($altname.ToLower())) {
                                     $relict = $true
                                 }
@@ -6468,7 +6542,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                     }
                     else {
                         if ($resourceType -eq "Microsoft.Authorization/policyAssignments") {
-                            if (-not $NoAzureRoleAssignments){
+                            if (-not $NoAzureRoleAssignments) {
                                 if (-not $htCacheAssignmentsPolicy.($altname.ToLower())) {
                                     $relict = $true
                                 }
@@ -6491,11 +6565,11 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
             #$hlper = $htServicePrincipalsAndAppsOnlyEnriched.($spId)
             $htOptInfo.type = $object.subtype
             $htOptInfo.alternativeName = $altname
-            $htOptInfo.resourceType = $miResourceType
+            $htOptInfo.resourceType = $resourceType
             $htOptInfo.resourceScope = $miResourceScope
             $htOptInfo.relict = $relict
             $null = $arrayManagedIdentityOpt.Add($htOptInfo)
-            $durationPerfTrackManagedIdentity = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackManagedIdentity = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ManagedIdentity
         
@@ -6521,6 +6595,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 $htOptInfo.roleDescription = $hlperAadRoleDefinition.description
                 $htOptInfo.principalId = $aadRoleAssignedOn.principalId
                 $htOptInfo.principalDisplayName = $aadRoleAssignedOn.principalDisplayName
+
                 if ($aadRoleAssignedOn.principalType -eq "User") {
                     $htOptInfo.principalType = $aadRoleAssignedOn.principalUserType
                 }
@@ -6533,7 +6608,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 }
                 $null = $arrayApplicationAADRoleAssignedOnOpt.Add($htOptInfo)
             }
-            $durationPerfTrackApplicationAADRoleAssignedOn = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackApplicationAADRoleAssignedOn = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ApplicationAADRoleAssignedOn
     
@@ -6589,7 +6664,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 }
                 $null = $arrayApplicationOwnerOpt.Add($htOptInfo)
             }
-            $durationPerfTrackApplicationOwner = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackApplicationOwner = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ApplicationOwner
     
@@ -6639,7 +6714,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                     $null = $arrayApplicationPasswordCredentialsOpt.Add($htOptInfo)
                 }
             }
-            $durationPerfTrackApplicationSecrets = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackApplicationSecrets = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ApplicationSecrets
             
@@ -6685,12 +6760,11 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                     $null = $arrayApplicationKeyCredentialsOpt.Add($htOptInfo)
                 }
             }
-            $durationPerfTrackApplicationCertificates = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+            $durationPerfTrackApplicationCertificates = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
         }
         #endregion ApplicationCertificates
     }
     #endregion Application
-    
 
     
     #region finalArray
@@ -6841,7 +6915,7 @@ foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).w
                 SPAzureRoleAssignments      = $arrayServicePrincipalAzureRoleAssignmentsOpt
             })
     }
-    $durationPerfTrackFinalArray = (NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds
+    $durationPerfTrackFinalArray = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
     
     #endregion finalArray
 
@@ -6913,12 +6987,31 @@ else {
 
 $null = new-item -Name $JSONPath -ItemType directory -path $outputPath
 foreach ($entry in $cu) {
-    if (-not $entry.APP -and -not $entry.ManagedIdentity) {
-    }
-    #$entry | ConvertTo-JSON -Depth 99 | Set-Content -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)$($DirectorySeparatorChar)$($entry.SP.SPObjectId).json" -Encoding utf8 -Force
     $entry | ConvertTo-JSON -Depth 99 | Set-Content -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)$($DirectorySeparatorChar)$($entry.ObjectId)_$($entry.ObjectType -replace " ", "-").json" -Encoding utf8 -Force
 }
 #endregion enrichedAADSPData
+
+Write-Host "Processing totals per capability (ms)"
+Write-Host "ServicePrincipalOwnedObjects:" ($arrayPerformanceTracking.ServicePrincipalOwnedObjects | Measure-Object -Sum).Sum
+Write-Host "ServicePrincipalOwners:" ($arrayPerformanceTracking.ServicePrincipalOwners | Measure-Object -Sum).Sum
+Write-Host "ServicePrincipalAADRoleAssignments:" ($arrayPerformanceTracking.ServicePrincipalAADRoleAssignments | Measure-Object -Sum).Sum
+Write-Host "ServicePrincipalAADRoleAssignedOn:" ($arrayPerformanceTracking.ServicePrincipalAADRoleAssignedOn | Measure-Object -Sum).Sum
+Write-Host "ServicePrincipalOauth2PermissionGrants:" ($arrayPerformanceTracking.ServicePrincipalOauth2PermissionGrants | Measure-Object -Sum).Sum
+Write-Host "SPOauth2PermissionGrantedTo:" ($arrayPerformanceTracking.SPOauth2PermissionGrantedTo | Measure-Object -Sum).Sum
+Write-Host "ServicePrincipalAppRoleAssignments:" ($arrayPerformanceTracking.ServicePrincipalAppRoleAssignments | Measure-Object -Sum).Sum
+Write-Host "ServicePrincipalAppRoleAssignedTo:" ($arrayPerformanceTracking.ServicePrincipalAppRoleAssignedTo | Measure-Object -Sum).Sum
+Write-Host "AzureRoleAssignmentsPrep:" ($arrayPerformanceTracking.AzureRoleAssignmentsPrep | Measure-Object -Sum).Sum
+Write-Host "AzureRoleAssignmentsOpt1:" ($arrayPerformanceTracking.AzureRoleAssignmentsOpt1 | Measure-Object -Sum).Sum
+Write-Host "AzureRoleAssignmentsOpt2:" ($arrayPerformanceTracking.AzureRoleAssignmentsOpt2 | Measure-Object -Sum).Sum
+Write-Host "ApplicationAADRoleAssignedOn:" ($arrayPerformanceTracking.ApplicationAADRoleAssignedOn | Measure-Object -Sum).Sum
+Write-Host "ApplicationOwner:" ($arrayPerformanceTracking.ApplicationOwner | Measure-Object -Sum).Sum
+Write-Host "ApplicationSecrets:" ($arrayPerformanceTracking.ApplicationSecrets | Measure-Object -Sum).Sum
+Write-Host "ApplicationCertificates:" ($arrayPerformanceTracking.ApplicationCertificates | Measure-Object -Sum).Sum
+Write-Host "ManagedIdentity:" ($arrayPerformanceTracking.ManagedIdentity | Measure-Object -Sum).Sum
+Write-Host "FinalArray:" ($arrayPerformanceTracking.FinalArray | Measure-Object -Sum).Sum
+
+
+
 
 #endregion AADSP
 
