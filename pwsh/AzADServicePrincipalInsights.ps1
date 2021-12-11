@@ -2,9 +2,9 @@
 Param
 (
     [string]$Product = "AzADServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20211204_6_POC",
+    [string]$ProductVersion = "v1_20211211_1_POC",
     [string]$GithubRepository = "aka.ms/AzADServicePrincipalInsights",
-    [switch]$AzureDevOpsWikiAsCode, #Use this parameter only when running in a Azure DevOps Pipeline!
+    [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
     [switch]$NoCsvExport,
     [string]$CsvDelimiter = ";",
@@ -74,16 +74,44 @@ $startTime = get-date -format "dd-MMM-yyyy HH:mm:ss"
 Write-Host "Start $($Product) $($startTime) (#$($ProductVersion))"
 
 #region htParameters (all switch params used in foreach-object -parallel)
+
+if ($env:GITHUB_SERVER_URL -and $env:CODESPACES) {
+    #GitHub Codespaces
+    Write-Host "CheckCodeRunPlatform: running in GitHub Codespaces"
+    $checkCodeRunPlatform = "GitHubCodespaces"
+    #Write-Host "GITHUB_SERVER_URL" $env:GITHUB_SERVER_URL
+    #Write-Host "CODESPACES" $env:CODESPACES
+}
+elseif ($env:SYSTEM_TEAMPROJECTID -and $env:BUILD_REPOSITORY_ID) {
+    #Azure DevOps
+    Write-Host "CheckCodeRunPlatform: running in Azure DevOps"
+    $checkCodeRunPlatform = "AzureDevOps"
+    #Write-Host "BUILD_REPOSITORY_ID" $env:BUILD_REPOSITORY_ID
+    #Write-Host "SYSTEM_TEAMPROJECTID" $env:SYSTEM_TEAMPROJECTID
+    $onAzureDevOps = $true
+}
+elseif ($PSPrivateMetadata) {
+    #Azure Automation
+    Write-Output "CheckCodeRunPlatform: running in Azure Automation"
+    $checkCodeRunPlatform = "AzureAutomation"
+    #Write-Output "PSPrivateMetadata:" $PSPrivateMetadata
+}
+else {
+    #Other Console
+    Write-Host "CheckCodeRunPlatform: not Codespaces, not Azure DevOps, not Azure Automation - likely local console"
+    $checkCodeRunPlatform = "Console"
+}
+
 $htParameters = @{ }
 $htParameters.ProductVersion = $ProductVersion
 $htParameters.AzCloudEnv = $checkContext.Environment.Name
 $htParameters.GithubRepository = $GithubRepository
 
-if ($AzureDevOpsWikiAsCode) {
-    $htParameters.AzureDevOpsWikiAsCode = $true
+if ($onAzureDevOps) {
+    $htParameters.onAzureDevOps = $true
 }
 else {
-    $htParameters.AzureDevOpsWikiAsCode = $false
+    $htParameters.onAzureDevOps = $false
 }
 
 if ($DebugAzAPICall) {
@@ -157,7 +185,7 @@ else {
     Write-Host " Get Powershell: https://github.com/PowerShell/PowerShell#get-powershell"
     Write-Host " Installing PowerShell on Windows: https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-core-on-windows"
     Write-Host " Installing PowerShell on Linux: https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-core-on-linux"
-    if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+    if ($htParameters.onAzureDevOps -eq $true) {
         Write-Error "Error"
     }
     else {
@@ -478,7 +506,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                                 foreach ($htParameter in ($htParameters.Keys | Sort-Object)) {
                                     Write-Host "$($htParameter):$($htParameters.($htParameter))"
                                 }
-                                if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                                if ($htParameters.onAzureDevOps -eq $true) {
                                     Write-Error "Error"
                                 }
                                 else {
@@ -576,7 +604,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                             if ($userType -eq "unknown") {
                                 Write-Host " AzGovViz says: Your UserType is 'unknown' (member/guest/unknown) in the tenant. Seems you do not have enough permissions geeting AAD related data. You have the following options: [1. request membership to AAD Role 'Directory readers'.]" -ForegroundColor Yellow
                             }
-                            if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                            if ($htParameters.onAzureDevOps -eq $true) {
                                 Write-Error "Error"
                             }
                             else {
@@ -592,7 +620,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                             foreach ($htParameter in ($htParameters.Keys | Sort-Object)) {
                                 Write-Host "$($htParameter):$($htParameters.($htParameter))"
                             }
-                            if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                            if ($htParameters.onAzureDevOps -eq $true) {
                                 Write-Error "Error"
                             }
                             else {
@@ -660,7 +688,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         $sleepSec = @(1, 3, 5, 7, 10, 12, 20, 30)[$tryCounter]
                         if ($tryCounter -gt $maxTries) {
                             Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' - exit"
-                            if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                            if ($htParameters.onAzureDevOps -eq $true) {
                                 Write-Error "Error"
                             }
                             else {
@@ -716,7 +744,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         if ($getConsumption) {
                             Write-Host "If Consumption data is not that important for you, please try parameter: -NoAzureConsumption (however, please still report the issue - thank you)"
                         }
-                        if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                        if ($htParameters.onAzureDevOps -eq $true) {
                             Write-Error "Error"
                         }
                         else {
@@ -784,7 +812,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         if ($uri -eq $azAPIRequestConvertedFromJson.nextLink) {
                             if ($restartDueToDuplicateNextlinkCounter -gt 3) {
                                 Write-Host " $currentTask restartDueToDuplicateNextlinkCounter: #$($restartDueToDuplicateNextlinkCounter) - Please report this error/exit"
-                                if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                                if ($htParameters.onAzureDevOps -eq $true) {
                                     Write-Error "Error"
                                 }
                                 else {
@@ -816,7 +844,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         if ($uri -eq $azAPIRequestConvertedFromJson."@odata.nextLink") {
                             if ($restartDueToDuplicateNextlinkCounter -gt 3) {
                                 Write-Host " $currentTask restartDueToDuplicate@odataNextlinkCounter: #$($restartDueToDuplicateNextlinkCounter) - Please report this error/exit"
-                                if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                                if ($htParameters.onAzureDevOps -eq $true) {
                                     Write-Error "Error"
                                 }
                                 else {
@@ -848,7 +876,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                         if ($uri -eq $azAPIRequestConvertedFromJson.properties.nextLink) {
                             if ($restartDueToDuplicateNextlinkCounter -gt 3) {
                                 Write-Host " $currentTask restartDueToDuplicateNextlinkCounter: #$($restartDueToDuplicateNextlinkCounter) - Please report this error/exit"
-                                if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                                if ($htParameters.onAzureDevOps -eq $true) {
                                     Write-Error "Error"
                                 }
                                 else {
@@ -895,7 +923,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
             }
             else {
                 Write-Host " $currentTask #$tryCounterUnexpectedError 'Unexpected Error' occurred (tried 5 times)/exit"
-                if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+                if ($htParameters.onAzureDevOps -eq $true) {
                     Write-Error "Error"
                 }
                 else {
@@ -918,7 +946,7 @@ $azModules = @('Az.Accounts')
 Write-Host "Testing required Az modules cmdlets"
 foreach ($testCommand in $testCommands) {
     if (-not (Get-Command $testCommand -ErrorAction Ignore)) {
-        if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+        if ($htParameters.onAzureDevOps -eq $true) {
             Write-Error "AzModule test failed: cmdlet $testCommand not available - make sure the modules $($azModules -join ", ") are installed"
             Write-Error "Error"
         }
@@ -952,7 +980,7 @@ foreach ($azModule in $azModules) {
 Write-Host "Checking Az Context"
 if (-not $checkContext) {
     Write-Host " Context test failed: No context found. Please connect to Azure (run: Connect-AzAccount) and re-run $($Product)" -ForegroundColor Red
-    if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+    if ($htParameters.onAzureDevOps -eq $true) {
         Write-Error "Error"
     }
     else {
@@ -971,7 +999,7 @@ else {
             Set-AzContext -SubscriptionId $SubscriptionId4AzContext
         }
         catch {
-            if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+            if ($htParameters.onAzureDevOps -eq $true) {
                 Write-Error "Error"
             }
             else {
@@ -986,7 +1014,7 @@ else {
         $checkContext
         Write-Host " Context test failed: Context is not set to any Subscription. Set your context to a subscription by running: Set-AzContext -subscription <subscriptionId> (run Get-AzSubscription to get the list of available Subscriptions). When done re-run $($Product)" -ForegroundColor Red
         
-        if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+        if ($htParameters.onAzureDevOps -eq $true) {
             Write-host " If this error occurs you may want to leverage parameter 'SubscriptionId4AzContext' (<script>.ps1 -SubscriptionId4AzContext '<SubscriptionId>')"
             Write-Error "Error"
         }
@@ -4022,7 +4050,7 @@ $arrayAPICallTrackingCustomDataCollection = [System.Collections.ArrayList]::Sync
 #endregion helper ht / collect results /save some time
 
 #region validation / check 'Microsoft Graph API' Access
-if ($htParameters.AzureDevOpsWikiAsCode -eq $true -or $accountType -eq "ServicePrincipal") {
+if ($htParameters.onAzureDevOps -eq $true -or $accountType -eq "ServicePrincipal") {
     Write-Host "Checking ServicePrincipal permissions"
     
     $permissionCheckResults = @()
@@ -4110,7 +4138,7 @@ if (-not $NoAzureRoleAssignments) {
 
     if ($permissionsCheckFailed -eq $true) {
         Write-Host "Please consult the documentation: https://$($GithubRepository)#required-permissions-in-azure"
-        if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+        if ($htParameters.onAzureDevOps -eq $true) {
             Write-Error "Error"
         }
         else {
@@ -4254,7 +4282,7 @@ if (-not $NoAzureRoleAssignments) {
 
     if ($tryCounter -gt 6) {
         Write-Host "Problem switching the context to a Subscription that has a non AAD_ QuotaId"
-        if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+        if ($htParameters.onAzureDevOps -eq $true) {
             Write-Error "Error"
         }
         else {
@@ -4396,7 +4424,7 @@ else {
 
     if ($permissionsCheckFailed -eq $true) {
         Write-Host "Please consult the documentation: https://$($GithubRepository)#required-permissions-in-azure"
-        if ($htParameters.AzureDevOpsWikiAsCode -eq $true) {
+        if ($htParameters.onAzureDevOps -eq $true) {
             Write-Error "Error"
         }
         else {
@@ -6971,7 +6999,7 @@ $duration = NEW-TIMESPAN -Start $startEnrichmentSP -End $endEnrichmentSP
 Write-Host "Service Principals enrichment duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 
 #
-if ($AzureDevOpsWikiAsCode) {
+if ($onAzureDevOps) {
     $JSONPath = "JSON_SP_$($ManagementGroupId)"
     if (Test-Path -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)") {
         Write-Host " Cleaning old state (Pipeline only)"
@@ -7027,7 +7055,7 @@ $fileTimestamp = (get-date -format $FileTimeStampFormat)
 $startBuildHTML = get-date
 
 #filename
-if ($htParameters.AzureDevOpsWikiAsCode -eq $true) { 
+if ($htParameters.onAzureDevOps -eq $true) { 
     $fileName = "$($Product)_$($ManagementGroupId)"
 }
 else {
@@ -7257,7 +7285,7 @@ else {
 #region Stats
 if (-not $StatsOptOut) {
 
-    if ($htParameters.AzureDevOpsWikiAsCode) {
+    if ($htParameters.onAzureDevOps) {
         if ($env:BUILD_REPOSITORY_ID) {
             $hashTenantIdOrRepositoryId = [string]($env:BUILD_REPOSITORY_ID)
         }
@@ -7304,16 +7332,6 @@ if (-not $StatsOptOut) {
     $identifierBase = $hasher512.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hashUse))
     $identifier = "$(([System.BitConverter]::ToString($identifierBase)) -replace '-')"
 
-    $platform = "Console"
-    if ($htParameters.AzureDevOpsWikiAsCode) {
-        if ($env:SYSTEM_TEAMPROJECTID) {
-            $platform = "AzureDevOps"
-        }
-        else {
-            $platform = "unclear"
-        }
-    }
-
     $accountInfo = "$($accountType)$($userType)"
     if ($accountType -eq "ServicePrincipal") {
         $accountInfo = $accountType
@@ -7351,7 +7369,7 @@ if (-not $StatsOptOut) {
                 "accType": "$($accountInfo)",
                 "azCloud": "$($checkContext.Environment.Name)",
                 "identifier": "$($identifier)",
-                "platform": "$($platform)",
+                "platform": "$($checkCodeRunPlatform)",
                 "productVersion": "$($ProductVersion)",
                 "psAzAccountsVersion": "$($resolvedAzModuleVersion)",
                 "psVersion": "$($PSVersionTable.PSVersion)",

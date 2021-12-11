@@ -14,7 +14,7 @@ variables:
   WikiDir: wiki
   CsvDelimiter: ;
   ScriptDir: pwsh
-  Script: AzADServicePrincipalInsights.ps1
+  Script: AzADServicePrincipalInsights_parallelPOC.ps1
 
 schedules:
 - cron: "0 6,16 * * *"
@@ -22,7 +22,7 @@ schedules:
   always: true
   branches:
     include:
-    - master
+    - main
 
 jobs:
 - job: AzADServicePrincipalInsights  
@@ -45,7 +45,7 @@ jobs:
       scriptType: filePath
       pwsh: true
       scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(Script)'
-      scriptArguments: '-OutputPath $(WikiDir) -AzureDevOpsWikiAsCode -ThrottleLimit 10 -ThrottleLimitGraph 10'
+      scriptArguments: '-OutputPath $(WikiDir)'
       azurePowerShellVersion: latestVersion
     displayName: 'Run AzADServicePrincipalInsights v1'
   - powershell: |
