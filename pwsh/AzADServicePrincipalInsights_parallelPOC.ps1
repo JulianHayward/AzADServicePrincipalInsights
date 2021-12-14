@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzADServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20211211_1_POCPARALLEL",
+    [string]$ProductVersion = "v1_20211214_3_POCPARALLEL",
     [string]$GithubRepository = "aka.ms/AzADServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -6279,8 +6279,8 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
         $start = get-date
         $arraySPOauth2PermissionGrantedTo = [System.Collections.ArrayList]@()
         if ($htSPOauth2PermissionGrantedTo.($spId)) {
-            foreach ($SPOauth2PermissionGrantedTo in $htSPOauth2PermissionGrantedTo.($spId) | Sort-Object -Property clientId, id) {
-                foreach ($SPOauth2PermissionGrantedToScope in $SPOauth2PermissionGrantedTo.scope | Sort-Object) {
+            foreach ($SPOauth2PermissionGrantedTo in $htSPOauth2PermissionGrantedTo.($spId) <#| Sort-Object -Property clientId, id#>) {
+                foreach ($SPOauth2PermissionGrantedToScope in $SPOauth2PermissionGrantedTo.scope <#| Sort-Object#>) {
                     #$hlper = $htServicePrincipalsAndAppsOnlyEnriched.($SPOauth2PermissionGrantedTo.clientId).ServicePrincipal
                     #$spHlper = $hlper.ServicePrincipalDetails #| Select-Object displayName, id, appId
                     #$appHlperApplicationDetails = $hlper.Application.ApplicationDetails #| Select-Object displayName, id, appId
@@ -6888,6 +6888,10 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
             })
     
         if ($spOrAppWithoutSP.SPOrAppOnly -eq "SP") {
+            if ($arraySPOauth2PermissionGrantedTo.Count -gt 0){
+                $arraySPOauth2PermissionGrantedTo = ($arraySPOauth2PermissionGrantedTo | Sort-Object { $_.servicePrincipalDisplayName }, { $_.scope }, { $_.permissionId })
+            }
+
             $null = $script:cu.Add([PSCustomObject]@{ 
                     #SPObjId                     = $spId
                     #SPDisplayName               = $object.ServicePrincipalDetails.displayName
@@ -6941,6 +6945,10 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     }
     elseif ($object.ManagedIdentity) {
         #Write-Host "$($object.ServicePrincipalDetails.displayName) is MI"
+        if ($arraySPOauth2PermissionGrantedTo.Count -gt 0){
+            $arraySPOauth2PermissionGrantedTo = ($arraySPOauth2PermissionGrantedTo | Sort-Object { $_.servicePrincipalDisplayName }, { $_.scope }, { $_.permissionId })
+        }
+
         $null = $script:cu.Add([PSCustomObject]@{ 
                 #SPObjId                     = $spId
                 #SPDisplayName               = $object.ServicePrincipalDetails.displayName
@@ -6966,6 +6974,10 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     }
     else {
         #Write-Host "$($object.ServicePrincipalDetails.displayName) is neither App, nore MI"
+        if ($arraySPOauth2PermissionGrantedTo.Count -gt 0){
+            $arraySPOauth2PermissionGrantedTo = ($arraySPOauth2PermissionGrantedTo | Sort-Object { $_.servicePrincipalDisplayName }, { $_.scope }, { $_.permissionId })
+        }
+
         $null = $script:cu.Add([PSCustomObject]@{ 
                 #SPObjId                     = $spId
                 #SPDisplayName               = $object.ServicePrincipalDetails.displayName
