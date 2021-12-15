@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzADServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20211214_3_POCPARALLEL",
+    [string]$ProductVersion = "v1_20211215_1_POCPARALLEL",
     [string]$GithubRepository = "aka.ms/AzADServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -6844,6 +6844,18 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     $start = get-date
     $spArray = [System.Collections.ArrayList]@()
     if ($spOrAppWithoutSP.SPOrAppOnly -eq "SP") {
+        if ($object.ServicePrincipalDetails.appRoles.Count -gt 0){
+            $hlpxAppRoles = $object.ServicePrincipalDetails.appRoles | Sort-Object -Property value
+        }
+        else{
+            $hlpxAppRoles = $object.ServicePrincipalDetails.appRoles
+        }
+        if ($object.ServicePrincipalDetails.oauth2PermissionScopes.Count -gt 0){
+            $hlpxOauth2PermissionScopes = $object.ServicePrincipalDetails.oauth2PermissionScopes | Sort-Object -Property value
+        }
+        else{
+            $hlpxOauth2PermissionScopes = $object.ServicePrincipalDetails.oauth2PermissionScopes
+        }
         $null = $spArray.Add([PSCustomObject]@{ 
                 SPObjectId                  = $spId
                 SPAppId                     = $object.ServicePrincipalDetails.appId
@@ -6862,8 +6874,8 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                 SPLogoutUrl                 = $object.ServicePrincipalDetails.logoutUrl
                 SPPreferredSingleSignOnMode = $object.ServicePrincipalDetails.preferredSingleSignOnMode
                 SPTags                      = $object.ServicePrincipalDetails.tags
-                SPAppRoles                  = $object.ServicePrincipalDetails.appRoles
-                SPOauth2PermissionScopes    = $object.ServicePrincipalDetails.oauth2PermissionScopes
+                SPAppRoles                  = $hlpxAppRoles
+                SPOauth2PermissionScopes    = $hlpxOauth2PermissionScopes
             })
     }
     
