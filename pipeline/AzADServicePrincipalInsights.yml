@@ -14,7 +14,7 @@ variables:
   WikiDir: wiki
   CsvDelimiter: ;
   ScriptDir: pwsh
-  Script: AzADServicePrincipalInsights_parallelPOC.ps1
+  Script: AzADServicePrincipalInsights.ps1
 
 schedules:
 - cron: "0 6,16 * * *"

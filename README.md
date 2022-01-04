@@ -1,6 +1,6 @@
 # AzADServicePrincipalInsights
 
-Insights and tracking on Azure Active Directory Service Principals
+Insights and tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 ## Features
 
