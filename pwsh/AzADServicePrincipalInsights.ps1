@@ -2771,7 +2771,7 @@ extensions: [{ name: 'sort' }]
     $applicationsAADRoleAssignedOnCount = $applicationsAADRoleAssignedOn.Count
     if ($applicationsAADRoleAssignedOnCount -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Appications AAD RoleAssignedOn" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Applications AAD RoleAssignedOn" /></button>
         <div class="content TenantSummaryContent">
 "@)
 
@@ -2883,7 +2883,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@"
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="Appications AAD RoleAssignedOn" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="Applications AAD RoleAssignedOn" /></button>
 "@)
     }
 
