@@ -54,6 +54,6 @@ Connect-AzAccount -ServicePrincipal -TenantId "<tenantId>" -Credential $pscreden
 
 ## Preview
 
-![previewHTML](img/preview.png)  
+![previewHTML](img/preview_fixTyp0.png)  
 ![previewHTML2](img/preview2.png)  
 ![previewJSON](img/previewJSON.png)
