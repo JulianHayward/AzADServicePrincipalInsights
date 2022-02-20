@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = "AzADServicePrincipalInsights",
-    [string]$ProductVersion = "v1_20220104_1",
+    [string]$ProductVersion = "v1_20220220_1",
     [string]$GithubRepository = "aka.ms/AzADServicePrincipalInsights",
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -72,35 +72,37 @@ $startProduct = get-date
 $startTime = get-date -format "dd-MMM-yyyy HH:mm:ss"
 Write-Host "Start $($Product) $($startTime) (#$($ProductVersion))"
 
-#region htParameters (all switch params used in foreach-object -parallel)
-
+#region CheckCodeRunPlatform
+$onAzureDevOps = $false
+$onAzureDevOpsOrGitHubActions = $false
 if ($env:GITHUB_SERVER_URL -and $env:CODESPACES) {
-    #GitHub Codespaces
-    Write-Host "CheckCodeRunPlatform: running in GitHub Codespaces"
     $checkCodeRunPlatform = "GitHubCodespaces"
-    #Write-Host "GITHUB_SERVER_URL" $env:GITHUB_SERVER_URL
-    #Write-Host "CODESPACES" $env:CODESPACES
+}
+elseif ($env:REMOTE_CONTAINERS) {
+    $checkCodeRunPlatform = "RemoteContainers"
 }
 elseif ($env:SYSTEM_TEAMPROJECTID -and $env:BUILD_REPOSITORY_ID) {
-    #Azure DevOps
-    Write-Host "CheckCodeRunPlatform: running in Azure DevOps"
     $checkCodeRunPlatform = "AzureDevOps"
-    #Write-Host "BUILD_REPOSITORY_ID" $env:BUILD_REPOSITORY_ID
-    #Write-Host "SYSTEM_TEAMPROJECTID" $env:SYSTEM_TEAMPROJECTID
     $onAzureDevOps = $true
+    $onAzureDevOpsOrGitHubActions = $true
 }
 elseif ($PSPrivateMetadata) {
-    #Azure Automation
-    Write-Output "CheckCodeRunPlatform: running in Azure Automation"
     $checkCodeRunPlatform = "AzureAutomation"
-    #Write-Output "PSPrivateMetadata:" $PSPrivateMetadata
+}
+elseif ($env:GITHUB_ACTIONS) {
+    $checkCodeRunPlatform = "GitHubActions"
+    $onAzureDevOpsOrGitHubActions = $true
+}
+elseif ($env:ACC_IDLE_TIME_LIMIT -and $env:AZURE_HTTP_USER_AGENT -and $env:AZUREPS_HOST_ENVIRONMENT) {
+    $checkCodeRunPlatform = "CloudShell"
 }
 else {
-    #Other Console
-    Write-Host "CheckCodeRunPlatform: not Codespaces, not Azure DevOps, not Azure Automation - likely local console"
     $checkCodeRunPlatform = "Console"
 }
+#endregion CheckCodeRunPlatform
+Write-Host "CheckCodeRunPlatform:" $checkCodeRunPlatform
 
+#region htParameters (all switch params used in foreach-object -parallel)
 $htParameters = @{ }
 $htParameters.ProductVersion = $ProductVersion
 $htParameters.AzCloudEnv = $checkContext.Environment.Name
@@ -111,6 +113,13 @@ if ($onAzureDevOps) {
 }
 else {
     $htParameters.onAzureDevOps = $false
+}
+
+if ($onAzureDevOpsOrGitHubActions) {
+    $htParameters.onAzureDevOpsOrGitHubActions = $true
+}
+else {
+    $htParameters.onAzureDevOpsOrGitHubActions = $false
 }
 
 if ($DebugAzAPICall) {
@@ -2562,7 +2571,7 @@ extensions: [{ name: 'sort' }]
 "@)
         }
 
-        if ($htParameters.onAzureDevOps -eq $true) {
+        if ($htParameters.onAzureDevOpsOrGitHubActions -eq $true) {
             $fileName = "$($Product)_$($ManagementGroupId)_AADRoleAssignments_"
         }
         else {
@@ -2989,7 +2998,7 @@ extensions: [{ name: 'sort' }]
 "@)
         }
 
-        if ($htParameters.onAzureDevOps -eq $true) {
+        if ($htParameters.onAzureDevOpsOrGitHubActions -eq $true) {
             $fileName = "$($Product)_$($ManagementGroupId)_AppRoleAssignments_"
         }
         else {
@@ -3295,7 +3304,7 @@ extensions: [{ name: 'sort' }]
 "@)
         }
 
-        if ($htParameters.onAzureDevOps -eq $true) {
+        if ($htParameters.onAzureDevOpsOrGitHubActions -eq $true) {
             $fileName = "$($Product)_$($ManagementGroupId)_Oauth2PermissionGrants_"
         }
         else {
@@ -7124,7 +7133,7 @@ $duration = NEW-TIMESPAN -Start $startEnrichmentSP -End $endEnrichmentSP
 Write-Host "Service Principals enrichment duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 
 #
-if ($onAzureDevOps) {
+if ($onAzureDevOpsOrGitHubActions) {
     $JSONPath = "JSON_SP_$($ManagementGroupId)"
     if (Test-Path -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)") {
         Write-Host " Cleaning old state (Pipeline only)"
@@ -7178,7 +7187,7 @@ $fileTimestamp = (get-date -format $FileTimeStampFormat)
 $startBuildHTML = get-date
 
 #filename
-if ($htParameters.onAzureDevOps -eq $true) {
+if ($htParameters.onAzureDevOpsOrGitHubActions -eq $true) {
     $fileName = "$($Product)_$($ManagementGroupId)"
 }
 else {
