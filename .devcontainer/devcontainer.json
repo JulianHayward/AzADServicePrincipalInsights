@@ -8,6 +8,5 @@
 		"ms-vscode.powershell",
 		"analytic-signal.preview-html"
 	],
-	"forwardPorts": [],
-	"postCreateCommand": "chmod +x ./.devcontainer/profile.sh && ./.devcontainer/profile.sh"
+	"forwardPorts": []
 }
