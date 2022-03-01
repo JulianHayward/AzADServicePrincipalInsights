@@ -462,6 +462,7 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                     ) -or
                     $catchResult.error.message -like "*The offer MS-AZR-0110P is not supported*" -or
                     ($getSP -and $catchResult.error.code -like "*Request_ResourceNotFound*") -or
+                    ($getSP -and $catchResult.error.code -like "*Directory_ResultSizeLimitExceeded*") -or
                     ($getSP -and $catchResult.error.code -like "*Authorization_RequestDenied*") -or
                     ($getApp -and $catchResult.error.code -like "*Request_ResourceNotFound*") -or
                     ($getApp -and $catchResult.error.code -like "*Authorization_RequestDenied*") -or
@@ -596,6 +597,11 @@ function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumptio
                     if (($getApp -or $getSP) -and $catchResult.error.code -like "*Request_ResourceNotFound*") {
                         Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain ServicePrincipal status - skipping for now :)"
                         return "Request_ResourceNotFound"
+                    }
+
+                    if (($getSP) -and $catchResult.error.code -like "*Directory_ResultSizeLimitExceeded*") {
+                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain ServicePrincipal status - skipping for now :)"
+                        return "Directory_ResultSizeLimitExceeded"
                     }
 
                     if ($currentTask -eq "Checking AAD UserType" -and $catchResult.error.code -like "*Authorization_RequestDenied*") {
@@ -5022,6 +5028,9 @@ else {
                         $script:htMeanwhileDeleted.($object.id) = @{}
                         $meanwhileDeleted = $true
                     }
+                }
+                elseif ($getSPGroupMemberships -eq "Directory_ResultSizeLimitExceeded"){
+                    write-host "Directory_ResultSizeLimitExceeded - skipping for now"
                 }
                 else {
                     if ($getSPGroupMemberships.Count -gt 0) {
