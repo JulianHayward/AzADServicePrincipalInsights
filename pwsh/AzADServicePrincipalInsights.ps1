@@ -28,9 +28,6 @@ Param
     [int]$ApplicationCertificateExpiryMax = 730
 )
 
-#test
-$outputPath = 'C:\temp'
-
 $Error.clear()
 $ErrorActionPreference = 'Stop'
 
