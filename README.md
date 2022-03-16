@@ -53,6 +53,14 @@ $pscredential = Get-Credential
 Connect-AzAccount -ServicePrincipal -TenantId "<tenantId>" -Credential $pscredential
 ```
 
+## Prerequisites
+
+Requires PowerShell Module 'AzAPICall'.  
+Running in Azure DevOps the AzAPICall PowerShell module will be installed automatically.
+
+* [Powershell Gallery](https://www.powershellgallery.com/packages/AzAPICall)
+* [GitHub Repository](https://aka.ms/AzAPICall)
+
 ## Preview
 
 ![previewHTML](img/preview_fixTyp0.png)  
