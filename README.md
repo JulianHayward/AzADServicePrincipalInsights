@@ -1,15 +1,15 @@
-# AzADServicePrincipalInsights
+__AzADServicePrincipalInsights__
 
 Insights and tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
-## Features
+# Features
 
 * HTML export
 * JSON export
 * CSV export (wip)
 * Customizable permission classification (permissionClassification.json)
 
-## Data
+# Data
 
 * ServicePrincipals by type
 * ServicePrincipal  owners
@@ -25,6 +25,8 @@ Insights and tracking on Azure Active Directory Service Principals (Enterprise A
 * ServicePrincipal Group memberships
 * Application Secrets
 * Application Certificates
+
+# Prerequisites
 
 ## Permissions
 
@@ -43,25 +45,27 @@ Microsoft Graph API | Application | __User.Read.All__
 
 The Build Service Account or Project Collection Build Service Account (which ever you use) requires __Contribute__ permissions on the repository (Project settings - Repos - Security)
 
-## Execute as Service Principal / Application
+## PowerShell
+Requires Powershell Version >= 7.0.3
+
+Requires PowerShell Module 'AzAPICall'.  
+Running in Azure DevOps the AzAPICall PowerShell module will be installed automatically.  
+
+AzAPICall resources:
+* [Powershell Gallery](https://www.powershellgallery.com/packages/AzAPICall)
+* [GitHub Repository](https://aka.ms/AzAPICall)
+
+# Execute as Service Principal / Application
 
 #USER: 'Application (client) ID' of the App registration OR 'Application ID' of the Service Principal (Enterprise Application)  
 #PASSWORD: Secret of the App registration  
 
 ```
 $pscredential = Get-Credential
-Connect-AzAccount -ServicePrincipal -TenantId "<tenantId>" -Credential $pscredential
+Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredential
 ```
 
-## Prerequisites
-
-Requires PowerShell Module 'AzAPICall'.  
-Running in Azure DevOps the AzAPICall PowerShell module will be installed automatically.
-
-* [Powershell Gallery](https://www.powershellgallery.com/packages/AzAPICall)
-* [GitHub Repository](https://aka.ms/AzAPICall)
-
-## Preview
+# Preview
 
 ![previewHTML](img/preview_fixTyp0.png)  
 ![previewHTML2](img/preview2.png)  
