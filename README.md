@@ -7,6 +7,7 @@ Insights and tracking on Azure Active Directory Service Principals (Enterprise A
 * HTML export
 * JSON export
 * CSV export (wip)
+* Customizable permission classification (permissionClassification.json)
 
 ## Data
 
