@@ -2,8 +2,8 @@
 Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
-    [string]$ProductVersion = 'v1_20220314_1',
-    [string]$GithubRepository = 'aka.ms/AzADServicePrincipalInsights',
+    [string]$ProductVersion = 'v1_20220316_1',
+    [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
     [switch]$NoCsvExport,
@@ -25,1064 +25,266 @@ Param
     [int]$ApplicationSecretExpiryWarning = 14,
     [int]$ApplicationSecretExpiryMax = 730,
     [int]$ApplicationCertificateExpiryWarning = 14,
-    [int]$ApplicationCertificateExpiryMax = 730
+    [int]$ApplicationCertificateExpiryMax = 730,
+    [string]$DirectorySeparatorChar = [IO.Path]::DirectorySeparatorChar,
+    [string]$azAPICallVersion = '1.0.8'
 )
 
 $Error.clear()
 $ErrorActionPreference = 'Stop'
+#removeNoise
+$ProgressPreference = 'SilentlyContinue'
+Set-Item Env:\SuppressAzurePowerShellBreakingChangeWarnings 'true'
 
-$checkContext = Get-AzContext -ErrorAction Stop
-Write-Host "Environment: $($checkContext.Environment.Name)"
-$ManagementGroupId = ($checkContext).Tenant.Id
-
-#region filedir
-if (-not [IO.Path]::IsPathRooted($outputPath)) {
-    $outputPath = Join-Path -Path (Get-Location).Path -ChildPath $outputPath
-}
-$outputPath = Join-Path -Path $outputPath -ChildPath '.'
-$outputPath = [IO.Path]::GetFullPath($outputPath)
-if (-not (test-path $outputPath)) {
-    Write-Host "path $outputPath does not exist - please create it!" -ForegroundColor Red
-    Throw "Error - $($Product): check the last console output for details"
-}
-else {
-    Write-Host "Output/Files will be created in path $outputPath"
-}
-$DirectorySeparatorChar = [IO.Path]::DirectorySeparatorChar
-#endregion filedir
-
-#region fileTimestamp
-try {
-    $fileTimestamp = (get-date -format $FileTimeStampFormat)
-}
-catch {
-    Write-Host "fileTimestamp format: '$($FileTimeStampFormat)' invalid; continue with default format: 'yyyyMMdd_HHmmss'" -ForegroundColor Red
-    $FileTimeStampFormat = 'yyyyMMdd_HHmmss'
-    $fileTimestamp = (get-date -format $FileTimeStampFormat)
-}
-
-if ($DoTranscript) {
-    $fileNameTranscript = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($ManagementGroupId)_Log.txt"
-    Start-Transcript -Path "$($outputPath)$($DirectorySeparatorChar)$($fileNameTranscript)" -NoClobber
-}
-#endregion fileTimestamp
-
-#
 $startProduct = get-date
 $startTime = get-date -format 'dd-MMM-yyyy HH:mm:ss'
 Write-Host "Start $($Product) $($startTime) (#$($ProductVersion))"
 
-#region CheckCodeRunPlatform
-$onAzureDevOps = $false
-$onAzureDevOpsOrGitHubActions = $false
-if ($env:GITHUB_SERVER_URL -and $env:CODESPACES) {
-    $checkCodeRunPlatform = 'GitHubCodespaces'
-}
-elseif ($env:REMOTE_CONTAINERS) {
-    $checkCodeRunPlatform = 'RemoteContainers'
-}
-elseif ($env:SYSTEM_TEAMPROJECTID -and $env:BUILD_REPOSITORY_ID) {
-    $checkCodeRunPlatform = 'AzureDevOps'
-    $onAzureDevOps = $true
-    $onAzureDevOpsOrGitHubActions = $true
-}
-elseif ($PSPrivateMetadata) {
-    $checkCodeRunPlatform = 'AzureAutomation'
-}
-elseif ($env:GITHUB_ACTIONS) {
-    $checkCodeRunPlatform = 'GitHubActions'
-    $onAzureDevOpsOrGitHubActions = $true
-}
-elseif ($env:ACC_IDLE_TIME_LIMIT -and $env:AZURE_HTTP_USER_AGENT -and $env:AZUREPS_HOST_ENVIRONMENT) {
-    $checkCodeRunPlatform = 'CloudShell'
-}
-else {
-    $checkCodeRunPlatform = 'Console'
-}
-#endregion CheckCodeRunPlatform
-Write-Host 'CheckCodeRunPlatform:' $checkCodeRunPlatform
+function testPowerShellVersion {
 
-#region htParameters (all switch params used in foreach-object -parallel)
-$htParameters = @{ }
-$htParameters.ProductVersion = $ProductVersion
-$htParameters.AzCloudEnv = $checkContext.Environment.Name
-$htParameters.GithubRepository = $GithubRepository
+    Write-Host ' Checking PowerShell edition and version'
+    $requiredPSVersion = '7.0.3'
+    $splitRequiredPSVersion = $requiredPSVersion.split('.')
+    $splitRequiredPSVersionMajor = $splitRequiredPSVersion[0]
+    $splitRequiredPSVersionMinor = $splitRequiredPSVersion[1]
+    $splitRequiredPSVersionPatch = $splitRequiredPSVersion[2]
 
-if ($onAzureDevOps) {
-    $htParameters.onAzureDevOps = $true
-}
-else {
-    $htParameters.onAzureDevOps = $false
-}
+    $thisPSVersion = ($PSVersionTable.PSVersion)
+    $thisPSVersionMajor = ($thisPSVersion).Major
+    $thisPSVersionMinor = ($thisPSVersion).Minor
+    $thisPSVersionPatch = ($thisPSVersion).Patch
 
-if ($onAzureDevOpsOrGitHubActions) {
-    $htParameters.onAzureDevOpsOrGitHubActions = $true
-}
-else {
-    $htParameters.onAzureDevOpsOrGitHubActions = $false
-}
+    $psVersionCheckResult = 'letsCheck'
 
-if ($DebugAzAPICall) {
-    $htParameters.DebugAzAPICall = $true
-}
-else {
-    $htParameters.DebugAzAPICall = $false
-}
-
-if (-not $NoJsonExport) {
-    $htParameters.NoJsonExport = $false
-}
-else {
-    $htParameters.NoJsonExport = $true
-}
-
-if (-not $NoAzureRoleAssignments) {
-    $htParameters.NoAzureRoleAssignments = $false
-}
-else {
-    $htParameters.NoAzureRoleAssignments = $true
-}
-#endregion htParameters
-
-#region PowerShellEditionAnVersionCheck
-Write-Host 'Checking powershell edition and version'
-$requiredPSVersion = '7.0.3'
-$splitRequiredPSVersion = $requiredPSVersion.split('.')
-$splitRequiredPSVersionMajor = $splitRequiredPSVersion[0]
-$splitRequiredPSVersionMinor = $splitRequiredPSVersion[1]
-$splitRequiredPSVersionPatch = $splitRequiredPSVersion[2]
-
-$thisPSVersion = ($PSVersionTable.PSVersion)
-$thisPSVersionMajor = ($thisPSVersion).Major
-$thisPSVersionMinor = ($thisPSVersion).Minor
-$thisPSVersionPatch = ($thisPSVersion).Patch
-
-$psVersionCheckResult = 'letsCheck'
-
-if ($PSVersionTable.PSEdition -eq 'Core' -and $thisPSVersionMajor -eq $splitRequiredPSVersionMajor) {
-    if ($thisPSVersionMinor -gt $splitRequiredPSVersionMinor) {
-        $psVersionCheckResult = 'passed'
-        $psVersionCheck = "(Major[$splitRequiredPSVersionMajor]; Minor[$thisPSVersionMinor] gt $($splitRequiredPSVersionMinor))"
-    }
-    else {
-        if ($thisPSVersionPatch -ge $splitRequiredPSVersionPatch) {
+    if ($PSVersionTable.PSEdition -eq 'Core' -and $thisPSVersionMajor -eq $splitRequiredPSVersionMajor) {
+        if ($thisPSVersionMinor -gt $splitRequiredPSVersionMinor) {
             $psVersionCheckResult = 'passed'
-            $psVersionCheck = "(Major[$splitRequiredPSVersionMajor]; Minor[$splitRequiredPSVersionMinor]; Patch[$thisPSVersionPatch] gt $($splitRequiredPSVersionPatch))"
+            $psVersionCheck = "(Major[$splitRequiredPSVersionMajor]; Minor[$thisPSVersionMinor] gt $($splitRequiredPSVersionMinor))"
         }
         else {
-            $psVersionCheckResult = 'failed'
-            $psVersionCheck = "(Major[$splitRequiredPSVersionMajor]; Minor[$splitRequiredPSVersionMinor]; Patch[$thisPSVersionPatch] lt $($splitRequiredPSVersionPatch))"
-        }
-    }
-}
-else {
-    $psVersionCheckResult = 'failed'
-    $psVersionCheck = "(Major[$splitRequiredPSVersionMajor] ne $($splitRequiredPSVersionMajor))"
-}
-
-if ($psVersionCheckResult -eq 'passed') {
-    Write-Host " PS check $psVersionCheckResult : $($psVersionCheck); (minimum supported version '$requiredPSVersion')"
-    Write-Host " PS Edition: $($PSVersionTable.PSEdition)"
-    Write-Host " PS Version: $($PSVersionTable.PSVersion)"
-}
-else {
-    Write-Host " PS check $psVersionCheckResult : $($psVersionCheck)"
-    Write-Host " PS Edition: $($PSVersionTable.PSEdition)"
-    Write-Host " PS Version: $($PSVersionTable.PSVersion)"
-    Write-Host " This $($Product) version only supports Powershell 'Core' version '$($requiredPSVersion)' or higher"
-    Write-Host ' Get Powershell: https://github.com/PowerShell/PowerShell#get-powershell'
-    Write-Host ' Installing PowerShell on Windows: https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-core-on-windows'
-    Write-Host ' Installing PowerShell on Linux: https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-core-on-linux'
-    if ($htParameters.onAzureDevOps -eq $true) {
-        Write-Error 'Error'
-    }
-    else {
-        Throw "Error - $($Product): check the last console output for details"
-    }
-}
-#endregion PowerShellEditionAnVersionCheck
-
-if ($htParameters.DebugAzAPICall -eq $false) {
-    write-host 'AzAPICall debug disabled' -ForegroundColor Cyan
-}
-else {
-    write-host 'AzAPICall debug enabled' -ForegroundColor Cyan
-}
-
-#region shutuppoluters
-$ProgressPreference = 'SilentlyContinue'
-Set-Item Env:\SuppressAzurePowerShellBreakingChangeWarnings 'true'
-#endregion shutuppoluters
-
-#JWTDetails https://www.powershellgallery.com/packages/JWTDetails/1.0.2
-#region jwtdetails
-function getJWTDetails {
-    [cmdletbinding()]
-    param(
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true, Position = 0)]
-        [string]$token
-    )
-
-    if (!$token -contains ('.') -or !$token.StartsWith('eyJ')) { Write-Error 'Invalid token' -ErrorAction Stop }
-
-    #Token
-    foreach ($i in 0..1) {
-        $data = $token.Split('.')[$i].Replace('-', '+').Replace('_', '/')
-        switch ($data.Length % 4) {
-            0 { break }
-            2 { $data += '==' }
-            3 { $data += '=' }
-        }
-    }
-
-    $decodedToken = [System.Text.Encoding]::UTF8.GetString([convert]::FromBase64String($data)) | ConvertFrom-Json
-    Write-Verbose 'JWT Token:'
-    Write-Verbose $decodedToken
-
-    #Signature
-    foreach ($i in 0..2) {
-        $sig = $token.Split('.')[$i].Replace('-', '+').Replace('_', '/')
-        switch ($sig.Length % 4) {
-            0 { break }
-            2 { $sig += '==' }
-            3 { $sig += '=' }
-        }
-    }
-    Write-Verbose 'JWT Signature:'
-    Write-Verbose $sig
-    $decodedToken | Add-Member -Type NoteProperty -Name 'sig' -Value $sig
-
-    #Convert Expiry time to PowerShell DateTime
-    $orig = (Get-Date -Year 1970 -Month 1 -Day 1 -hour 0 -Minute 0 -Second 0 -Millisecond 0)
-    $timeZone = Get-TimeZone
-    $utcTime = $orig.AddSeconds($decodedToken.exp)
-    $offset = $timeZone.GetUtcOffset($(Get-Date)).TotalMinutes #Daylight saving needs to be calculated
-    $localTime = $utcTime.AddMinutes($offset)     # Return local time,
-
-    $decodedToken | Add-Member -Type NoteProperty -Name 'expiryDateTime' -Value $localTime
-
-    #Time to Expiry
-    $timeToExpiry = ($localTime - (get-date))
-    $decodedToken | Add-Member -Type NoteProperty -Name 'timeToExpiry' -Value $timeToExpiry
-
-    return $decodedToken
-}
-$funcGetJWTDetails = $function:getJWTDetails.ToString()
-#endregion jwtdetails
-
-#Bearer Token
-#region createbearertoken
-function createBearerToken($targetEndPoint) {
-    Write-Host "+Processing new bearer token request ($targetEndPoint)"
-    if ($targetEndPoint -eq 'ManagementAPI') {
-        $azureRmProfile = [Microsoft.Azure.Commands.Common.Authentication.Abstractions.AzureRmProfileProvider]::Instance.Profile;
-        $profileClient = New-Object Microsoft.Azure.Commands.ResourceManager.Common.RMProfileClient($azureRmProfile);
-        $catchResult = 'letscheck'
-        try {
-            $newBearerAccessTokenRequest = ($profileClient.AcquireAccessToken($checkContext.Subscription.TenantId))
-        }
-        catch {
-            $catchResult = $_
-        }
-    }
-    if ($targetEndPoint -eq 'MSGraphAPI') {
-        $contextForMSGraphToken = [Microsoft.Azure.Commands.Common.Authentication.Abstractions.AzureRmProfileProvider]::Instance.Profile.DefaultContext
-        $catchResult = 'letscheck'
-        try {
-            $newBearerAccessTokenRequest = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($contextForMSGraphToken.Account, $contextForMSGraphToken.Environment, $contextForMSGraphToken.Tenant.Id.ToString(), $null, [Microsoft.Azure.Commands.Common.Authentication.ShowDialog]::Never, $null, "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)")
-        }
-        catch {
-            $catchResult = $_
-        }
-    }
-    if ($catchResult -ne 'letscheck') {
-        Write-Host "-ERROR processing new bearer token request ($targetEndPoint): $catchResult" -ForegroundColor Red
-        Write-Host "Likely your Azure credentials have not been set up or have expired, please run 'Connect-AzAccount' to set up your Azure credentials."
-        Write-Host "It could also well be that there are multiple context in cache, please run 'Clear-AzContext' and then run 'Connect-AzAccount'."
-        Throw "Error - $($Product): check the last console output for details"
-    }
-    $dateTimeTokenCreated = (get-date -format 'MM/dd/yyyy HH:mm:ss')
-    if ($targetEndPoint -eq 'ManagementAPI') {
-        $script:htBearerAccessToken.AccessTokenManagement = $newBearerAccessTokenRequest.AccessToken
-    }
-    if ($targetEndPoint -eq 'MSGraphAPI') {
-        $script:htBearerAccessToken.AccessTokenMSGraph = $newBearerAccessTokenRequest.AccessToken
-    }
-    $bearerDetails = GetJWTDetails -token $newBearerAccessTokenRequest.AccessToken
-    $bearerAccessTokenExpiryDateTime = $bearerDetails.expiryDateTime
-    $bearerAccessTokenTimeToExpiry = $bearerDetails.timeToExpiry
-    Write-Host "+Bearer token ($targetEndPoint): [tokenRequestProcessed: '$dateTimeTokenCreated']; [expiryDateTime: '$bearerAccessTokenExpiryDateTime']; [timeUntilExpiry: '$bearerAccessTokenTimeToExpiry']"
-}
-$funcCreateBearerToken = $function:createBearerToken.ToString()
-$htBearerAccessToken = @{}
-#endregion createbearertoken
-
-#API
-
-#region azapicall
-function AzAPICall($uri, $method, $currentTask, $body, $listenOn, $getConsumption, $getGroup, $getGroupMembersCount, $getApp, $getSP, $getGuests, $caller, $consistencyLevel, $getCount, $getPolicyCompliance, $getMgAscSecureScore, $getRoleAssignmentSchedules, $getRoleAssignmentScheduledInstances, $getDiagnosticSettingsMg, $validate) {
-    $tryCounter = 0
-    $tryCounterUnexpectedError = 0
-    $retryAuthorizationFailed = 5
-    $retryAuthorizationFailedCounter = 0
-    $apiCallResultsCollection = [System.Collections.ArrayList]@()
-    $initialUri = $uri
-    $restartDueToDuplicateNextlinkCounter = 0
-    if ($htParameters.DebugAzAPICall -eq $true) {
-        if ($caller -like 'CustomDataCollection*') {
-            $debugForeGroundColors = @('DarkBlue', 'DarkGreen', 'DarkCyan', 'Cyan', 'DarkMagenta', 'DarkYellow', 'Blue', 'Magenta', 'Yellow', 'Green')
-            $debugForeGroundColorsCount = $debugForeGroundColors.Count
-            $randomNumber = Get-Random -Minimum 0 -Maximum ($debugForeGroundColorsCount - 1)
-            $debugForeGroundColor = $debugForeGroundColors[$randomNumber]
-        }
-        else {
-            $debugForeGroundColor = 'Cyan'
-        }
-    }
-
-    do {
-        if ($arrayAzureManagementEndPointUrls | Where-Object { $uri -match $_ }) {
-            $targetEndpoint = 'ManagementAPI'
-            $bearerToUse = $htBearerAccessToken.AccessTokenManagement
-        }
-        else {
-            $targetEndpoint = 'MSGraphAPI'
-            $bearerToUse = $htBearerAccessToken.AccessTokenMSGraph
-        }
-
-        #
-        $unexpectedError = $false
-
-        $Header = @{
-            'Content-Type'  = 'application/json';
-            'Authorization' = "Bearer $bearerToUse"
-        }
-        if ($consistencyLevel) {
-            $Header = @{
-                'Content-Type'     = 'application/json';
-                'Authorization'    = "Bearer $bearerToUse";
-                'ConsistencyLevel' = "$consistencyLevel"
-            }
-        }
-
-        $startAPICall = Get-Date
-        try {
-            if ($body) {
-                $azAPIRequest = Invoke-WebRequest -Uri $uri -Method $method -body $body -Headers $Header -ContentType 'application/json' -UseBasicParsing
+            if ($thisPSVersionPatch -ge $splitRequiredPSVersionPatch) {
+                $psVersionCheckResult = 'passed'
+                $psVersionCheck = "(Major[$splitRequiredPSVersionMajor]; Minor[$splitRequiredPSVersionMinor]; Patch[$thisPSVersionPatch] gt $($splitRequiredPSVersionPatch))"
             }
             else {
-                $azAPIRequest = Invoke-WebRequest -Uri $uri -Method $method -Headers $Header -UseBasicParsing
+                $psVersionCheckResult = 'failed'
+                $psVersionCheck = "(Major[$splitRequiredPSVersionMajor]; Minor[$splitRequiredPSVersionMinor]; Patch[$thisPSVersionPatch] lt $($splitRequiredPSVersionPatch))"
             }
         }
-        catch {
+    }
+    else {
+        $psVersionCheckResult = 'failed'
+        $psVersionCheck = "(Major[$splitRequiredPSVersionMajor] ne $($splitRequiredPSVersionMajor))"
+    }
+
+    if ($psVersionCheckResult -eq 'passed') {
+        Write-Host "  PS check $psVersionCheckResult : $($psVersionCheck); (minimum supported version '$requiredPSVersion')"
+        Write-Host "  PS Edition: $($PSVersionTable.PSEdition); PS Version: $($PSVersionTable.PSVersion)"
+        Write-Host '  PS Version check succeeded' -ForegroundColor Green
+    }
+    else {
+        Write-Host "  PS check $psVersionCheckResult : $($psVersionCheck)"
+        Write-Host "  PS Edition: $($PSVersionTable.PSEdition); PS Version: $($PSVersionTable.PSVersion)"
+        Write-Host "  Parallelization requires Powershell 'Core' version '$($requiredPSVersion)' or higher"
+        Throw 'Error - check the last console output for details'
+    }
+}
+testPowerShellVersion
+
+#region filedir
+function setOutput {
+    #outputPath
+    if (-not [IO.Path]::IsPathRooted($outputPath)) {
+        $outputPath = Join-Path -Path (Get-Location).Path -ChildPath $outputPath
+    }
+    $outputPath = Join-Path -Path $outputPath -ChildPath '.'
+    $script:outputPath = [IO.Path]::GetFullPath($outputPath)
+    if (-not (test-path $outputPath)) {
+        Write-Host "path $outputPath does not exist - please create it!" -ForegroundColor Red
+        Throw 'Error - check the last console output for details'
+    }
+    else {
+        Write-Host "Output/Files will be created in path '$outputPath'"
+    }
+
+    #fileTimestamp
+    try {
+        $script:fileTimestamp = (Get-Date -Format $FileTimeStampFormat)
+    }
+    catch {
+        Write-Host "fileTimestamp format: '$($FileTimeStampFormat)' invalid; continue with default format: 'yyyyMMdd_HHmmss'" -ForegroundColor Red
+        $FileTimeStampFormat = 'yyyyMMdd_HHmmss'
+        $script:fileTimestamp = (Get-Date -Format $FileTimeStampFormat)
+    }
+
+    $script:executionDateTimeInternationalReadable = Get-Date -Format 'dd-MMM-yyyy HH:mm:ss'
+    $script:currentTimeZone = (Get-TimeZone).Id
+}
+setOutput
+#endregion filedir
+
+#region verifyAzAPICall
+if ($azAPICallVersion) {
+    Write-Host " Verify 'AzAPICall' ($azAPICallVersion)"
+}
+else {
+    Write-Host " Verify 'AzAPICall' (latest)"
+}
+
+do {
+    $importAzAPICallModuleSuccess = $false
+    try {
+        
+        if (-not $azAPICallVersion) {
+            Write-Host '  Check latest module version'
             try {
-                $catchResultPlain = $_.ErrorDetails.Message
-                if ($catchResultPlain) {
-                    $catchResult = $catchResultPlain | ConvertFrom-Json -ErrorAction Stop
-                }
+                $azAPICallVersion = (Find-Module -name AzAPICall).Version
+                Write-Host "  Latest module version: $azAPICallVersion"
             }
             catch {
-                $catchResult = $catchResultPlain
-                $tryCounterUnexpectedError++
-                $unexpectedError = $true
+                Write-Host '  Check latest module version failed'
+                throw
             }
         }
-        $endAPICall = get-date
-        $durationAPICall = NEW-TIMESPAN -Start $startAPICall -End $endAPICall
 
-        #API Call Tracking
-        $tstmp = (Get-Date -format 'yyyyMMddHHmmssms')
-        $null = $script:arrayAPICallTracking.Add([PSCustomObject]@{
-                CurrentTask                          = $currentTask
-                TargetEndpoint                       = $targetEndpoint
-                Uri                                  = $uri
-                Method                               = $method
-                TryCounter                           = $tryCounter
-                TryCounterUnexpectedError            = $tryCounterUnexpectedError
-                RetryAuthorizationFailedCounter      = $retryAuthorizationFailedCounter
-                RestartDueToDuplicateNextlinkCounter = $restartDueToDuplicateNextlinkCounter
-                TimeStamp                            = $tstmp
-                Duration                             = $durationAPICall.TotalSeconds
-            })
-
-        if ($caller -eq 'CustomDataCollection') {
-            $null = $script:arrayAPICallTrackingCustomDataCollection.Add([PSCustomObject]@{
-                    CurrentTask                          = $currentTask
-                    TargetEndpoint                       = $targetEndpoint
-                    Uri                                  = $uri
-                    Method                               = $method
-                    TryCounter                           = $tryCounter
-                    TryCounterUnexpectedError            = $tryCounterUnexpectedError
-                    RetryAuthorizationFailedCounter      = $retryAuthorizationFailedCounter
-                    RestartDueToDuplicateNextlinkCounter = $restartDueToDuplicateNextlinkCounter
-                    TimeStamp                            = $tstmp
-                    Duration                             = $durationAPICall.TotalSeconds
-                })
-        }
-
-        $tryCounter++
-        if ($htParameters.DebugAzAPICall -eq $true) {
-            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "  DEBUGTASK: attempt#$($tryCounter) processing: $($currenttask) uri: '$($uri)'" -ForegroundColor $debugForeGroundColor }
-        }
-
-        if ($unexpectedError -eq $false) {
-            if ($htParameters.DebugAzAPICall -eq $true) {
-                if ($htParameters.DebugAzAPICall -eq $true) { Write-Host '   DEBUG: unexpectedError: false' -ForegroundColor $debugForeGroundColor }
-            }
-            if ($azAPIRequest.StatusCode -ne 200) {
-                if ($htParameters.DebugAzAPICall -eq $true -or $tryCounter -gt 3) {
-                    if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" -ForegroundColor $debugForeGroundColor }
-                    if ($htParameters.DebugAzAPICall -eq $false -and $tryCounter -gt 3) { Write-Host "   Forced DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" }
-                }
-                if ($catchResult.error.code -like '*GatewayTimeout*' -or
-                    $catchResult.error.code -like '*BadGatewayConnection*' -or
-                    $catchResult.error.code -like '*InvalidGatewayHost*' -or
-                    $catchResult.error.code -like '*ServerTimeout*' -or
-                    $catchResult.error.code -like '*ServiceUnavailable*' -or
-                    $catchResult.code -like '*ServiceUnavailable*' -or
-                    $catchResult.error.code -like '*MultipleErrorsOccurred*' -or
-                    $catchResult.code -like '*InternalServerError*' -or
-                    $catchResult.error.code -like '*InternalServerError*' -or
-                    $catchResult.error.code -like '*RequestTimeout*' -or
-                    $catchResult.error.code -like '*AuthorizationFailed*' -or
-                    $catchResult.error.code -like '*ExpiredAuthenticationToken*' -or
-                    $catchResult.error.code -like '*Authentication_ExpiredToken*' -or
-                    ($getPolicyCompliance -and $catchResult.error.code -like '*ResponseTooLarge*') -or
-                    $catchResult.error.code -like '*InvalidAuthenticationToken*' -or
-                    (
-                        ($getConsumption -and $catchResult.error.code -eq 404) -or
-                        ($getConsumption -and $catchResult.error.code -eq 'AccountCostDisabled') -or
-                        ($getConsumption -and $catchResult.error.message -like '*does not have any valid subscriptions*') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'Unauthorized') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'BadRequest' -and $catchResult.error.message -like '*The offer*is not supported*' -and $catchResult.error.message -notlike '*The offer MS-AZR-0110P is not supported*') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'BadRequest' -and $catchResult.error.message -like 'Invalid query definition*') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'NotFound' -and $catchResult.error.message -like '*have valid WebDirect/AIRS offer type*') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'NotFound' -and $catchResult.error.message -like 'Cost management data is not supported for subscription(s)*') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'IndirectCostDisabled')
-                    ) -or
-                    $catchResult.error.message -like '*The offer MS-AZR-0110P is not supported*' -or
-                    ($getSP -and $catchResult.error.code -like '*Request_ResourceNotFound*') -or
-                    ($getSP -and $catchResult.error.code -like '*Directory_ResultSizeLimitExceeded*') -or
-                    ($getSP -and $catchResult.error.code -like '*Authorization_RequestDenied*') -or
-                    ($getApp -and $catchResult.error.code -like '*Request_ResourceNotFound*') -or
-                    ($getApp -and $catchResult.error.code -like '*Authorization_RequestDenied*') -or
-                    ($getGroup -and $catchResult.error.code -like '*Request_ResourceNotFound*') -or
-                    ($getGroupMembersCount -and $catchResult.error.code -like '*Request_ResourceNotFound*') -or
-                    ($getGuests -and $catchResult.error.code -like '*Authorization_RequestDenied*') -or
-                    $catchResult.error.code -like '*UnknownError*' -or
-                    $catchResult.error.code -like '*BlueprintNotFound*' -or
-                    $catchResult.error.code -eq '500' -or
-                    $catchResult.error.code -eq 'ResourceRequestsThrottled' -or
-                    $catchResult.error.code -eq '429' -or
-                    ($getMgAscSecureScore -and $catchResult.error.code -eq 'BadRequest') -or
-                    ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'ResourceNotOnboarded') -or
-                    ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'TenantNotOnboarded') -or
-                    ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'InvalidResourceType') -or
-                    ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'InvalidResource') -or
-                    ($getRoleAssignmentScheduledInstances -and $catchResult.error.code -eq 'InvalidResource') -or
-                    ($getDiagnosticSettingsMg -and $catchResult.error.code -eq 'InvalidResourceType') -or
-                    ($catchResult.error.code -eq 'InsufficientPermissions') -or
-                    $catchResult.error.code -eq 'ClientCertificateValidationFailure' -or
-                    ($validate -and $catchResult.error.code -eq 'Authorization_RequestDenied') -or
-                    $catchResult.error.code -eq 'GatewayAuthenticationFailed' -or
-                    $catchResult.message -eq 'An error has occurred.' -or
-                    $catchResult.error.code -eq 'Request_UnsupportedQuery'
-                ) {
-                    if ($getPolicyCompliance -and $catchResult.error.code -like '*ResponseTooLarge*') {
-                        Write-Host "Info: $currentTask - (StatusCode: '$($azAPIRequest.StatusCode)') Response too large, skipping this scope."
-                        return 'ResponseTooLarge'
-                    }
-                    if ($catchResult.error.message -like '*The offer MS-AZR-0110P is not supported*') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - seems we´re hitting a malicious endpoint .. try again in $tryCounter second(s)"
-                        Start-Sleep -Seconds $tryCounter
-                    }
-                    if ($catchResult.error.code -like '*GatewayTimeout*' -or $catchResult.error.code -like '*BadGatewayConnection*' -or $catchResult.error.code -like '*InvalidGatewayHost*' -or $catchResult.error.code -like '*ServerTimeout*' -or $catchResult.error.code -like '*ServiceUnavailable*' -or $catchResult.code -like '*ServiceUnavailable*' -or $catchResult.error.code -like '*MultipleErrorsOccurred*' -or $catchResult.code -like '*InternalServerError*' -or $catchResult.error.code -like '*InternalServerError*' -or $catchResult.error.code -like '*RequestTimeout*' -or $catchResult.error.code -like '*UnknownError*' -or $catchResult.error.code -eq '500') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - try again in $tryCounter second(s)"
-                        Start-Sleep -Seconds $tryCounter
-                    }
-                    if ($catchResult.error.code -like '*AuthorizationFailed*') {
-                        if ($validate) {
-                            #Write-Host "$currentTask failed ('$($catchResult.error.code)' | '$($catchResult.error.message)')" -ForegroundColor DarkRed
-                            return 'failed'
-                        }
-                        else {
-                            if ($retryAuthorizationFailedCounter -gt $retryAuthorizationFailed) {
-                                Write-Host '- - - - - - - - - - - - - - - - - - - - '
-                                Write-Host "!Please report at $($htParameters.GithubRepository) and provide the following dump" -ForegroundColor Yellow
-                                Write-Host "$currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' - $retryAuthorizationFailed retries failed - EXIT"
-                                Write-Host ''
-                                Write-Host 'Parameters:'
-                                foreach ($htParameter in ($htParameters.Keys | Sort-Object)) {
-                                    Write-Host "$($htParameter):$($htParameters.($htParameter))"
-                                }
-                                if ($htParameters.onAzureDevOps -eq $true) {
-                                    Write-Error 'Error'
-                                }
-                                else {
-                                    Throw 'Error: check the last console output for details'
-                                }
-                            }
-                            else {
-                                if ($retryAuthorizationFailedCounter -gt 2) {
-                                    Start-Sleep -Seconds 5
-                                }
-                                if ($retryAuthorizationFailedCounter -gt 3) {
-                                    Start-Sleep -Seconds 10
-                                }
-                                Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' - not reasonable, retry #$retryAuthorizationFailedCounter of $retryAuthorizationFailed"
-                                $retryAuthorizationFailedCounter ++
-                            }
-                        }
-
-                    }
-
-                    if ($catchResult.error.code -like '*ExpiredAuthenticationToken*' -or $catchResult.error.code -like '*Authentication_ExpiredToken*' -or $catchResult.error.code -like '*InvalidAuthenticationToken*') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' - requesting new bearer token ($targetEndpoint)"
-                        createBearerToken -targetEndPoint $targetEndpoint
-                    }
-
-                    if (
-                        ($getConsumption -and $catchResult.error.code -eq 404) -or
-                        ($getConsumption -and $catchResult.error.code -eq 'AccountCostDisabled') -or
-                        ($getConsumption -and $catchResult.error.message -like '*does not have any valid subscriptions*') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'Unauthorized') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'BadRequest' -and $catchResult.error.message -like '*The offer*is not supported*' -and $catchResult.error.message -notlike '*The offer MS-AZR-0110P is not supported*') -or
-                        ($getConsumption -and $catchResult.error.code -eq 'BadRequest' -and $catchResult.error.message -like 'Invalid query definition*')
-                    ) {
-                        if ($getConsumption -and $catchResult.error.code -eq 404) {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) seems Subscriptions was created only recently - skipping"
-                            return $apiCallResultsCollection
-                        }
-                        if ($getConsumption -and $catchResult.error.code -eq 'AccountCostDisabled') {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) seems Access to cost data has been disabled for this Account - skipping CostManagement"
-                            return 'AccountCostDisabled'
-                        }
-                        if ($getConsumption -and $catchResult.error.message -like '*does not have any valid subscriptions*') {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) seems there are no valid Subscriptions present - skipping CostManagement"
-                            return 'NoValidSubscriptions'
-                        }
-                        if ($getConsumption -and $catchResult.error.code -eq 'Unauthorized') {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) Unauthorized - handling as exception"
-                            return 'Unauthorized'
-                        }
-                        if ($getConsumption -and $catchResult.error.code -eq 'BadRequest' -and $catchResult.error.message -like '*The offer*is not supported*' -and $catchResult.error.message -notlike '*The offer MS-AZR-0110P is not supported*') {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) Unauthorized - handling as exception"
-                            return 'OfferNotSupported'
-                        }
-                        if ($getConsumption -and $catchResult.error.code -eq 'BadRequest' -and $catchResult.error.message -like 'Invalid query definition*') {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) Unauthorized - handling as exception"
-                            return 'InvalidQueryDefinition'
-                        }
-                        if ($getConsumption -and $catchResult.error.code -eq 'NotFound' -and $catchResult.error.message -like '*have valid WebDirect/AIRS offer type*') {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) Unauthorized - handling as exception"
-                            return 'NonValidWebDirectAIRSOfferType'
-                        }
-                        if ($getConsumption -and $catchResult.error.code -eq 'NotFound' -and $catchResult.error.message -like 'Cost management data is not supported for subscription(s)*') {
-                            return 'NotFoundNotSupported'
-                        }
-                        if ($getConsumption -and $catchResult.error.code -eq 'IndirectCostDisabled') {
-                            return 'IndirectCostDisabled'
-                        }
-                    }
-                    if (($getGroup) -and $catchResult.error.code -like '*Request_ResourceNotFound*') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain Group status - skipping for now :)"
-                        return 'Request_ResourceNotFound'
-                    }
-
-                    if (($getGroupMembersCount) -and $catchResult.error.code -like '*Request_ResourceNotFound*') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain Group status - skipping for now :)"
-                        return 'Request_ResourceNotFound'
-                    }
-
-                    if (($getApp -or $getSP) -and $catchResult.error.code -like '*Request_ResourceNotFound*') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain ServicePrincipal status - skipping for now :)"
-                        return 'Request_ResourceNotFound'
-                    }
-
-                    if (($getSP) -and $catchResult.error.code -like '*Directory_ResultSizeLimitExceeded*') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) uncertain ServicePrincipal status - skipping for now :)"
-                        return 'Directory_ResultSizeLimitExceeded'
-                    }
-
-                    if ($currentTask -eq 'Checking AAD UserType' -and $catchResult.error.code -like '*Authorization_RequestDenied*') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) cannot get the executing user´s userType information (member/guest) - proceeding as 'unknown'"
-                        return 'unknown'
-                    }
-
-                    if ((($getApp -or $getSP) -and $catchResult.error.code -like '*Authorization_RequestDenied*') -or ($getGuests -and $catchResult.error.code -like '*Authorization_RequestDenied*')) {
-                        if ($userType -eq 'Guest' -or $userType -eq 'unknown') {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult)"
-                            if ($userType -eq 'Guest') {
-                                Write-Host " Your UserType is 'Guest' (member/guest/unknown) in the tenant therefore not enough permissions. You have the following options: [1. request membership to AAD Role 'Directory readers'.] Grant explicit Microsoft Graph API permission." -ForegroundColor Yellow
-                            }
-                            if ($userType -eq 'unknown') {
-                                Write-Host " Your UserType is 'unknown' (member/guest/unknown) in the tenant. Seems you do not have enough permissions geeting AAD related data. You have the following options: [1. request membership to AAD Role 'Directory readers'.]" -ForegroundColor Yellow
-                            }
-                            if ($htParameters.onAzureDevOps -eq $true) {
-                                Write-Error 'Error'
-                            }
-                            else {
-                                Throw 'Authorization_RequestDenied'
-                            }
-                        }
-                        else {
-                            Write-Host '- - - - - - - - - - - - - - - - - - - - '
-                            Write-Host "!Please report at $($htParameters.GithubRepository) and provide the following dump" -ForegroundColor Yellow
-                            Write-Host "$currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) - EXIT"
-                            Write-Host ''
-                            Write-Host 'Parameters:'
-                            foreach ($htParameter in ($htParameters.Keys | Sort-Object)) {
-                                Write-Host "$($htParameter):$($htParameters.($htParameter))"
-                            }
-                            if ($htParameters.onAzureDevOps -eq $true) {
-                                Write-Error 'Error'
-                            }
-                            else {
-                                Throw 'Authorization_RequestDenied'
-                            }
-                        }
-                    }
-
-                    if ($catchResult.error.code -like '*BlueprintNotFound*') {
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) seems Blueprint definition is gone - skipping for now :)"
-                        return 'BlueprintNotFound'
-                    }
-
-                    if ($catchResult.error.code -eq 'ResourceRequestsThrottled' -or $catchResult.error.code -eq '429') {
-                        $sleepSeconds = 11
-                        if ($catchResult.error.code -eq 'ResourceRequestsThrottled') {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' - throttled! sleeping $sleepSeconds seconds"
-                            start-sleep -Seconds $sleepSeconds
-                        }
-                        if ($catchResult.error.code -eq '429') {
-                            if ($catchResult.error.message -like '*60 seconds*') {
-                                $sleepSeconds = 60
-                            }
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' - throttled! sleeping $sleepSeconds seconds"
-                            start-sleep -Seconds $sleepSeconds
-                        }
-
-                    }
-
-                    if ($getMgAscSecureScore -and $catchResult.error.code -eq 'BadRequest') {
-                        $sleepSec = @(1, 1, 2, 3, 5, 7, 9, 10, 13, 15, 20, 25, 30, 45, 60, 60, 60, 60)[$tryCounter]
-                        $maxTries = 15
-                        if ($tryCounter -gt $maxTries) {
-                            Write-Host " $currentTask - capitulation after $maxTries attempts"
-                            return 'capitulation'
-                        }
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - try again (trying $maxTries times) in $sleepSec second(s)"
-                        Start-Sleep -Seconds $sleepSec
-                    }
-
-                    if (($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'ResourceNotOnboarded') -or ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'TenantNotOnboarded') -or ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'InvalidResourceType') -or ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'InvalidResource') -or ($getRoleAssignmentScheduledInstances -and $catchResult.error.code -eq 'InvalidResource')) {
-                        if ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'ResourceNotOnboarded') {
-                            return 'ResourceNotOnboarded'
-                        }
-                        if ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'TenantNotOnboarded') {
-                            return 'TenantNotOnboarded'
-                        }
-                        if ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'InvalidResourceType') {
-                            return 'InvalidResourceType'
-                        }
-                        if ($getRoleAssignmentSchedules -and $catchResult.error.code -eq 'InvalidResource') {
-                            return 'InvalidResource'
-                        }
-                        if ($getRoleAssignmentScheduledInstances -and $catchResult.error.code -eq 'InvalidResource') {
-                            return 'InvalidResource'
-                        }
-                    }
-
-                    if ($getDiagnosticSettingsMg -and $catchResult.error.code -eq 'InvalidResourceType') {
-                        return 'InvalidResourceType'
-                    }
-
-                    if ($catchResult.error.code -eq 'InsufficientPermissions' -or $catchResult.error.code -eq 'ClientCertificateValidationFailure' -or $catchResult.error.code -eq 'GatewayAuthenticationFailed' -or $catchResult.message -eq 'An error has occurred.') {
-                        $maxTries = 5
-                        $sleepSec = @(1, 3, 5, 7, 10, 12, 20, 30)[$tryCounter]
-                        if ($tryCounter -gt $maxTries) {
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' - exit"
-                            if ($htParameters.onAzureDevOps -eq $true) {
-                                Write-Error 'Error'
-                            }
-                            else {
-                                Throw 'Error - check the last console output for details'
-                            }
-                        }
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') '$($catchResult.error.code)' | '$($catchResult.error.message)' sleeping $($sleepSec) seconds"
-                        start-sleep -Seconds $sleepSec
-                    }
-
-                    if ($validate -and $catchResult.error.code -eq 'Authorization_RequestDenied') {
-                        #Write-Host "$currentTask failed ('$($catchResult.error.code)' | '$($catchResult.error.message)')" -ForegroundColor DarkRed
-                        return 'failed'
-                    }
-
-                    if ($catchResult.error.code -eq 'Request_UnsupportedQuery') {
-                        $sleepSec = @(1, 3, 7, 10, 15, 20, 30)[$tryCounter]
-                        $maxTries = 5
-                        if ($tryCounter -gt $maxTries) {
-                            Write-Host " $currentTask - capitulation after $maxTries attempts"
-                            return 'Request_UnsupportedQuery'
-                        }
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - try again (trying $maxTries times) in $sleepSec second(s)"
-                        Start-Sleep -Seconds $sleepSec
-                    }
-
-                }
-                else {
-                    if (-not $catchResult.code -and -not $catchResult.error.code -and -not $catchResult.message -and -not $catchResult.error.message -and -not $catchResult -and $tryCounter -lt 6) {
-                        if ($azAPIRequest.StatusCode -eq 204 -and $getConsumption) {
-                            return $apiCallResultsCollection
-                        }
-                        else {
-                            $sleepSec = @(3, 7, 12, 20, 30, 45, 60)[$tryCounter]
-                            Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) try again in $sleepSec second(s)"
-                            Start-Sleep -Seconds $sleepSec
-                        }
-                    }
-                    elseif (-not $catchResult.code -and -not $catchResult.error.code -and -not $catchResult.message -and -not $catchResult.error.message -and $catchResult -and $tryCounter -lt 6) {
-                        $sleepSec = @(3, 7, 12, 20, 30, 45, 60)[$tryCounter]
-                        Write-Host " $currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) try again in $sleepSec second(s)"
-                        Start-Sleep -Seconds $sleepSec
-                    }
-                    else {
-                        Write-Host '- - - - - - - - - - - - - - - - - - - - '
-                        Write-Host "!Please report at $($htParameters.GithubRepository) and provide the following dump" -ForegroundColor Yellow
-                        Write-Host "$currentTask - try #$tryCounter; returned: (StatusCode: '$($azAPIRequest.StatusCode)') <.code: '$($catchResult.code)'> <.error.code: '$($catchResult.error.code)'> | <.message: '$($catchResult.message)'> <.error.message: '$($catchResult.error.message)'> - (plain : $catchResult) - EXIT"
-                        Write-Host ''
-                        Write-Host 'Parameters:'
-                        foreach ($htParameter in ($htParameters.Keys | Sort-Object)) {
-                            Write-Host "$($htParameter):$($htParameters.($htParameter))"
-                        }
-                        if ($getConsumption) {
-                            Write-Host 'If Consumption data is not that important for you, please try parameter: -NoAzureConsumption (however, please still report the issue - thank you)'
-                        }
-                        if ($htParameters.onAzureDevOps -eq $true) {
-                            Write-Error 'Error'
-                        }
-                        else {
-                            Throw 'Error - check the last console output for details'
-                        }
-                    }
-                }
-            }
-            else {
-                if ($htParameters.DebugAzAPICall -eq $true) {
-                    if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: apiStatusCode: $($azAPIRequest.StatusCode)" -ForegroundColor $debugForeGroundColor }
-                }
-                $azAPIRequestConvertedFromJson = ($azAPIRequest.Content | ConvertFrom-Json)
-                if ($listenOn -eq 'Content') {
-                    if ($htParameters.DebugAzAPICall -eq $true) {
-                        if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: listenOn=content ($((($azAPIRequestConvertedFromJson) | Measure-Object).count))" -ForegroundColor $debugForeGroundColor }
-                    }
-                    $null = $apiCallResultsCollection.Add($azAPIRequestConvertedFromJson)
-                }
-                elseif ($listenOn -eq 'ContentProperties') {
-                    if (($azAPIRequestConvertedFromJson.properties.rows | Measure-Object).Count -gt 0) {
-                        foreach ($consumptionline in $azAPIRequestConvertedFromJson.properties.rows) {
-                            $hlper = $htSubscriptionsMgPath.($consumptionline[1])
-                            $null = $apiCallResultsCollection.Add([PSCustomObject]@{
-                                    "$($azAPIRequestConvertedFromJson.properties.columns.name[0])" = $consumptionline[0]
-                                    "$($azAPIRequestConvertedFromJson.properties.columns.name[1])" = $consumptionline[1]
-                                    SubscriptionName                                               = $hlper.DisplayName
-                                    SubscriptionMgPath                                             = $hlper.ParentNameChainDelimited
-                                    "$($azAPIRequestConvertedFromJson.properties.columns.name[2])" = $consumptionline[2]
-                                    "$($azAPIRequestConvertedFromJson.properties.columns.name[3])" = $consumptionline[3]
-                                    "$($azAPIRequestConvertedFromJson.properties.columns.name[4])" = $consumptionline[4]
-                                    "$($azAPIRequestConvertedFromJson.properties.columns.name[5])" = $consumptionline[5]
-                                    "$($azAPIRequestConvertedFromJson.properties.columns.name[6])" = $consumptionline[6]
-                                })
-                        }
-                    }
-                }
-                else {
-                    if (($azAPIRequestConvertedFromJson).value) {
-                        if ($htParameters.DebugAzAPICall -eq $true) {
-                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: listenOn=default(value) value exists ($((($azAPIRequestConvertedFromJson).value | Measure-Object).count))" -ForegroundColor $debugForeGroundColor }
-                        }
-                        foreach ($entry in $azAPIRequestConvertedFromJson.value) {
-                            $null = $apiCallResultsCollection.Add($entry)
-                        }
-
-                        if ($getGuests) {
-                            $guestAccountsCount = ($apiCallResultsCollection).Count
-                            if ($guestAccountsCount % 1000 -eq 0) {
-                                write-host " $guestAccountsCount processed"
-                            }
-                        }
-                    }
-                    else {
-                        if ($htParameters.DebugAzAPICall -eq $true) {
-                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host '   DEBUG: listenOn=default(value) value not exists; return empty array' -ForegroundColor $debugForeGroundColor }
-                        }
-                    }
-                }
-
-                $isMore = $false
-                if (-not $validate) {
-                    if ($azAPIRequestConvertedFromJson.nextLink) {
-                        $isMore = $true
-                        if ($uri -eq $azAPIRequestConvertedFromJson.nextLink) {
-                            if ($restartDueToDuplicateNextlinkCounter -gt 3) {
-                                Write-Host " $currentTask restartDueToDuplicateNextlinkCounter: #$($restartDueToDuplicateNextlinkCounter) - Please report this error/exit"
-                                if ($htParameters.onAzureDevOps -eq $true) {
-                                    Write-Error 'Error'
-                                }
-                                else {
-                                    Throw 'Error - check the last console output for details'
-                                }
-                            }
-                            else {
-                                $restartDueToDuplicateNextlinkCounter++
-                                Write-Host 'nextLinkLog: uri is equal to nextLinkUri'
-                                Write-Host "nextLinkLog: uri: $uri"
-                                Write-Host "nextLinkLog: nextLinkUri: $($azAPIRequestConvertedFromJson.nextLink)"
-                                Write-Host "nextLinkLog: re-starting (#$($restartDueToDuplicateNextlinkCounter)) '$currentTask'"
-                                $apiCallResultsCollection = [System.Collections.ArrayList]@()
-                                $uri = $initialUri
-                                Start-Sleep -Seconds 10
-                                createBearerToken -targetEndPoint $targetEndpoint
-                                Start-Sleep -Seconds 10
-                            }
-                        }
-                        else {
-                            $uri = $azAPIRequestConvertedFromJson.nextLink
-                        }
-                        if ($htParameters.DebugAzAPICall -eq $true) {
-                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
-                        }
-                    }
-                    elseIf ($azAPIRequestConvertedFromJson.'@oData.nextLink') {
-                        $isMore = $true
-                        if ($uri -eq $azAPIRequestConvertedFromJson.'@odata.nextLink') {
-                            if ($restartDueToDuplicateNextlinkCounter -gt 3) {
-                                Write-Host " $currentTask restartDueToDuplicate@odataNextlinkCounter: #$($restartDueToDuplicateNextlinkCounter) - Please report this error/exit"
-                                if ($htParameters.onAzureDevOps -eq $true) {
-                                    Write-Error 'Error'
-                                }
-                                else {
-                                    Throw 'Error - check the last console output for details'
-                                }
-                            }
-                            else {
-                                $restartDueToDuplicateNextlinkCounter++
-                                Write-Host 'nextLinkLog: uri is equal to @odata.nextLinkUri'
-                                Write-Host "nextLinkLog: uri: $uri"
-                                Write-Host "nextLinkLog: @odata.nextLinkUri: $($azAPIRequestConvertedFromJson.'@odata.nextLink')"
-                                Write-Host "nextLinkLog: re-starting (#$($restartDueToDuplicateNextlinkCounter)) '$currentTask'"
-                                $apiCallResultsCollection = [System.Collections.ArrayList]@()
-                                $uri = $initialUri
-                                Start-Sleep -Seconds 10
-                                createBearerToken -targetEndPoint $targetEndpoint
-                                Start-Sleep -Seconds 10
-                            }
-                        }
-                        else {
-                            $uri = $azAPIRequestConvertedFromJson.'@odata.nextLink'
-                        }
-                        if ($htParameters.DebugAzAPICall -eq $true) {
-                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: @oData.nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
-                        }
-                    }
-                    elseif ($azAPIRequestConvertedFromJson.properties.nextLink) {
-                        $isMore = $true
-                        if ($uri -eq $azAPIRequestConvertedFromJson.properties.nextLink) {
-                            if ($restartDueToDuplicateNextlinkCounter -gt 3) {
-                                Write-Host " $currentTask restartDueToDuplicateNextlinkCounter: #$($restartDueToDuplicateNextlinkCounter) - Please report this error/exit"
-                                if ($htParameters.onAzureDevOps -eq $true) {
-                                    Write-Error 'Error'
-                                }
-                                else {
-                                    Throw 'Error - check the last console output for details'
-                                }
-                            }
-                            else {
-                                $restartDueToDuplicateNextlinkCounter++
-                                Write-Host 'nextLinkLog: uri is equal to nextLinkUri'
-                                Write-Host "nextLinkLog: uri: $uri"
-                                Write-Host "nextLinkLog: nextLinkUri: $($azAPIRequestConvertedFromJson.properties.nextLink)"
-                                Write-Host "nextLinkLog: re-starting (#$($restartDueToDuplicateNextlinkCounter)) '$currentTask'"
-                                $apiCallResultsCollection = [System.Collections.ArrayList]@()
-                                $uri = $initialUri
-                                Start-Sleep -Seconds 10
-                                createBearerToken -targetEndPoint $targetEndpoint
-                                Start-Sleep -Seconds 10
-                            }
-                        }
-                        else {
-                            $uri = $azAPIRequestConvertedFromJson.properties.nextLink
-                        }
-                        if ($htParameters.DebugAzAPICall -eq $true) {
-                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host "   DEBUG: nextLink: $Uri" -ForegroundColor $debugForeGroundColor }
-                        }
-                    }
-                    else {
-                        if ($htParameters.DebugAzAPICall -eq $true) {
-                            if ($htParameters.DebugAzAPICall -eq $true) { Write-Host '   DEBUG: NextLink: none' -ForegroundColor $debugForeGroundColor }
-                        }
-                    }
-                }
-            }
-        }
-        else {
-            if ($htParameters.DebugAzAPICall -eq $true) {
-                if ($htParameters.DebugAzAPICall -eq $true) { Write-Host '   DEBUG: unexpectedError: notFalse' -ForegroundColor $debugForeGroundColor }
-            }
-            if ($tryCounterUnexpectedError -lt 13) {
-                $sleepSec = @(1, 2, 3, 5, 7, 10, 13, 17, 20, 30, 40, 50, , 55, 60)[$tryCounterUnexpectedError]
-                Write-Host " $currentTask #$tryCounterUnexpectedError 'Unexpected Error' occurred (trying 10 times); sleep $sleepSec seconds"
-                Write-Host $catchResult
-                Start-Sleep -Seconds $sleepSec
-            }
-            else {
-                Write-Host " $currentTask #$tryCounterUnexpectedError 'Unexpected Error' occurred (tried 5 times)/exit"
-                if ($htParameters.onAzureDevOps -eq $true) {
-                    Write-Error 'Error'
-                }
-                else {
-                    Throw 'Error - check the last console output for details'
-                }
-            }
-        }
-    }
-    until($azAPIRequest.StatusCode -eq 200 -and -not $isMore)
-    return $apiCallResultsCollection
-}
-$funcAzAPICall = $function:AzAPICall.ToString()
-#endregion azapicall
-
-#check required Az modules cmdlets
-#region testAzModules
-$testCommands = @('Get-AzContext')
-$azModules = @('Az.Accounts')
-
-Write-Host 'Testing required Az modules cmdlets'
-foreach ($testCommand in $testCommands) {
-    if (-not (Get-Command $testCommand -ErrorAction Ignore)) {
-        if ($htParameters.onAzureDevOps -eq $true) {
-            Write-Error "AzModule test failed: cmdlet $testCommand not available - make sure the modules $($azModules -join ', ') are installed"
-            Write-Error 'Error'
-        }
-        else {
-            Write-Host " AzModule test failed: cmdlet $testCommand not available - make sure the modules $($azModules -join ', ') are installed" -ForegroundColor Red
-            Write-Host ' Install the Azure Az PowerShell module: https://docs.microsoft.com/en-us/powershell/azure/install-az-ps'
-            Throw "Error - $($Product): check the last console output for details"
-        }
-    }
-    else {
-        Write-Host " AzModule test passed: Az ps module supporting cmdlet $testCommand installed" -ForegroundColor Green
-    }
-}
-
-Write-Host 'Collecting Az modules versions'
-foreach ($azModule in $azModules) {
-    $azModuleVersion = (Get-InstalledModule -name "$azModule" -ErrorAction Ignore).Version
-    if ($azModuleVersion) {
-        Write-Host " Az Module $azModule Version: $azModuleVersion"
-        $resolvedAzModuleVersion = $azModuleVersion
-    }
-    else {
-        Write-Host " Az Module $azModule Version: could not be assessed"
-        $resolvedAzModuleVersion = 'could not be assessed'
-    }
-}
-#endregion testAzModules
-
-#check AzContext
-#region checkAzContext
-Write-Host 'Checking Az Context'
-if (-not $checkContext) {
-    Write-Host " Context test failed: No context found. Please connect to Azure (run: Connect-AzAccount) and re-run $($Product)" -ForegroundColor Red
-    if ($htParameters.onAzureDevOps -eq $true) {
-        Write-Error 'Error'
-    }
-    else {
-        Throw "Error - $($Product): check the last console output for details"
-    }
-}
-else {
-    $accountType = $checkContext.Account.Type
-    $accountId = $checkContext.Account.Id
-    Write-Host " Context AccountId: '$($accountId)'" -ForegroundColor Yellow
-    Write-Host " Context AccountType: '$($accountType)'" -ForegroundColor Yellow
-
-    if ($SubscriptionId4AzContext -ne 'undefined') {
-        Write-Host " Setting AzContext to SubscriptionId: '$SubscriptionId4AzContext'" -ForegroundColor Yellow
         try {
-            Set-AzContext -SubscriptionId $SubscriptionId4AzContext
+            $azAPICallModuleDeviation = $false
+            $azAPICallModuleVersionLoaded = ((Get-Module -name AzAPICall).Version)
+            foreach ($moduleLoaded in $azAPICallModuleVersionLoaded) {
+                if ($moduleLoaded.toString() -ne $azAPICallVersion) {
+                    Write-Host "  Deviating loaded version found ('$($moduleLoaded.toString())' != '$($azAPICallVersion)')"
+                    $azAPICallModuleDeviation = $true
+                }
+                else {
+                    if ($azAPICallModuleVersionLoaded.count -eq 1) {
+                        Write-Host "  AzAPICall module ($($moduleLoaded.toString())) is already loaded" -ForegroundColor Green
+                        $importAzAPICallModuleSuccess = $true
+                    }
+                }
+            }
+
+            if ($azAPICallModuleDeviation) {
+                $importAzAPICallModuleSuccess = $false
+                try {
+                    Write-Host "  Remove-Module AzAPICall ($(($azAPICallModuleVersionLoaded -join ', ').ToString()))"
+                    Remove-Module -Name AzAPICall -Force
+                }
+                catch {
+                    Write-Host '  Remove-Module AzAPICall failed'
+                    throw
+                }
+            }
         }
         catch {
-            if ($htParameters.onAzureDevOps -eq $true) {
-                Write-Error 'Error'
+            #Write-Host '  AzAPICall module is not loaded'
+        }
+
+        if (-not $importAzAPICallModuleSuccess) {
+            Write-Host "  Try importing AzAPICall module ($azAPICallVersion)"
+            if (($env:SYSTEM_TEAMPROJECTID -and $env:BUILD_REPOSITORY_ID) -or $env:GITHUB_ACTIONS) {
+                Import-Module ".\pwsh\AzAPICallModule\AzAPICall\$($azAPICallVersion)\AzAPICall.psd1" -Force -ErrorAction Stop
+                Write-Host "  Import PS module 'AzAPICall' ($($azAPICallVersion)) succeeded" -ForegroundColor Green
             }
             else {
-                Throw "Error - $($Product): check the last console output for details"
+                Import-Module -Name AzAPICall -RequiredVersion $azAPICallVersion -Force
+                Write-Host "  Import PS module 'AzAPICall' ($($azAPICallVersion)) succeeded" -ForegroundColor Green
+            }
+            $importAzAPICallModuleSuccess = $true
+        }
+    }
+    catch {
+        Write-Host '  Importing AzAPICall module failed'
+        if (($env:SYSTEM_TEAMPROJECTID -and $env:BUILD_REPOSITORY_ID) -or $env:GITHUB_ACTIONS) {
+            Write-Host "  Saving AzAPICall module ($($azAPICallVersion))"
+            try {
+                $params = @{
+                    Name            = 'AzAPICall'
+                    Path            = '.\pwsh\AzAPICallModule'
+                    Force           = $true
+                    RequiredVersion = $azAPICallVersion
+                }
+                Save-Module @params
+            }
+            catch {
+                Write-Host "  Saving AzAPICall module ($($azAPICallVersion)) failed"
+                throw
             }
         }
-        $checkContext = Get-AzContext -ErrorAction Stop
-    }
-
-    #else{
-    if (-not $checkContext.Subscription) {
-        $checkContext
-        Write-Host " Context test failed: Context is not set to any Subscription. Set your context to a subscription by running: Set-AzContext -subscription <subscriptionId> (run Get-AzSubscription to get the list of available Subscriptions). When done re-run $($Product)" -ForegroundColor Red
-
-        if ($htParameters.onAzureDevOps -eq $true) {
-            Write-host " If this error occurs you may want to leverage parameter 'SubscriptionId4AzContext' (<script>.ps1 -SubscriptionId4AzContext '<SubscriptionId>')"
-            Write-Error 'Error'
-        }
         else {
-            Throw "Error - $($Product): check the last console output for details"
+            do {
+                $installAzAPICallModuleUserChoice = Read-Host "  Do you want to install AzAPICall module ($($azAPICallVersion)) from the PowerShell Gallery? (y/n)"
+                if ($installAzAPICallModuleUserChoice -eq 'y') {
+                    try {
+                        Install-Module -Name AzAPICall -RequiredVersion $azAPICallVersion
+                    }
+                    catch {
+                        Write-Host "  Install-Module AzAPICall ($($azAPICallVersion)) Failed"
+                        throw
+                    }
+                }
+                elseif ($installAzAPICallModuleUserChoice -eq 'n') {
+                    Write-Host '  AzAPICall module is required, please visit https://aka.ms/AZAPICall or https://www.powershellgallery.com/packages/AzAPICall'
+                    throw '  AzAPICall module is required' 
+                }
+                else {
+                    Write-Host "  Accepted input 'y' or 'n'; start over.."
+                }
+            }
+            until ($installAzAPICallModuleUserChoice -eq 'y')
         }
+    }
+}
+until ($importAzAPICallModuleSuccess)
+#endregion verifyAzAPICall
+
+#Region initAZAPICall
+Write-Host "Initialize 'AzAPICall'"
+$parameters4AzAPICallModule = @{
+    #DebugAzAPICall = $DebugAzAPICall
+    #SubscriptionId4AzContext = $SubscriptionId4AzContext
+}
+$azAPICallConf = initAzAPICall @parameters4AzAPICallModule
+Write-Host " Initialize 'AzAPICall' succeeded" -ForegroundColor Green
+#EndRegion initAZAPICall
+
+$AzAPICallFunctions = getAzAPICallFunctions
+
+$ManagementGroupId = ($azAPICallConf['checkContext']).Tenant.Id
+
+function setTranscript {
+    #region setTranscript
+
+    if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
+
+        $script:fileNameTranscript = "AzADServiceprincipalInsights_$($ManagementGroupId)_Log.txt"
     }
     else {
-        Write-Host ' Context test passed: Context OK' -ForegroundColor Green
-    }
-    #}
 
+        $script:fileNameTranscript = "AzADServiceprincipalInsights_$($ProductVersion)_$($fileTimestamp)_$($ManagementGroupId)_Log.txt"
+    }
+    
+    Write-Host "Writing transcript: $($outputPath)$($DirectorySeparatorChar)$($fileNameTranscript)"
+    Start-Transcript -Path "$($outputPath)$($DirectorySeparatorChar)$($fileNameTranscript)"
+    #endregion setTranscript
 }
-#endregion checkAzContext
-
-#environment check
-#region environmentcheck
-$checkAzEnvironments = Get-AzEnvironment -ErrorAction Stop
-
-#FutureUse
-#Graph Endpoints https://docs.microsoft.com/en-us/graph/deployments#microsoft-graph-and-graph-explorer-service-root-endpoints
-#AzureCloud https://graph.microsoft.com
-#AzureUSGovernment L4 https://graph.microsoft.us
-#AzureUSGovernment L5 (DOD) https://dod-graph.microsoft.us
-#AzureChinaCloud https://microsoftgraph.chinacloudapi.cn
-#AzureGermanCloud https://graph.microsoft.de
-
-#AzureEnvironmentRelatedUrls
-$htAzureEnvironmentRelatedUrls = @{ }
-$arrayAzureManagementEndPointUrls = @()
-foreach ($checkAzEnvironment in $checkAzEnvironments) {
-    ($htAzureEnvironmentRelatedUrls).($checkAzEnvironment.Name) = @{ }
-    ($htAzureEnvironmentRelatedUrls).($checkAzEnvironment.Name).ResourceManagerUrl = $checkAzEnvironment.ResourceManagerUrl
-    $arrayAzureManagementEndPointUrls += $checkAzEnvironment.ResourceManagerUrl
-    if ($checkAzEnvironment.Name -eq 'AzureCloud') {
-        ($htAzureEnvironmentRelatedUrls).($checkAzEnvironment.Name).MSGraphUrl = 'https://graph.microsoft.com'
-    }
-    if ($checkAzEnvironment.Name -eq 'AzureChinaCloud') {
-        ($htAzureEnvironmentRelatedUrls).($checkAzEnvironment.Name).MSGraphUrl = 'https://microsoftgraph.chinacloudapi.cn'
-    }
-    if ($checkAzEnvironment.Name -eq 'AzureUSGovernment') {
-        ($htAzureEnvironmentRelatedUrls).($checkAzEnvironment.Name).MSGraphUrl = 'https://graph.microsoft.us'
-    }
-    if ($checkAzEnvironment.Name -eq 'AzureGermanCloud') {
-        ($htAzureEnvironmentRelatedUrls).($checkAzEnvironment.Name).MSGraphUrl = 'https://graph.microsoft.de'
-    }
+if ($DoTranscript) {
+    setTranscript
 }
-#endregion environmentcheck
 
-#create bearer token
-if (-not $NoAzureRoleAssignments) {
-    createBearerToken -targetEndPoint 'ManagementAPI'
+#region htParameters (all switch params used in foreach-object -parallel)
+function addHtParameters {
+    Write-Host 'Add AzADServiceprincipalInsights htParameters'
+    $script:azAPICallConf['htParameters'] += [ordered]@{
+        NoJsonExport           = [bool]$NoJsonExport
+        NoAzureRoleAssignments = [bool]$NoAzureRoleAssignments
+        ProductVersion         = $ProductVersion
+    }
+    Write-Host 'htParameters:'
+    $azAPICallConf['htParameters'] | format-table -AutoSize | Out-String
+    Write-Host 'Add AzADServiceprincipalInsights htParameters succeeded' -ForegroundColor Green
 }
-createBearerToken -targetEndPoint 'MSGraphAPI'
+addHtParameters
+#endregion htParameters
 
 #helper file/dir, delimiter, time
 #region helper
@@ -1096,6 +298,65 @@ if ($CsvDelimiter -eq ',') {
 #endregion helper
 
 #region Function
+
+#region getClassification
+function getClassification {
+    param (
+        [string]$permission,
+        [string]$permissionType
+    )
+    #Write-Host "getting classification for permission '$permission' ($permissionType)"
+    $returnClassification = 'unclassified'
+    $isClassified = $false
+    foreach ($classification in $getClassifications.permissions.($permissionType).'classifications'.Keys) {
+        if (($getClassifications.permissions.($permissionType).'classifications'.($classification).'includes').count -gt 0) {
+            $currentPermissionClassification = $classification
+            #Write-Host "$classification permissions to check: $(($getClassifications.permissions.($permissionType).'classifications'.($currentPermissionClassification).'includes').count)"
+            
+            foreach ($permissionToCheck in $getClassifications.permissions.($permissionType).'classifications'.($currentPermissionClassification).'includes') {
+                if ($permissionToCheck.Contains('*')) {
+                    if ($permission -like $permissionToCheck) {
+                        #Write-Host "TRUE (like) $permissionType permission '$permission' is classified '$currentPermissionClassification'"
+                        $isClassified = $true
+                        $returnClassification = $classification
+                    }
+                }
+                else {
+                    if ($permission -eq $permissionToCheck) {
+                        #Write-Host "TRUE (eq) $permissionType permission '$permission' is classified '$currentPermissionClassification'"
+                        $isClassified = $true
+                        $returnClassification = $classification
+                    }
+                }
+            }
+    
+            foreach ($permissionToCheck in $getClassifications.permissions.($permissionType).'classifications'.($currentPermissionClassification).'excludes') {
+                if ($permissionToCheck.Contains('*')) {
+                    if ($permission -like $permissionToCheck) {
+                        #Write-Host "excludes - TRUE (like) $permissionType permission '$permission' is excluded for classification"
+                        $isClassified = $false
+                        $returnClassification = 'unclassified'
+                    }
+                }
+                else {
+                    if ($permission -eq $permissionToCheck) {
+                        #Write-Host "excludes - TRUE (eq) $permissionType permission '$permission' is excluded for classification"
+                        $isClassified = $false
+                        $returnClassification = 'unclassified'
+                    }
+                }
+            }
+        }
+    }
+    # if ($isClassified) {
+    #     #$returnClassification = $currentPermissionClassification
+    #     Write-Host $returnClassification
+    # }
+
+    return $returnClassification
+}
+$funcGetClassification = $function:getClassification.ToString()
+#endregion getClassification
 
 #region resolveObectsById
 function resolveObectsById($objects, $targetHt) {
@@ -1113,7 +374,7 @@ function resolveObectsById($objects, $targetHt) {
         $nonResolvedIdentitiesToCheck = '"{0}"' -f ($batch.Group -join '","')
         #Write-Host "    IdentitiesToCheck: $nonResolvedIdentitiesToCheck"
 
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/directoryObjects/getByIds?`$select=userType,id,displayName"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/directoryObjects/getByIds?`$select=userType,id,displayName"
         $method = 'POST'
         $body = @"
         {
@@ -1121,7 +382,7 @@ function resolveObectsById($objects, $targetHt) {
         }
 "@
         $currentTask = "Resolving Identities - Batch #$batchCnt/$($ObjectIdsBatchCount) ($(($batch.Group).Count) ObjectIds)"
-        $resolvedIdentities = AzAPICall -uri $uri -method $method -body $body -currentTask $currentTask
+        $resolvedIdentities = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -body $body -currentTask $currentTask
 
         $t = 0
         foreach ($resolvedIdentity in $resolvedIdentities) {
@@ -1175,12 +436,8 @@ function dataCollection($mgId) {
         $CsvDelimiter = $using:CsvDelimiter
         $CsvDelimiterOpposite = $using:CsvDelimiterOpposite
         #fromOtherFunctions
-        $arrayAzureManagementEndPointUrls = $using:arrayAzureManagementEndPointUrls
-        $checkContext = $using:checkContext
-        $htAzureEnvironmentRelatedUrls = $using:htAzureEnvironmentRelatedUrls
-        $htBearerAccessToken = $using:htBearerAccessToken
+        $azAPICallConf = $using:azAPICallConf
         #Array&HTs
-        $htParameters = $using:htParameters
         $customDataCollectionDuration = $using:customDataCollectionDuration
         $htCacheDefinitionsRole = $using:htCacheDefinitionsRole
         $htCacheAssignmentsRole = $using:htCacheAssignmentsRole
@@ -1190,13 +447,12 @@ function dataCollection($mgId) {
         $allManagementGroupsFromEntitiesChildOfRequestedMg = $using:allManagementGroupsFromEntitiesChildOfRequestedMg
         $allManagementGroupsFromEntitiesChildOfRequestedMgCount = $using:allManagementGroupsFromEntitiesChildOfRequestedMgCount
         $arrayDataCollectionProgressMg = $using:arrayDataCollectionProgressMg
-        $arrayAPICallTracking = $using:arrayAPICallTracking
         $arrayAPICallTrackingCustomDataCollection = $using:arrayAPICallTrackingCustomDataCollection
         $htRoleAssignmentsFromAPIInheritancePrevention = $using:htRoleAssignmentsFromAPIInheritancePrevention
         #Functions
-        $function:AzAPICall = $using:funcAzAPICall
-        $function:createBearerToken = $using:funcCreateBearerToken
-        $function:GetJWTDetails = $using:funcGetJWTDetails
+        $function:AzAPICall = $using:AzAPICallFunctions.funcAzAPICall
+        $function:createBearerToken = $using:AzAPICallFunctions.funcCreateBearerToken
+        $function:GetJWTDetails = $using:AzAPICallFunctions.funcGetJWTDetails
         #endregion usingVARS
 
         $MgParentId = ($allManagementGroupsFromEntitiesChildOfRequestedMg.where( { $_.Name -eq $mgdetail.Name })).properties.parent.Id -replace '.*/'
@@ -1212,9 +468,9 @@ function dataCollection($mgId) {
 
         #MGPolicyAssignments
         $currentTask = "Policy assignments '$($mgdetail.properties.displayName)' ('$($mgdetail.Name)')"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementgroups/$($mgdetail.Name)/providers/Microsoft.Authorization/policyAssignments?`$filter=atscope()&api-version=2021-06-01"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/providers/Microsoft.Management/managementgroups/$($mgdetail.Name)/providers/Microsoft.Authorization/policyAssignments?`$filter=atscope()&api-version=2021-06-01"
         $method = 'GET'
-        $L0mgmtGroupPolicyAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
+        $L0mgmtGroupPolicyAssignments = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
 
         foreach ($L0mgmtGroupPolicyAssignment in $L0mgmtGroupPolicyAssignments) {
 
@@ -1226,9 +482,9 @@ function dataCollection($mgId) {
 
         #MGCustomRolesRoles
         $currentTask = "Custom Role definitions '$($mgdetail.properties.displayName)' ('$($mgdetail.Name)')"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleDefinitions?api-version=2015-07-01&`$filter=type%20eq%20'CustomRole'"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleDefinitions?api-version=2015-07-01&`$filter=type%20eq%20'CustomRole'"
         $method = 'GET'
-        $mgCustomRoleDefinitions = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
+        $mgCustomRoleDefinitions = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
 
         foreach ($mgCustomRoleDefinition in $mgCustomRoleDefinitions) {
             if (-not ($htCacheDefinitionsRole).($mgCustomRoleDefinition.name)) {
@@ -1240,9 +496,9 @@ function dataCollection($mgId) {
 
         #PIM RoleAssignmentSchedules
         $currentTask = "Role assignment schedules API '$($mgdetail.properties.displayName)' ('$($mgdetail.Name)')"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignmentSchedules?api-version=2020-10-01-preview"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignmentSchedules?api-version=2020-10-01-preview"
         $method = 'GET'
-        $roleAssignmentSchedulesFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection' -getRoleAssignmentSchedules $true
+        $roleAssignmentSchedulesFromAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
 
         if ($roleAssignmentSchedulesFromAPI -eq 'ResourceNotOnboarded' -or $roleAssignmentSchedulesFromAPI -eq 'TenantNotOnboarded' -or $roleAssignmentSchedulesFromAPI -eq 'InvalidResourceType') {
             #Write-Host "Scope '$($childMgSubDisplayName)' ('$childMgSubId') not onboarded in PIM"
@@ -1262,9 +518,9 @@ function dataCollection($mgId) {
 
         #RoleAssignment API (system metadata e.g. createdOn)
         $currentTask = "Role assignments API '$($mgdetail.properties.displayName)' ('$($mgdetail.Name)')"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignments?api-version=2015-07-01"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/providers/Microsoft.Management/managementGroups/$($mgdetail.Name)/providers/Microsoft.Authorization/roleAssignments?api-version=2015-07-01"
         $method = 'GET'
-        $roleAssignmentsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
+        $roleAssignmentsFromAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
 
         if ($roleAssignmentsFromAPI.Count -gt 0) {
             foreach ($roleAssignmentFromAPI in $roleAssignmentsFromAPI) {
@@ -1360,12 +616,8 @@ function dataCollection($mgId) {
                 $CsvDelimiterOpposite = $using:CsvDelimiterOpposite
                 #Parameters Sub related
                 #fromOtherFunctions
-                $arrayAzureManagementEndPointUrls = $using:arrayAzureManagementEndPointUrls
-                $checkContext = $using:checkContext
-                $htAzureEnvironmentRelatedUrls = $using:htAzureEnvironmentRelatedUrls
-                $htBearerAccessToken = $using:htBearerAccessToken
+                $azAPICallConf = $using:azAPICallConf
                 #Array&HTs
-                $htParameters = $using:htParameters
                 $customDataCollectionDuration = $using:customDataCollectionDuration
                 $htSubscriptionsMgPath = $using:htSubscriptionsMgPath
                 $htManagementGroupsMgPath = $using:htManagementGroupsMgPath
@@ -1377,13 +629,12 @@ function dataCollection($mgId) {
                 $arrayDataCollectionProgressSub = $using:arrayDataCollectionProgressSub
                 $htAllSubscriptionsFromAPI = $using:htAllSubscriptionsFromAPI
                 $arrayEntitiesFromAPI = $using:arrayEntitiesFromAPI
-                $arrayAPICallTracking = $using:arrayAPICallTracking
                 $arrayAPICallTrackingCustomDataCollection = $using:arrayAPICallTrackingCustomDataCollection
                 $htRoleAssignmentsFromAPIInheritancePrevention = $using:htRoleAssignmentsFromAPIInheritancePrevention
                 #Functions
-                $function:AzAPICall = $using:funcAzAPICall
-                $function:createBearerToken = $using:funcCreateBearerToken
-                $function:GetJWTDetails = $using:funcGetJWTDetails
+                $function:AzAPICall = $using:AzAPICallFunctions.funcAzAPICall
+                $function:createBearerToken = $using:AzAPICallFunctions.funcCreateBearerToken
+                $function:GetJWTDetails = $using:AzAPICallFunctions.funcGetJWTDetails
                 #endregion UsingVARs
 
                 $childMgSubId = $childMgSubDetail.subscriptionId
@@ -1394,9 +645,9 @@ function dataCollection($mgId) {
 
                 #SubscriptionPolicyAssignments
                 $currentTask = "Policy assignments '$($childMgSubDisplayName)' ('$childMgSubId')"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$($childMgSubId)/providers/Microsoft.Authorization/policyAssignments?api-version=2021-06-01"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$($childMgSubId)/providers/Microsoft.Authorization/policyAssignments?api-version=2021-06-01"
                 $method = 'GET'
-                $L1mgmtGroupSubPolicyAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
+                $L1mgmtGroupSubPolicyAssignments = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
 
                 foreach ($L1mgmtGroupSubPolicyAssignment in $L1mgmtGroupSubPolicyAssignments) {
 
@@ -1408,9 +659,9 @@ function dataCollection($mgId) {
 
                 #SubscriptionRoles
                 $currentTask = "Custom Role definitions '$($childMgSubDisplayName)' ('$childMgSubId')"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleDefinitions?api-version=2015-07-01&`$filter=type%20eq%20'CustomRole'"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleDefinitions?api-version=2015-07-01&`$filter=type%20eq%20'CustomRole'"
                 $method = 'GET'
-                $subCustomRoleDefinitions = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
+                $subCustomRoleDefinitions = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
 
                 foreach ($subCustomRoleDefinition in $subCustomRoleDefinitions) {
                     if (-not ($htCacheDefinitionsRole).($subCustomRoleDefinition.name)) {
@@ -1421,9 +672,9 @@ function dataCollection($mgId) {
 
                 #PIM RoleAssignmentSchedules
                 $currentTask = "Role assignment schedules API '$($childMgSubDisplayName)' ('$childMgSubId')"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleAssignmentSchedules?api-version=2020-10-01-preview"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleAssignmentSchedules?api-version=2020-10-01-preview"
                 $method = 'GET'
-                $roleAssignmentSchedulesFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection' -getRoleAssignmentSchedules $true
+                $roleAssignmentSchedulesFromAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
 
                 if ($roleAssignmentSchedulesFromAPI -eq 'ResourceNotOnboarded' -or $roleAssignmentSchedulesFromAPI -eq 'TenantNotOnboarded' -or $roleAssignmentSchedulesFromAPI -eq 'InvalidResourceType') {
                     #Write-Host "Scope '$($childMgSubDisplayName)' ('$childMgSubId') not onboarded in PIM"
@@ -1446,9 +697,9 @@ function dataCollection($mgId) {
                 #SubscriptionRoleAssignments
                 #RoleAssignment API (system metadata e.g. createdOn)
                 $currentTask = "Role assignments API '$($childMgSubDisplayName)' ('$childMgSubId')"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleAssignments?api-version=2015-07-01"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$childMgSubId/providers/Microsoft.Authorization/roleAssignments?api-version=2015-07-01"
                 $method = 'GET'
-                $roleAssignmentsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
+                $roleAssignmentsFromAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
 
                 if ($roleAssignmentsFromAPI.Count -gt 0) {
                     foreach ($roleAssignmentFromAPI in $roleAssignmentsFromAPI) {
@@ -1592,11 +843,10 @@ function summary() {
         $SPAppINT = $cu.where( { $_.ObjectType -eq 'SP APP INT' } )
 
         #notes
-        $SPAppINTCount = $SPAppINT.Count
-        $notesSetSP = $SPAppINT.SP.where( { -not [string]::IsNullOrWhiteSpace($_.SPNotes) } )
-        #$notesSetSP.Count
-        $notesNotSetSP = $SPAppINT.SP.where( { [string]::IsNullOrWhiteSpace($_.SPNotes) } )
-        #$notesNotSetSP.Count
+        $SPAppINTSPAppEXTSPEXT = $cu.where( { $_.ObjectType -eq 'SP APP INT' -or $_.ObjectType -eq 'SP APP EXT' -or $_.ObjectType -eq 'SP EXT' } )
+        $SPAppINTSPAppEXTSPEXTCount = $SPAppINTSPAppEXTSPEXT.Count
+        $notesSetSP = $SPAppINTSPAppEXTSPEXT.SP.where( { -not [string]::IsNullOrWhiteSpace($_.SPNotes) } )
+        $notesNotSetSP = $SPAppINTSPAppEXTSPEXT.SP.where( { [string]::IsNullOrWhiteSpace($_.SPNotes) } )
 
         #sp
         $SPAppINTSPOwnerStatusLabel = "'{0}'" -f ((@('SP without owner', 'SP with owner')) -join "','")
@@ -1637,7 +887,7 @@ function summary() {
                     <canvas id="myChart4" style="height:150px; width: 250px"></canvas>
                 </div>
                 <div class="chartDiv">
-                    <span>SP APP INT ($($SPAppINTCount)) - Notes</span>
+                    <span>SP [APP INT, APP EXT, EXT] ($($SPAppINTSPAppEXTSPEXTCount)) - Notes</span>
                 <canvas id="myChart5" style="height:150px; width: 250px"></canvas>
             </div>
             </div>
@@ -1848,7 +1098,7 @@ var myChart = new Chart(ctx, {
                         {
                             data: ['$($notesSetSP.Count)', '$($notesNotSetSP.Count)'],
                             backgroundColor: ['rgb(85,194,55)', 'rgb(173,173,173)'],
-                            labels: ['notes set', 'notes not set'],
+                            labels: ['!notesN/A && !notesNotSet', 'notesNotSet'],
                             borderWidth:0.5,
                         }
                     ]
@@ -1918,16 +1168,16 @@ var myChart = new Chart(ctx, {
 
             $spType = $sp.ObjectType
 
-            if ($spType -eq 'SP APP INT') {
+            if ($spType -eq 'SP APP INT' -or $spType -eq 'SP APP EXT' -or $spType -eq 'SP EXT') {
                 if ([string]::IsNullOrWhiteSpace($sp.SP.SPNotes)) {
-                    $spNotes = 'not set'
+                    $spNotes = 'notesNotSet'
                 }
                 else {
                     $spNotes = $sp.SP.SPNotes
                 }
             }
             else {
-                $spNotes = 'n/a'
+                $spNotes = 'notesN/A'
             }
 
             $appObjectId = ''
@@ -2069,7 +1319,7 @@ col_widths: ['6%', '6%', '7%', '8%', '8%', '6%', '7%', '6%', '6%', '8%', '8%', '
                 'caseinsensitivestring',
                 'caseinsensitivestring'
             ],
-            watermark: ['', '', '', 'try: !n/a && !not set', '', '', '', '', '', '', '', '', '', '', '', ''],
+            watermark: ['', '', '', 'try: !notesN/A && !notesNotSet', '', '', '', '', '', '', '', '', '', '', '', ''],
             extensions: [{ name: 'sort' }]
         };
         var $($tf) = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
@@ -2646,7 +1896,7 @@ extensions: [{ name: 'sort' }]
 "@)
         }
 
-        if ($htParameters.onAzureDevOpsOrGitHubActions -eq $true) {
+        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
             $fileName = "$($Product)_$($ManagementGroupId)_AADRoleAssignments_"
         }
         else {
@@ -2981,11 +2231,12 @@ extensions: [{ name: 'sort' }]
     $servicePrincipalsAppRoleAssignments = $cu.where( { $_.SPAppRoleAssignments.Count -ne 0 } )
     $servicePrincipalsAppRoleAssignmentsCount = $servicePrincipalsAppRoleAssignments.Count
     if ($servicePrincipalsAppRoleAssignmentsCount -gt 0) {
-        $classifiedCritical = $servicePrincipalsAppRoleAssignments.SPAppRoleAssignments.where( { $_.AppRolePermissionSensitivity -eq 'critical' } )
+        $summaryClassifications = ($servicePrincipalsAppRoleAssignments.SPAppRoleAssignments.AppRolePermissionSensitivity.where( { $_ -ne 'unclassified' } ) | Sort-Object -Unique) -join ', '
+        $classifiedCritical = $servicePrincipalsAppRoleAssignments.SPAppRoleAssignments.where( { $_.AppRolePermissionSensitivity -ne 'unclassified' } )
         $classifiedCriticalCount = $classifiedCritical.Count
 
         if ($classifiedCriticalCount -gt 0) {
-            $buttonDataContent = "Service Principals App RoleAssignments (API permissions Application) [critical permissions: $classifiedCriticalCount]"
+            $buttonDataContent = "Service Principals App RoleAssignments (API permissions Application) [$summaryClassifications permissions: $classifiedCriticalCount]"
         }
         else {
             $buttonDataContent = 'Service Principals App RoleAssignments (API permissions Application)'
@@ -3025,16 +2276,20 @@ extensions: [{ name: 'sort' }]
                 $classification = 'unclassified'
                 if (($sp.SPAppRoleAssignments.count -gt 0)) {
                     $array = @()
+                    $classificationCollection = @()
                     foreach ($approleAss in $sp.SPAppRoleAssignments) {
 
                         $classification4CSV = 'unclassified'
-                        if ($approleAss.AppRolePermissionSensitivity -eq 'critical') {
-                            $classification = 'critical'
-                            $classification4CSV = 'critical'
-                            $array += "$($approleAss.AppRoleAssignmentResourceDisplayName) (<span class=`"critical`">$($approleAss.AppRolePermission)</span>)"
+                        
+                        if ($approleAss.AppRolePermissionSensitivity -ne 'unclassified') {
+                            $classificationCollection += $approleAss.AppRolePermissionSensitivity
+                            $classification = $approleAss.AppRolePermissionSensitivity
+                            $classification4CSV = $approleAss.AppRolePermissionSensitivity
+                            $array += "$($approleAss.AppRoleAssignmentResourceDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($approleAss.AppRolePermissionSensitivity))`">$($approleAss.AppRolePermission)</span>)"
                         }
                         else {
                             $array += "$($approleAss.AppRoleAssignmentResourceDisplayName) ($($approleAss.AppRolePermission))"
+                            
                         }
 
                         $null = $arrayServicePrincipalsAppRoleAssignments4CSV.Add([PSCustomObject]@{
@@ -3067,13 +2322,13 @@ extensions: [{ name: 'sort' }]
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
-<td>$($classification)</td>
+<td>$(($classificationCollection | sort-Object -Unique) -join ', ')</td>
 <td class="breakwordall">$($SPAppRoleAssignments)</td>
 </tr>
 "@)
         }
 
-        if ($htParameters.onAzureDevOpsOrGitHubActions -eq $true) {
+        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
             $fileName = "$($Product)_$($ManagementGroupId)_AppRoleAssignments_"
         }
         else {
@@ -3120,7 +2375,6 @@ col_widths: ['10%', '10%', '10%', '10%', '10%', '5%', '45%'],
             locale: 'en-US',
             col_3: 'multiple',
             col_4: 'select',
-            col_5: 'select',
             col_types: [
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -3130,6 +2384,7 @@ col_widths: ['10%', '10%', '10%', '10%', '10%', '5%', '45%'],
                 'caseinsensitivestring',
                 'caseinsensitivestring'
             ],
+            watermark: ['', '', '', '', '', '$($summaryClassifications)', ''],
 extensions: [{ name: 'sort' }]
         };
         var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
@@ -3286,11 +2541,12 @@ extensions: [{ name: 'sort' }]
     $servicePrincipalsOauth2PermissionGrants = $cu.where( { $_.SPOauth2PermissionGrants.Count -ne 0 } )
     $servicePrincipalsOauth2PermissionGrantsCount = $servicePrincipalsOauth2PermissionGrants.Count
 
-    $classifiedCritical = $servicePrincipalsOauth2PermissionGrants.SPOauth2PermissionGrants.where( { $_.permissionSensitivity -eq 'critical' } )
+    $summaryClassifications = ($servicePrincipalsOauth2PermissionGrants.SPOauth2PermissionGrants.permissionSensitivity.where( { $_ -ne 'unclassified' } ) | Sort-Object -Unique) -join ', '
+    $classifiedCritical = $servicePrincipalsOauth2PermissionGrants.SPOauth2PermissionGrants.where( { $_.permissionSensitivity -ne 'unclassified' } )
     $classifiedCriticalCount = $classifiedCritical.Count
 
     if ($classifiedCriticalCount -gt 0) {
-        $buttonDataContent = "Service Principals Oauth Permission grants (API permissions Delegated) [critical permissions: $classifiedCriticalCount]"
+        $buttonDataContent = "Service Principals Oauth Permission grants (API permissions Delegated) [$summaryClassifications permissions: $classifiedCriticalCount]"
     }
     else {
         $buttonDataContent = 'Service Principals Oauth Permission grants (API permissions Delegated)'
@@ -3331,16 +2587,20 @@ extensions: [{ name: 'sort' }]
                 $classification = 'unclassified'
                 if (($sp.SPOauth2PermissionGrants.count -gt 0)) {
                     $array = @()
+                    $classificationCollection = @()
                     foreach ($oauthGrant in $sp.SPOauth2PermissionGrants | Sort-Object -Property SPDisplayName, type, permission) {
 
                         $classification4CSV = 'unclassified'
-                        if ($oauthGrant.permissionSensitivity -eq 'critical') {
-                            $classification = 'critical'
-                            $classification4CSV = 'critical'
-                            $array += "$($oauthGrant.SPDisplayName) (<span class=`"critical`">$($oauthGrant.permission)</span> - $($oauthGrant.type))"
+                        
+                        if ($oauthGrant.permissionSensitivity -ne 'unclassified') {
+                            $classificationCollection += $oauthGrant.permissionSensitivity
+                            $classification = $oauthGrant.permissionSensitivity
+                            $classification4CSV = $oauthGrant.permissionSensitivity
+                            $array += "$($oauthGrant.SPDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($oauthGrant.permissionSensitivity))`">$($oauthGrant.permission)</span> - $($oauthGrant.type))"
                         }
                         else {
                             $array += "$($oauthGrant.SPDisplayName) ($($oauthGrant.permission) - $($oauthGrant.type))"
+                            
                         }
 
                         $null = $arrayServicePrincipalsOauth2PermissionGrants4CSV.Add([PSCustomObject]@{
@@ -3373,13 +2633,13 @@ extensions: [{ name: 'sort' }]
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
-<td>$($classification)</td>
+<td>$(($classificationCollection | sort-Object -Unique) -join ', ')</td>
 <td class="breakwordall">$($SPOauth2PermissionGrants)</td>
 </tr>
 "@)
         }
 
-        if ($htParameters.onAzureDevOpsOrGitHubActions -eq $true) {
+        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
             $fileName = "$($Product)_$($ManagementGroupId)_Oauth2PermissionGrants_"
         }
         else {
@@ -3426,7 +2686,6 @@ col_widths: ['10%', '10%', '10%', '10%', '10%', '5%', '50%'],
             locale: 'en-US',
             col_3: 'multiple',
             col_4: 'select',
-            col_5: 'select',
             col_types: [
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -3436,6 +2695,7 @@ col_widths: ['10%', '10%', '10%', '10%', '10%', '5%', '50%'],
                 'caseinsensitivestring',
                 'caseinsensitivestring'
             ],
+            watermark: ['', '', '', '', '', '$($summaryClassifications)', ''],
 extensions: [{ name: 'sort' }]
         };
         var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
@@ -4198,6 +3458,35 @@ extensions: [{ name: 'sort' }]
 
 #endregion Function
 
+#region verifyClassifications
+Write-Host 'Verify Classifications (permissionClassification.json)'
+try {
+    $getClassifications = Get-Content -raw .\pwsh\permissionClassification.json | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+}
+catch {
+    Write-Host "file '.\pwsh\permissionClassification.json' not found"
+    throw
+}
+
+#validate permission assigned to ONE classification
+foreach ($permissionType in $getClassifications.permissions.Keys) {
+    $classifications = ($getClassifications.permissions.($permissionType).'classifications'.Keys)
+    $arrayPermissions4Classification = @()
+    foreach ($classification in $classifications) {
+        foreach ($permission in $getClassifications.permissions.($permissionType).'classifications'.($classification).'includes') {
+            $arrayPermissions4Classification += $permission
+        }
+    }
+    if ($arrayPermissions4Classification.Count -ne ($arrayPermissions4Classification | Sort-Object -Unique).Count) {
+        Write-Host "$permissionType - duplicate permissions found"
+        $diff = Compare-Object -ReferenceObject $arrayPermissions4Classification -DifferenceObject ($arrayPermissions4Classification | Sort-Object -Unique)
+        Write-Host ($diff.InputObject -join ', ')
+        throw
+    }
+}
+Write-Host ' Verify Classifications (permissionClassification.json) succeeded' -ForegroundColor Green
+#endregion verifyClassifications
+
 #region dataCollection
 
 #region helper ht / collect results /save some time
@@ -4217,15 +3506,15 @@ $arrayAPICallTrackingCustomDataCollection = [System.Collections.ArrayList]::Sync
 #endregion helper ht / collect results /save some time
 
 #region validation / check 'Microsoft Graph API' Access
-if ($htParameters.onAzureDevOps -eq $true -or $accountType -eq 'ServicePrincipal') {
+if ($azAPICallConf['htParameters'].onAzureDevOps -eq $true -or $azAPICallConf['checkContext'].Account.Type -eq 'ServicePrincipal') {
     Write-Host 'Checking ServicePrincipal permissions'
 
     $permissionCheckResults = @()
     $permissionsCheckFailed = $false
     $currentTask = 'Test AAD Users Read permission'
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/users?`$count=true&`$top=1"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/users?`$count=true&`$top=1"
     $method = 'GET'
-    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validate $true
+    $res = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validateAccess -noPaging
 
     if ($res -eq 'failed') {
         $permissionCheckResults += 'AAD Users Read permission check FAILED'
@@ -4236,9 +3525,9 @@ if ($htParameters.onAzureDevOps -eq $true -or $accountType -eq 'ServicePrincipal
     }
 
     $currentTask = 'Test AAD Groups Read permission'
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/groups?`$count=true&`$top=1"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/groups?`$count=true&`$top=1"
     $method = 'GET'
-    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validate $true
+    $res = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validateAccess -noPaging
 
     if ($res -eq 'failed') {
         $permissionCheckResults += 'AAD Groups Read permission check FAILED'
@@ -4249,9 +3538,9 @@ if ($htParameters.onAzureDevOps -eq $true -or $accountType -eq 'ServicePrincipal
     }
 
     $currentTask = 'Test AAD ServicePrincipals Read permission'
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals?`$count=true&`$top=1"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/servicePrincipals?`$count=true&`$top=1"
     $method = 'GET'
-    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validate $true
+    $res = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validateAccess -noPaging
 
     if ($res -eq 'failed') {
         $permissionCheckResults += 'AAD ServicePrincipals Read permission check FAILED'
@@ -4262,9 +3551,9 @@ if ($htParameters.onAzureDevOps -eq $true -or $accountType -eq 'ServicePrincipal
     }
 
     $currentTask = 'Test AAD RoleManagement Read permission'
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/roleManagement/directory/roleDefinitions"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/roleManagement/directory/roleDefinitions"
     $method = 'GET'
-    $res = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validate $true
+    $res = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validateAccess -noPaging
 
     if ($res -eq 'failed') {
         $permissionCheckResults += 'AAD RoleManagement Read permission check FAILED'
@@ -4281,9 +3570,9 @@ if (-not $NoAzureRoleAssignments) {
 
     $currentTask = "Checking permissions for ManagementGroup '$ManagementGroupId'"
     Write-Host $currentTask
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/managementGroups/$($ManagementGroupId)?api-version=2020-05-01"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/providers/Microsoft.Management/managementGroups/$($ManagementGroupId)?api-version=2020-05-01"
     $method = 'GET'
-    $selectedManagementGroupId = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn 'Content' -validate $true
+    $selectedManagementGroupId = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn 'Content' -validateAccess -noPaging
 
     if ($selectedManagementGroupId -eq 'failed') {
         $permissionCheckResults += 'MG Reader permission check FAILED'
@@ -4304,8 +3593,8 @@ if (-not $NoAzureRoleAssignments) {
     }
 
     if ($permissionsCheckFailed -eq $true) {
-        Write-Host "Please consult the documentation: https://$($GithubRepository)#required-permissions-in-azure"
-        if ($htParameters.onAzureDevOps -eq $true) {
+        Write-Host "Please consult the documentation: https://$($azAPICallConf['htParameters'].gitHubRepository)#required-permissions-in-azure"
+        if ($azAPICallConf['htParameters'].onAzureDevOps -eq $true) {
             Write-Error 'Error'
         }
         else {
@@ -4313,33 +3602,14 @@ if (-not $NoAzureRoleAssignments) {
         }
     }
 
-    #region AADUserType
-    $userType = 'n/a'
-    if ($accountType -eq 'User') {
-        $currentTask = 'Checking AAD UserType'
-        Write-Host $currentTask
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/me?`$select=userType"
-        $method = 'GET'
-        $checkUserType = AzAPICall -uri $uri -method $method -listenOn 'Content' -currentTask $currentTask
-
-        if ($checkUserType -eq 'unknown') {
-            $userType = $checkUserType
-        }
-        else {
-            $userType = $checkUserType.userType
-        }
-        Write-Host "AAD UserType: $($userType)" -ForegroundColor Yellow
-    }
-    #endregion AADUserType
-
     #region GettingEntities
     $startEntities = get-date
     $currentTask = 'Getting Entities'
     Write-Host "$currentTask"
     #https://management.azure.com/providers/Microsoft.Management/getEntities?api-version=2020-02-01
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)providers/Microsoft.Management/getEntities?api-version=2020-02-01"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/providers/Microsoft.Management/getEntities?api-version=2020-02-01"
     $method = 'POST'
-    $arrayEntitiesFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask
+    $arrayEntitiesFromAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
     $htSubscriptionsMgPath = @{ }
     $htManagementGroupsMgPath = @{ }
@@ -4409,9 +3679,9 @@ if (-not $NoAzureRoleAssignments) {
     $currentTask = 'Getting all Subscriptions'
     Write-Host "$currentTask"
     #https://management.azure.com/subscriptions?api-version=2020-01-01
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions?api-version=2019-10-01"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions?api-version=2019-10-01"
     $method = 'GET'
-    $requestAllSubscriptionsAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask
+    $requestAllSubscriptionsAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
     foreach ($subscription in $requestAllSubscriptionsAPI) {
         $htAllSubscriptionsFromAPI.($subscription.subscriptionId) = @{ }
@@ -4420,43 +3690,6 @@ if (-not $NoAzureRoleAssignments) {
     $endGetSubscriptions = get-date
     Write-Host "Getting all Subscriptions duration: $((NEW-TIMESPAN -Start $startGetSubscriptions -End $endGetSubscriptions).TotalSeconds) seconds"
     #endregion subscriptions
-
-    #region newAADCheck
-    function CheckContextSubscriptionQuotaId($AADQuotaId) {
-        $sleepSec = @(0, 0, 2, 2, 4, 4, 10, 10)
-        do {
-            Start-Sleep -Seconds $sleepSec[$tryCounter]
-            $script:tryCounter++
-            $checkContext = Get-AzContext -ErrorAction Stop
-            if ($htAllSubscriptionsFromAPI.($checkContext.Subscription.Id).subDetails.subscriptionPolicies.quotaId -like "$($AADQuotaId)*") {
-                Write-Host "Current AzContext Subscription not OK: $($checkContext.Subscription.Name); $($checkContext.Subscription.Id); QuotaId: $($htAllSubscriptionsFromAPI.($checkContext.Subscription.Id).subDetails.subscriptionPolicies.quotaId)"
-                $alternativeSubscriptionIdForContext = (($requestAllSubscriptionsAPI.where( { $_.subscriptionPolicies.quotaId -notlike "$($AADQuotaId)*" -and $_.state -eq 'Enabled' }))[0]).subscriptionId
-                Write-Host "Setting AzContext with alternative Subscription: $($htAllSubscriptionsFromAPI.($alternativeSubscriptionIdForContext).subDetails.displayName); $($alternativeSubscriptionIdForContext); $($htAllSubscriptionsFromAPI.($alternativeSubscriptionIdForContext).subDetails.subscriptionPolicies.quotaId)"
-                Set-AzContext -SubscriptionId "$($alternativeSubscriptionIdForContext)" -Tenant "$($checkContext.Tenant.Id)" -ErrorAction Stop
-            }
-            else {
-                Write-Host "Current AzContext OK: $($checkContext.Subscription.Name); $($checkContext.Subscription.Id); QuotaId: $($htAllSubscriptionsFromAPI.($checkContext.Subscription.Id).subDetails.subscriptionPolicies.quotaId)"
-                $contextSubscriptionQuotaId = 'OK'
-            }
-        }
-        until($contextSubscriptionQuotaId -eq 'OK' -or $tryCounter -gt 6)
-    }
-    $tryCounter = 0
-    $contextSubscriptionQuotaId = $null
-    $AADQuotaId = 'AAD'
-    CheckContextSubscriptionQuotaId -AADQuotaId $AADQuotaId
-    $checkContext = Get-AzContext -ErrorAction Stop
-
-    if ($tryCounter -gt 6) {
-        Write-Host 'Problem switching the context to a Subscription that has a non AAD_ QuotaId'
-        if ($htParameters.onAzureDevOps -eq $true) {
-            Write-Error 'Error'
-        }
-        else {
-            Throw "Error - $($Product): check the last console output for details"
-        }
-    }
-    #endregion newAADCheck
 
     #region subscriptionFilter
     #API in rare cases returns duplicats, therefor sorting unique (id)
@@ -4535,9 +3768,9 @@ if (-not $NoAzureRoleAssignments) {
 
     $currentTask = 'Caching built-in Role definitions'
     Write-Host " $currentTask"
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).ResourceManagerUrl)subscriptions/$($checkContext.Subscription.Id)/providers/Microsoft.Authorization/roleDefinitions?api-version=2018-07-01&`$filter=type eq 'BuiltInRole'"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$($azAPICallConf['checkContext'].Subscription.Id)/providers/Microsoft.Authorization/roleDefinitions?api-version=2018-07-01&`$filter=type eq 'BuiltInRole'"
     $method = 'GET'
-    $requestRoleDefinitionAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask
+    $requestRoleDefinitionAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
     foreach ($roleDefinition in $requestRoleDefinitionAPI) {
         ($htCacheDefinitionsRole).($roleDefinition.name) = @{ }
@@ -4590,8 +3823,8 @@ else {
     }
 
     if ($permissionsCheckFailed -eq $true) {
-        Write-Host "Please consult the documentation: https://$($GithubRepository)#required-permissions-in-azure"
-        if ($htParameters.onAzureDevOps -eq $true) {
+        Write-Host "Please consult the documentation: https://$($azAPICallConf['htParameters'].gitHubRepository)#required-permissions-in-azure"
+        if ($azAPICallConf['htParameters'].onAzureDevOps -eq $true) {
             Write-Error 'Error'
         }
         else {
@@ -4608,16 +3841,16 @@ else {
 $startSP = get-date
 Write-Host 'Getting Service Principal count'
 $currentTask = 'getSPCount'
-$uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/`$count"
+$uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/servicePrincipals/`$count"
 $method = 'GET'
-$spCount = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn 'Content' -consistencyLevel 'eventual'
+$spCount = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn 'Content' -consistencyLevel 'eventual'
 
 Write-Host "API `$Count returned $spCount Service Principals"
 
 $currentTask = 'Get all Service Principals'
-$uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals"
+$uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/servicePrincipals"
 $method = 'GET'
-$getServicePrincipalsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
+$getServicePrincipalsFromAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
 
 Write-Host "API returned count: $($getServicePrincipalsFromAPI.Count)"
 $getServicePrincipals = $getServicePrincipalsFromAPI | Sort-Object -Property id -Unique
@@ -4682,9 +3915,9 @@ else {
     Write-Host 'Getting all AAD Role definitions'
     $currentTask = 'get AAD RoleDefinitions'
     $htAadRoleDefinitions = @{}
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/roleManagement/directory/roleDefinitions"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/roleManagement/directory/roleDefinitions"
     $method = 'GET'
-    $aadRoleDefinitions = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+    $aadRoleDefinitions = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
     foreach ($aadRoleDefinition in $aadRoleDefinitions) {
         $htAadRoleDefinitions.($aadRoleDefinition.id) = $aadRoleDefinition
@@ -4692,9 +3925,9 @@ else {
 
     Write-Host 'Validating Identity Governance state'
     $currentTask = 'Validate roleAssignmentScheduleInstance'
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$count=true&`$top=1"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$count=true&`$top=1"
     $method = 'GET'
-    $getRoleAssignmentScheduleInstance = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true -validate $true -getRoleAssignmentScheduledInstances $true
+    $getRoleAssignmentScheduleInstance = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -validateAccess -noPaging
     if ($getRoleAssignmentScheduleInstance -eq 'InvalidResource') {
         Write-Host 'Identity Governance state (roleAssignmentScheduleInstance): n/a'
         $identityGovernance = 'false'
@@ -4705,9 +3938,9 @@ else {
     }
 
     $currentTask = 'Validate roleAssignmentSchedules'
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignmentSchedules?`$count=true&`$top=1"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/roleManagement/directory/roleAssignmentSchedules?`$count=true&`$top=1"
     $method = 'GET'
-    $getRoleAssignmentSchedules = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSp $true -validate $true -getRoleAssignmentSchedules $true
+    $getRoleAssignmentSchedules = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -validateAccess -noPaging
     if ($getRoleAssignmentSchedules -eq 'InvalidResource') {
         Write-Host 'Identity Governance state (roleAssignmentSchedules): n/a'
         $identityGovernance = 'false'
@@ -4727,20 +3960,20 @@ else {
 
     Write-Host 'Getting Applications count'
     $currentTask = 'getAppCount'
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/applications/`$count"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/applications/`$count"
     $method = 'GET'
-    $appCount = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn 'Content' -consistencyLevel 'eventual'
+    $appCount = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn 'Content' -consistencyLevel 'eventual'
 
     Write-Host "API `$Count returned $appCount Applications"
-    $spWithAppCount = ($getServicePrincipals.where( { $_.servicePrincipalType -eq 'Application' -and $_.appOwnerOrganizationId -eq $checkContext.tenant.Id } )).appid.count
+    $spWithAppCount = ($getServicePrincipals.where( { $_.servicePrincipalType -eq 'Application' -and $_.appOwnerOrganizationId -eq $azAPICallConf['checkContext'].tenant.Id } )).appid.count
     if ($appCount -gt $spWithAppCount) {
         $appsWithoutSPCount = $appCount - $spWithAppCount
         Write-Host "$($appsWithoutSPCount) Applications without ServicePrincipal present!"
 
         $currentTask = 'Get all Applications'
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/applications"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/applications"
         $method = 'GET'
-        $getApplicationsFromAPI = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
+        $getApplicationsFromAPI = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
 
         $cnt = 0
         foreach ($application in $getApplicationsFromAPI) {
@@ -4777,18 +4010,13 @@ else {
     $arraySPsAndAppsWithoutSP | ForEach-Object -Parallel {
         $spOrAppWithoutSP = $_
         #array&ht
-        $arrayAzureManagementEndPointUrls = $using:arrayAzureManagementEndPointUrls
-        $checkContext = $using:checkContext
-        $htAzureEnvironmentRelatedUrls = $using:htAzureEnvironmentRelatedUrls
-        $htBearerAccessToken = $using:htBearerAccessToken
-        $arrayAPICallTracking = $using:arrayAPICallTracking
+        $azAPICallConf = $using:azAPICallConf
         $htServicePrincipalsAndAppsOnlyEnriched = $using:htServicePrincipalsAndAppsOnlyEnriched
         $htServicePrincipalsAppRoles = $using:htServicePrincipalsAppRoles
         $htAppRoles = $using:htAppRoles
         $htServicePrincipalsPublishedPermissionScopes = $using:htServicePrincipalsPublishedPermissionScopes
         $htPublishedPermissionScopes = $using:htPublishedPermissionScopes
         $htAadRoleDefinitions = $using:htAadRoleDefinitions
-        $htParameters = $using:htParameters
         $htAadGroupsToResolve = $using:htAadGroupsToResolve
         $htAppRoleAssignments = $using:htAppRoleAssignments
         $htSPOauth2PermissionGrantedTo = $using:htSPOauth2PermissionGrantedTo
@@ -4804,9 +4032,9 @@ else {
         $htSpLookup = $using:htSpLookup
         $htPrincipalsResolved = $using:htPrincipalsResolved
         #func
-        $function:AzAPICall = $using:funcAzAPICall
-        $function:createBearerToken = $using:funcCreateBearerToken
-        $function:GetJWTDetails = $using:funcGetJWTDetails
+        $function:AzAPICall = $using:AzAPICallFunctions.funcAzAPICall
+        $function:createBearerToken = $using:AzAPICallFunctions.funcCreateBearerToken
+        $function:GetJWTDetails = $using:AzAPICallFunctions.funcGetJWTDetails
         #var
         $identityGovernance = $using:identityGovernance
 
@@ -4836,7 +4064,7 @@ else {
 
         if ($hlperType -eq 'SP') {
 
-            if ($object.appOwnerOrganizationId -eq $checkContext.Tenant.Id) {
+            if ($object.appOwnerOrganizationId -eq $azAPICallConf['checkContext'].Tenant.Id) {
                 $spTypeINTEXT = 'INT'
             }
             else {
@@ -4845,9 +4073,9 @@ else {
 
             #region spownedObjects
             $currentTask = "getSP OwnedObjects $($object.id)"
-            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($object.id)/ownedObjects"
+            $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/servicePrincipals/$($object.id)/ownedObjects"
             $method = 'GET'
-            $getSPOwnedObjects = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+            $getSPOwnedObjects = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
             if ($getSPOwnedObjects -eq 'Request_ResourceNotFound') {
                 if (-not $htMeanwhileDeleted.($object.id)) {
@@ -4868,9 +4096,9 @@ else {
             if (-not $meanwhileDeleted) {
                 $currentTask = "getSP AADRoleAssignments $($object.id)"
                 #v1 does not return principalOrganizationId, resourceScope
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignments?`$filter=principalId eq '$($object.id)'"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/roleManagement/directory/roleAssignments?`$filter=principalId eq '$($object.id)'"
                 $method = 'GET'
-                $getSPAADRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+                $getSPAADRoleAssignments = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                 if ($getSPAADRoleAssignments -eq 'Request_ResourceNotFound') {
                     if (-not $htMeanwhileDeleted.($object.id)) {
@@ -4894,9 +4122,9 @@ else {
                     #region AADRoleAssignmentSchedules
                     if (-not $meanwhileDeleted) {
                         $currentTask = "getSP AADRoleAssignmentSchedules $($object.id)"
-                        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignmentSchedules?`$filter=principalId eq '$($object.id)'"
+                        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/roleManagement/directory/roleAssignmentSchedules?`$filter=principalId eq '$($object.id)'"
                         $method = 'GET'
-                        $getSPAADRoleAssignmentSchedules = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+                        $getSPAADRoleAssignmentSchedules = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                         if ($getSPAADRoleAssignmentSchedules -eq 'Request_ResourceNotFound') {
                             if (-not $htMeanwhileDeleted.($object.id)) {
@@ -4916,9 +4144,9 @@ else {
                     #region AADRoleAssignmentScheduleInstances
                     if (-not $meanwhileDeleted) {
                         $currentTask = "getSP AADRoleAssignmentScheduleInstances $($object.id)"
-                        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$($object.id)'"
+                        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$($object.id)'"
                         $method = 'GET'
-                        $getSPAADRoleAssignmentScheduleInstances = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+                        $getSPAADRoleAssignmentScheduleInstances = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                         if ($getSPAADRoleAssignmentScheduleInstances -eq 'Request_ResourceNotFound') {
                             if (-not $htMeanwhileDeleted.($object.id)) {
@@ -4952,9 +4180,9 @@ else {
             #region spAppRoleAssignments
             if (-not $meanwhileDeleted) {
                 $currentTask = "getSP AppRoleAssignments $($object.id)"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($object.id)/appRoleAssignments"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/servicePrincipals/$($object.id)/appRoleAssignments"
                 $method = 'GET'
-                $getSPAppRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+                $getSPAppRoleAssignments = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                 if ($getSPAppRoleAssignments -eq 'Request_ResourceNotFound') {
                     if (-not $htMeanwhileDeleted.($object.id)) {
@@ -4979,9 +4207,9 @@ else {
             #region SPAADRoleAssignedOn
             if (-not $meanwhileDeleted) {
                 $currentTask = "getSP AADRoleAssignedOn $($object.id)"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignments?`$filter=resourceScope eq '/$($object.id)'&`$expand=principal"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/roleManagement/directory/roleAssignments?`$filter=resourceScope eq '/$($object.id)'&`$expand=principal"
                 $method = 'GET'
-                $getSPAADRoleAssignedOn = AzAPICall -uri $uri -method $method -currentTask $currentTask
+                $getSPAADRoleAssignedOn = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
                 if ($getSPAADRoleAssignedOn.Count -gt 0) {
                     $tmpArray = [System.Collections.ArrayList]@()
                     foreach ($SPAADRoleAssignedOn in $getSPAADRoleAssignedOn) {
@@ -5046,9 +4274,9 @@ else {
             #region spAppRoleAssignedTo
             if (-not $meanwhileDeleted) {
                 $currentTask = "getSP appRoleAssignedTo $($object.id)"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($object.id)/appRoleAssignedTo"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/servicePrincipals/$($object.id)/appRoleAssignedTo"
                 $method = 'GET'
-                $getSPAppRoleAssignedTo = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+                $getSPAppRoleAssignedTo = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                 if ($getSPAppRoleAssignedTo -eq 'Request_ResourceNotFound') {
                     if (-not $htMeanwhileDeleted.($object.id)) {
@@ -5082,14 +4310,14 @@ else {
             #region spGetMemberGroups
             if (-not $meanwhileDeleted) {
                 $currentTask = "getSP GroupMemberships $($object.id)"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($object.id)/getMemberGroups"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/servicePrincipals/$($object.id)/getMemberGroups"
                 $method = 'POST'
                 $body = @'
         {
             "securityEnabledOnly": false
         }
 '@
-                $getSPGroupMemberships = AzAPICall -uri $uri -method $method -body $body -currentTask $currentTask -getSP $true
+                $getSPGroupMemberships = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -body $body -currentTask $currentTask
 
                 if ($getSPGroupMemberships -eq 'Request_ResourceNotFound') {
                     if (-not $htMeanwhileDeleted.($object.id)) {
@@ -5118,9 +4346,9 @@ else {
             if (-not $meanwhileDeleted) {
                 $currentTask = "getSP oauth2PermissionGrants $($object.id)"
                 #v1 does not return startTime, expiryTime
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/$($object.id)/oauth2PermissionGrants"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/servicePrincipals/$($object.id)/oauth2PermissionGrants"
                 $method = 'GET'
-                $getSPOauth2PermissionGrants = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+                $getSPOauth2PermissionGrants = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                 if ($getSPOauth2PermissionGrants -eq 'Request_ResourceNotFound') {
                     if (-not $htMeanwhileDeleted.($object.id)) {
@@ -5167,10 +4395,10 @@ else {
     #delegatedPermissionClassifications
     if ($object.servicePrincipalType -eq "Application") {
 
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/servicePrincipals/$($object.id)/delegatedPermissionClassifications"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/servicePrincipals/$($object.id)/delegatedPermissionClassifications"
         $currentTask = $uri
         $method = "GET"
-        $getSPDelegatedPermissionClassifications = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn "Content"
+        $getSPDelegatedPermissionClassifications = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn "Content"
         Write-Host "$($object.id) --> $($getSPDelegatedPermissionClassifications.Count)"
         if ($getSPDelegatedPermissionClassifications.Count -gt 0){
             foreach ($delegatedPermissionClassification in $getSPDelegatedPermissionClassifications){
@@ -5184,9 +4412,9 @@ else {
             #region spOwner
             if (-not $meanwhileDeleted) {
                 $currentTask = "getSPOwner $($object.id)"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/servicePrincipals/$($object.id)/owners"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/servicePrincipals/$($object.id)/owners"
                 $method = 'GET'
-                $getSPOwner = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+                $getSPOwner = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                 if ($getSPOwner -eq 'Request_ResourceNotFound') {
                     if (-not $htMeanwhileDeleted.($object.id)) {
@@ -5231,9 +4459,9 @@ else {
                 }
 
                 $currentTask = "getApp $($object.appId)"
-                $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/applications?`$filter=appId eq '$($object.appId)'"
+                $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/applications?`$filter=appId eq '$($object.appId)'"
                 $method = 'GET'
-                $getApplication = AzAPICall -uri $uri -method $method -currentTask $currentTask -getApp $true
+                $getApplication = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                 if ($getApplication -eq 'Request_ResourceNotFound') {
                     if (-not $htMeanwhileDeleted.($object.id)) {
@@ -5257,9 +4485,9 @@ else {
 
                         #region AppAADRoleAssignedOn
                         $currentTask = "getApp AADRoleAssignedOn $($getApplication.id)"
-                        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/roleManagement/directory/roleAssignments?`$filter=resourceScope eq '/$($getApplication.id)'&`$expand=principal"
+                        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/roleManagement/directory/roleAssignments?`$filter=resourceScope eq '/$($getApplication.id)'&`$expand=principal"
                         $method = 'GET'
-                        $getAppAADRoleAssignedOn = AzAPICall -uri $uri -method $method -currentTask $currentTask
+                        $getAppAADRoleAssignedOn = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
                         if ($getAppAADRoleAssignedOn.Count -gt 0) {
                             $tmpArray = [System.Collections.ArrayList]@()
                             foreach ($AppAADRoleAssignedOn in $getAppAADRoleAssignedOn) {
@@ -5327,9 +4555,9 @@ else {
 
                         #region getAppOwner
                         $currentTask = "getAppOwner $($getApplication.id)"
-                        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/applications/$($getApplication.id)/owners"
+                        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/applications/$($getApplication.id)/owners"
                         $method = 'GET'
-                        $getAppOwner = AzAPICall -uri $uri -method $method -currentTask $currentTask -getSP $true
+                        $getAppOwner = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
                         if ($getAppOwner.Count -gt 0) {
                             if (-not $htAppOwners.($getApplication.id)) {
@@ -5527,21 +4755,17 @@ if ($htUsersAndGroupsToCheck4AppRoleAssignmentsUser.Keys.Count -gt 0) {
         $userObjectId = $_
 
         #array&ht
-        $arrayAzureManagementEndPointUrls = $using:arrayAzureManagementEndPointUrls
-        $checkContext = $using:checkContext
-        $htAzureEnvironmentRelatedUrls = $using:htAzureEnvironmentRelatedUrls
-        $htBearerAccessToken = $using:htBearerAccessToken
-        $arrayAPICallTracking = $using:arrayAPICallTracking
+        $azAPICallConf = $using:azAPICallConf
         $htUsersAndGroupsRoleAssignments = $using:htUsersAndGroupsRoleAssignments
         #func
-        $function:AzAPICall = $using:funcAzAPICall
-        $function:createBearerToken = $using:funcCreateBearerToken
-        $function:GetJWTDetails = $using:funcGetJWTDetails
+        $function:AzAPICall = $using:AzAPICallFunctions.funcAzAPICall
+        $function:createBearerToken = $using:AzAPICallFunctions.funcCreateBearerToken
+        $function:GetJWTDetails = $using:AzAPICallFunctions.funcGetJWTDetails
 
         $currentTask = "getUser AppRoleAssignments $($userObjectId)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/users/$($userObjectId)/appRoleAssignments"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/users/$($userObjectId)/appRoleAssignments"
         $method = 'GET'
-        $getUserAppRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask
+        $getUserAppRoleAssignments = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
         if ($getUserAppRoleAssignments.Count -gt 0) {
             foreach ($userAppRoleAssignment in $getUserAppRoleAssignments) {
@@ -5565,21 +4789,17 @@ if ($htUsersAndGroupsToCheck4AppRoleAssignmentsGroup.Keys.Count -gt 0) {
         $groupObjectId = $_
 
         #array&ht
-        $arrayAzureManagementEndPointUrls = $using:arrayAzureManagementEndPointUrls
-        $checkContext = $using:checkContext
-        $htAzureEnvironmentRelatedUrls = $using:htAzureEnvironmentRelatedUrls
-        $htBearerAccessToken = $using:htBearerAccessToken
-        $arrayAPICallTracking = $using:arrayAPICallTracking
+        $azAPICallConf = $using:azAPICallConf
         $htUsersAndGroupsRoleAssignments = $using:htUsersAndGroupsRoleAssignments
         #func
-        $function:AzAPICall = $using:funcAzAPICall
-        $function:createBearerToken = $using:funcCreateBearerToken
-        $function:GetJWTDetails = $using:funcGetJWTDetails
+        $function:AzAPICall = $using:AzAPICallFunctions.funcAzAPICall
+        $function:createBearerToken = $using:AzAPICallFunctions.funcCreateBearerToken
+        $function:GetJWTDetails = $using:AzAPICallFunctions.funcGetJWTDetails
 
         $currentTask = "getGroup AppRoleAssignments $($groupObjectId)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/Groups/$($groupObjectId)/appRoleAssignments"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/Groups/$($groupObjectId)/appRoleAssignments"
         $method = 'GET'
-        $getGroupAppRoleAssignments = AzAPICall -uri $uri -method $method -currentTask $currentTask
+        $getGroupAppRoleAssignments = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
 
         if ($getGroupAppRoleAssignments.Count -gt 0) {
             foreach ($groupAppRoleAssignment in $getGroupAppRoleAssignments) {
@@ -5616,23 +4836,18 @@ if (($htAadGroupsToResolve.Keys).Count -gt 0) {
         $aadGroupId = $_
 
         #array&ht
-        $arrayAzureManagementEndPointUrls = $using:arrayAzureManagementEndPointUrls
-        $checkContext = $using:checkContext
-        $htAzureEnvironmentRelatedUrls = $using:htAzureEnvironmentRelatedUrls
-        $htBearerAccessToken = $using:htBearerAccessToken
-        $arrayAPICallTracking = $using:arrayAPICallTracking
+        $azAPICallConf = $using:azAPICallConf
         $htAadGroups = $using:htAadGroups
-        $htParameters = $using:htParameters
         #func
-        $function:AzAPICall = $using:funcAzAPICall
-        $function:createBearerToken = $using:funcCreateBearerToken
-        $function:GetJWTDetails = $using:funcGetJWTDetails
+        $function:AzAPICall = $using:AzAPICallFunctions.funcAzAPICall
+        $function:createBearerToken = $using:AzAPICallFunctions.funcCreateBearerToken
+        $function:GetJWTDetails = $using:AzAPICallFunctions.funcGetJWTDetails
 
         #Write-Host "resolving AAD Group: $aadGroupId"
         $currentTask = "get AAD Group $($aadGroupId)"
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/groups/$($aadGroupId)"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/groups/$($aadGroupId)"
         $method = 'GET'
-        $getAadGroup = AzAPICall -uri $uri -method $method -currentTask $currentTask -listenOn 'Content'
+        $getAadGroup = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn 'Content'
 
         if ($getAadGroup -eq 'Request_UnsupportedQuery') {
             Write-Host "skipping Group $($aadGroupId)"
@@ -5643,9 +4858,9 @@ if (($htAadGroupsToResolve.Keys).Count -gt 0) {
 
             #v1 does not return ServicePrincipals
             $currentTask = "get transitive members for AAD Group $($aadGroupId)"
-            $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/groups/$($aadGroupId)/transitivemembers/microsoft.graph.group?`$count=true"
+            $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/groups/$($aadGroupId)/transitivemembers/microsoft.graph.group?`$count=true"
             $method = 'GET'
-            $getNestedGroups = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
+            $getNestedGroups = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
 
             if ($getNestedGroups) {
                 if ($getNestedGroups -eq 'Request_UnsupportedQuery') {
@@ -5701,7 +4916,7 @@ foreach ($batch in $objectIdsBatch) {
     $objectIdsToCheckIfGroup = '"{0}"' -f ($batch.Group -join '","')
 
     $currentTask = " Resolving identity type Group - Batch #$batchCnt/$($objectIdsBatchCount) ($(($batch.Group).Count)"
-    $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/v1.0/directoryObjects/getByIds"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/directoryObjects/getByIds"
     $method = 'POST'
     $body = @"
         {
@@ -5709,16 +4924,16 @@ foreach ($batch in $objectIdsBatch) {
             "types":["group"]
         }
 "@
-    $resolveObjectIdsTypeGroup = AzAPICall -uri $uri -method $method -body $body -currentTask $currentTask
+    $resolveObjectIdsTypeGroup = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -body $body -currentTask $currentTask
 
     foreach ($group in $resolveObjectIdsTypeGroup) {
         $script:htAadGroups.($group.id) = @{}
         $script:htAadGroups.($group.id).groupDetails = $group
 
         #v1 does not return ServicePrincipals
-        $uri = "$(($htAzureEnvironmentRelatedUrls).($checkContext.Environment.Name).MSGraphUrl)/beta/groups/$($group.id)/transitivemembers/microsoft.graph.group?`$count=true"
+        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/groups/$($group.id)/transitivemembers/microsoft.graph.group?`$count=true"
         $method = 'GET'
-        $getNestedGroups = AzAPICall -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
+        $getNestedGroups = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
 
         if ($getNestedGroups) {
             write-host " -> has nested Groups $($getNestedGroups.Count)"
@@ -6150,7 +5365,9 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     $htAppOwners = $using:htAppOwners
     $htServicePrincipalsPublishedPermissionScopes = $using:htServicePrincipalsPublishedPermissionScopes
     $htSpLookup = $using:htSpLookup
-    #
+    $getClassifications = $using:getClassifications
+    #functions
+    $function:getClassification = $using:funcGetClassification
 
     $object = $spOrAppWithoutSP
     if ($spOrAppWithoutSP.SPOrAppOnly -eq 'SP') {
@@ -6370,6 +5587,7 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                         $htOptInfo.scope = $scope
                         $htOptInfo.permission = $hlperPublishedPermissionScope.value
                         $oauth2PermissionSensitivity = 'unclassified'
+                        <#
                         if (
                             #$hlperPublishedPermissionScope.value -eq "Application.ReadWrite.All" -or
                             #$hlperPublishedPermissionScope.value -eq "Directory.ReadWrite.All" -or
@@ -6385,6 +5603,7 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                         ) {
                             $oauth2PermissionSensitivity = 'critical'
                         }
+                        #>
                         <#
                         Application.ReadWrite.All
                         Directory.ReadWrite.All
@@ -6397,6 +5616,8 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                         User.ManageCreds.All
                         All other AppOnly permissions that allow write access
                         #>
+                        $oauth2PermissionSensitivity = getClassification -permission $hlperPublishedPermissionScope.value -permissionType 'oauth2Permissions'
+
                         $htOptInfo.permissionSensitivity = $oauth2PermissionSensitivity
                         $htOptInfo.id = $hlperPublishedPermissionScope.id
                         $htOptInfo.type = $hlperPublishedPermissionScope.type
@@ -6466,6 +5687,7 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                 #https://www.youtube.com/watch?v=T-ZnAUt1IP8 - Monitoring and Incident Response in Azure AD
                 #https://docs.microsoft.com/en-us/security/compass/incident-response-playbook-app-consent#classifying-risky-permissions
                 $appRolePermissionSensitivity = 'unclassified'
+                <#
                 if (
                     ($hlper.value -like 'Mail.*' -and $hlper.value -notlike 'Mail.ReadBasic*') -or
                     $hlper.value -like 'Contacts.*' -or
@@ -6480,6 +5702,7 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                 ) {
                     $appRolePermissionSensitivity = 'critical'
                 }
+                #>
                 <#
                 Mail.* (including Mail.Send*, but not Mail.ReadBasic*)
                 Contacts. *
@@ -6490,6 +5713,8 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                 Directory.AccessAsUser.All
                 User_Impersonation
                 #>
+                $appRolePermissionSensitivity = getClassification -permission $hlper.value -permissionType 'appRolePermissions'
+
                 $htOptInfo.AppRolePermissionSensitivity = $appRolePermissionSensitivity
                 $htOptInfo.AppRoleDisplayName = $hlper.displayName
                 $htOptInfo.AppRoleDescription = $hlper.description
@@ -7211,7 +6436,7 @@ $duration = NEW-TIMESPAN -Start $startEnrichmentSP -End $endEnrichmentSP
 Write-Host "Service Principals enrichment duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 
 #
-if ($onAzureDevOpsOrGitHubActions) {
+if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions) {
     $JSONPath = "JSON_SP_$($ManagementGroupId)"
     if (Test-Path -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)") {
         Write-Host ' Cleaning old state (Pipeline only)'
@@ -7258,14 +6483,13 @@ Write-Host 'FinalArray:' ($arrayPerformanceTracking.FinalArray | Measure-Object 
 #region createoutputs
 
 #region BuildHTML
-#
 #testhelper
-$fileTimestamp = (get-date -format $FileTimeStampFormat)
+#$fileTimestamp = (get-date -format $FileTimeStampFormat)
 
 $startBuildHTML = get-date
 
 #filename
-if ($htParameters.onAzureDevOpsOrGitHubActions -eq $true) {
+if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
     $fileName = "$($Product)_$($ManagementGroupId)"
 }
 else {
@@ -7482,19 +6706,19 @@ else {
 #region Stats
 if (-not $StatsOptOut) {
 
-    if ($htParameters.onAzureDevOps) {
+    if ($azAPICallConf['htParameters'].onAzureDevOps) {
         if ($env:BUILD_REPOSITORY_ID) {
             $hashTenantIdOrRepositoryId = [string]($env:BUILD_REPOSITORY_ID)
         }
         else {
-            $hashTenantIdOrRepositoryId = [string]($checkContext.Tenant.Id)
+            $hashTenantIdOrRepositoryId = [string]($azAPICallConf['checkContext'].Tenant.Id)
         }
     }
     else {
-        $hashTenantIdOrRepositoryId = [string]($checkContext.Tenant.Id)
+        $hashTenantIdOrRepositoryId = [string]($azAPICallConf['checkContext'].Tenant.Id)
     }
 
-    $hashAccId = [string]($checkContext.Account.Id)
+    $hashAccId = [string]($azAPICallConf['checkContext'].Account.Id)
 
     $hasher384 = [System.Security.Cryptography.HashAlgorithm]::Create('sha384')
     $hasher512 = [System.Security.Cryptography.HashAlgorithm]::Create('sha512')
@@ -7529,9 +6753,9 @@ if (-not $StatsOptOut) {
     $identifierBase = $hasher512.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($hashUse))
     $identifier = "$(([System.BitConverter]::ToString($identifierBase)) -replace '-')"
 
-    $accountInfo = "$($accountType)$($userType)"
-    if ($accountType -eq 'ServicePrincipal') {
-        $accountInfo = $accountType
+    $accountInfo = "$($azAPICallConf['checkContext'].Account.Type)$($azAPICallConf['userType'])"
+    if ($azAPICallConf['checkContext'].Account.Type -eq 'ServicePrincipal' -or $azAPICallConf['checkContext'].Account.Type -eq 'ManagedService' -or $azAPICallConf['checkContext'].Account.Type -eq 'ClientAssertion') {
+        $accountInfo = $azAPICallConf['checkContext'].Account.Type
     }
 
     $statsCountSubscriptions = 'less than 100'
@@ -7564,11 +6788,11 @@ if (-not $StatsOptOut) {
             "ver": 2,
             "properties": {
                 "accType": "$($accountInfo)",
-                "azCloud": "$($checkContext.Environment.Name)",
+                "azCloud": "$($azAPICallConf['checkContext'].Environment.Name)",
                 "identifier": "$($identifier)",
-                "platform": "$($checkCodeRunPlatform)",
+                "platform": "$($azAPICallConf['htParameters'].codeRunPlatform)",
                 "productVersion": "$($ProductVersion)",
-                "psAzAccountsVersion": "$($resolvedAzModuleVersion)",
+                "psAzAccountsVersion": "$($azAPICallConf['htParameters'].azAccountsVersion)",
                 "psVersion": "$($PSVersionTable.PSVersion)",
                 "statsCountErrors": "$($Error.Count)",
                 "statsCountSPs": "$($statsCountSPs)",

@@ -1,0 +1,68 @@
+{
+    "permissions": {
+        "appRolePermissions": {
+            "classifications": {
+                "critical": {
+                    "includes": [
+                        "Mail.*",
+                        "Contacts.*",
+                        "MailboxSettings.*",
+                        "People.*",
+                        "Files.*",
+                        "Notes.*",
+                        "Directory.AccessAsUser.All",
+                        "User_Impersonation",
+                        "Member.Read.Hidden*",
+                        "RoleManagement.ReadWrite.Directory",
+                        "User.ManageCreds.All",
+                        "*Write.All*",
+                        "*Write"
+                    ],
+                    "excludes": [
+                        "Mail.ReadBasic*"
+                    ]
+                },
+                "medium": {
+                    "includes": [
+                        "Directory.Read.All"
+                    ],
+                    "excludes": []
+                }
+            }
+        },
+        "oauth2Permissions": {
+            "classifications": {
+                "critical": {
+                    "includes": [
+                        "Mail.*",
+                        "Contacts.*",
+                        "MailboxSettings.*",
+                        "People.*",
+                        "Files.*",
+                        "Notes.*",
+                        "Directory.AccessAsUser.All",
+                        "User_Impersonation",
+                        "Member.Read.Hidden*",
+                        "RoleManagement.ReadWrite.Directory",
+                        "User.ManageCreds.All",
+                        "*Write.All*",
+                        "*Write"
+                    ],
+                    "excludes": [
+                        "Mail.ReadBasic*"
+                    ]
+                },
+                "medium": {
+                    "includes": [
+                        "Directory.Read.All"
+                    ],
+                    "excludes": []
+                }
+            }
+        }
+    },
+    "permissionColors": {
+        "critical": "#FF0000",
+        "medium": "#DC9405"
+    }
+}
