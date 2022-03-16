@@ -50,7 +50,6 @@ Requires PowerShell Version >= 7.0.3
 
 Requires PowerShell Module 'AzAPICall'.  
 Running in Azure DevOps the AzAPICall PowerShell module will be installed automatically.  
-
 AzAPICall resources:
 * [PowerShell Gallery](https://www.powershellgallery.com/packages/AzAPICall)
 * [GitHub Repository](https://aka.ms/AzAPICall)
