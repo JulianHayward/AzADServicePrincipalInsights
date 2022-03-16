@@ -1,6 +1,6 @@
 __AzADServicePrincipalInsights__
 
-Insights and tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
+Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Features
 
@@ -46,13 +46,13 @@ Microsoft Graph API | Application | __User.Read.All__
 The Build Service Account or Project Collection Build Service Account (which ever you use) requires __Contribute__ permissions on the repository (Project settings - Repos - Security)
 
 ## PowerShell
-Requires Powershell Version >= 7.0.3
+Requires PowerShell Version >= 7.0.3
 
 Requires PowerShell Module 'AzAPICall'.  
 Running in Azure DevOps the AzAPICall PowerShell module will be installed automatically.  
 
 AzAPICall resources:
-* [Powershell Gallery](https://www.powershellgallery.com/packages/AzAPICall)
+* [PowerShell Gallery](https://www.powershellgallery.com/packages/AzAPICall)
 * [GitHub Repository](https://aka.ms/AzAPICall)
 
 # Execute as Service Principal / Application
