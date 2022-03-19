@@ -2,7 +2,7 @@
 Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
-    [string]$ProductVersion = 'v1_20220316_1',
+    [string]$ProductVersion = 'v1_20220319_1',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -27,7 +27,7 @@ Param
     [int]$ApplicationCertificateExpiryWarning = 14,
     [int]$ApplicationCertificateExpiryMax = 730,
     [string]$DirectorySeparatorChar = [IO.Path]::DirectorySeparatorChar,
-    [string]$azAPICallVersion = '1.0.8'
+    [string]$azAPICallVersion = '1.1.1'
 )
 
 $Error.clear()
@@ -242,6 +242,7 @@ Write-Host "Initialize 'AzAPICall'"
 $parameters4AzAPICallModule = @{
     #DebugAzAPICall = $DebugAzAPICall
     #SubscriptionId4AzContext = $SubscriptionId4AzContext
+    GitHubRepository = $GitHubRepository
 }
 $azAPICallConf = initAzAPICall @parameters4AzAPICallModule
 Write-Host " Initialize 'AzAPICall' succeeded" -ForegroundColor Green

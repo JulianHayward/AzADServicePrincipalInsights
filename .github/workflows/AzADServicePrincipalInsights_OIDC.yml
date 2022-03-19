@@ -1,7 +1,7 @@
 name: AzADServicePrincipalInsights_OIDC
 
 env:
-  outputpath: wiki
+  OutputPath: wiki
 
 on:
   #schedule:
@@ -42,7 +42,7 @@ jobs:
         uses: azure/powershell@v1
         with:
           inlineScript: |
-            .\pwsh\AzADServicePrincipalInsightsParallel.ps1 -SubscriptionId4AzContext ${{secrets.SUBSCRIPTION_ID}} -outputpath ${env:outputpath}
+            .\pwsh\AzADServicePrincipalInsightsParallel.ps1 -SubscriptionId4AzContext ${{secrets.SUBSCRIPTION_ID}} -OutputPath ${env:OutputPath}
           azPSVersion: "latest"
       
       - name: Push AzADServicePrincipalInsights output to repository
