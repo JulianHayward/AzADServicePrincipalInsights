@@ -49,10 +49,11 @@ The Build Service Account or Project Collection Build Service Account (which eve
 Requires PowerShell Version >= 7.0.3
 
 Requires PowerShell Module 'AzAPICall'.  
-Running in Azure DevOps the AzAPICall PowerShell module will be installed automatically.  
+Running in Azure DevOps or GitHub Actions the AzAPICall PowerShell module will be installed automatically.  
 AzAPICall resources:
-* [PowerShell Gallery](https://www.powershellgallery.com/packages/AzAPICall)
-* [GitHub Repository](https://aka.ms/AzAPICall)
+
+[![PowerShell Gallery Version (including pre-releases)](https://img.shields.io/powershellgallery/v/AzAPICall?include_prereleases&label=PowerShell%20Gallery)](https://www.powershellgallery.com/packages/AzAPICall)  
+[GitHub Repository](https://aka.ms/AzAPICall)
 
 # Execute as Service Principal / Application
 
