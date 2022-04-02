@@ -13,7 +13,7 @@ variables:
   SubscriptionQuotaIdWhitelist: ${{ join(',',parameters.subscriptionQuotaIdWhitelistParameters) }}
   WikiDir: wiki
   CsvDelimiter: ;
-  ScriptDir: pwsh
+  ScriptDir: pwsh #e.g. myFolder/pwsh
   Script: AzADServicePrincipalInsights.ps1
 
 schedules:
@@ -45,7 +45,7 @@ jobs:
       scriptType: filePath
       pwsh: true
       scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(Script)'
-      scriptArguments: '-OutputPath $(WikiDir)'
+      scriptArguments: '-OutputPath $(WikiDir) -ScriptPath $(ScriptDir)'
       azurePowerShellVersion: latestVersion
     displayName: 'Run AzADServicePrincipalInsights v1'
   - powershell: |

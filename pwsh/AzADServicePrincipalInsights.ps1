@@ -2,7 +2,8 @@
 Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
-    [string]$ProductVersion = 'v1_20220319_1',
+    [string]$ScriptPath = 'pwsh',
+    [string]$ProductVersion = 'v1_20220402_1',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -182,7 +183,7 @@ do {
         if (-not $importAzAPICallModuleSuccess) {
             Write-Host "  Try importing AzAPICall module ($azAPICallVersion)"
             if (($env:SYSTEM_TEAMPROJECTID -and $env:BUILD_REPOSITORY_ID) -or $env:GITHUB_ACTIONS) {
-                Import-Module ".\pwsh\AzAPICallModule\AzAPICall\$($azAPICallVersion)\AzAPICall.psd1" -Force -ErrorAction Stop
+                Import-Module ".\$($ScriptPath)\AzAPICallModule\AzAPICall\$($azAPICallVersion)\AzAPICall.psd1" -Force -ErrorAction Stop
                 Write-Host "  Import PS module 'AzAPICall' ($($azAPICallVersion)) succeeded" -ForegroundColor Green
             }
             else {
@@ -199,7 +200,7 @@ do {
             try {
                 $params = @{
                     Name            = 'AzAPICall'
-                    Path            = '.\pwsh\AzAPICallModule'
+                    Path            = ".\$($ScriptPath)\AzAPICallModule"
                     Force           = $true
                     RequiredVersion = $azAPICallVersion
                 }
@@ -3462,10 +3463,10 @@ extensions: [{ name: 'sort' }]
 #region verifyClassifications
 Write-Host 'Verify Classifications (permissionClassification.json)'
 try {
-    $getClassifications = Get-Content -raw .\pwsh\permissionClassification.json | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+    $getClassifications = Get-Content -raw ".\$($ScriptPath)\permissionClassification.json" | ConvertFrom-Json -AsHashtable -ErrorAction Stop
 }
 catch {
-    Write-Host "file '.\pwsh\permissionClassification.json' not found"
+    Write-Host "file '.\$($ScriptPath)\permissionClassification.json' not found"
     throw
 }
 
