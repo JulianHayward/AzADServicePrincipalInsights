@@ -15,7 +15,7 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
   * AppRoleAssignments
   * Oauth2PermissionGrants
   * AppSecrets
-  * AppCertificats
+  * AppCertificates
   * AppFederatedIdentityCredentials
 * Customizable permission classification (permissionClassification.json)
 
