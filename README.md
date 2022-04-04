@@ -2,11 +2,21 @@ __AzADServicePrincipalInsights__
 
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
+# Updates
+
+* 20220404_1 - add FederatedIdentityCredentials
+
 # Features
 
 * HTML export
 * JSON export
 * CSV export (wip)
+  * AADRoleAssignments
+  * AppRoleAssignments
+  * Oauth2PermissionGrants
+  * AppSecrets
+  * AppCertificats
+  * AppFederatedIdentityCredentials
 * Customizable permission classification (permissionClassification.json)
 
 # Data
@@ -25,6 +35,7 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 * ServicePrincipal Group memberships
 * Application Secrets
 * Application Certificates
+* Application Federated Identity Credentials
 
 # Prerequisites
 
