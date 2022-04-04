@@ -3,7 +3,7 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20220402_1',
+    [string]$ProductVersion = 'v1_20220404_1',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -779,7 +779,7 @@ function dataCollection($mgId) {
 #rsu
 #region TenantSummary
 function summary() {
-    Write-Host ' Building TenantSummary'
+    Write-Host ' Building Summary'
 
     $htmlTenantSummary = [System.Text.StringBuilder]::new()
 
@@ -792,7 +792,7 @@ function summary() {
 
     if ($cu.Count -gt 0) {
         $startCustPolLoop = get-date
-        Write-Host '  processing TenantSummary ServicePrincipals'
+        Write-Host '  processing Summary ServicePrincipals'
 
         $tfCount = $cu.Count
         $htmlTableId = 'TenantSummary_ServicePrincipals'
@@ -1347,7 +1347,7 @@ col_widths: ['6%', '6%', '7%', '8%', '8%', '6%', '7%', '6%', '6%', '8%', '8%', '
     #region SUMMARYServicePrincipalOwners
 
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ServicePrincipal Owners'
+    Write-Host '  processing Summary ServicePrincipal Owners'
 
     if ($cu.SPOwners.Count -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
@@ -1510,7 +1510,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYApplicationOwners
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary Application Owners'
+    Write-Host '  processing Summary Application Owners'
 
     if ($cu.APPAppOwners.Count -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
@@ -1675,7 +1675,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalOwnedObjects
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ServicePrincipal Owned Objects'
+    Write-Host '  processing Summary ServicePrincipal Owned Objects'
 
     if ($cu.SPOwnedObjects.Count -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
@@ -1792,7 +1792,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsAADRoleAssignments
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ServicePrincipalsAADRoleAssignments'
+    Write-Host '  processing Summary ServicePrincipalsAADRoleAssignments'
     $servicePrincipalsAADRoleAssignments = $cu.where( { $_.SPAADRoleAssignments.Count -ne 0 } )
     $servicePrincipalsAADRoleAssignmentsCount = $servicePrincipalsAADRoleAssignments.Count
     if ($servicePrincipalsAADRoleAssignmentsCount -gt 0) {
@@ -1975,7 +1975,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsAADRoleAssignedOn
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ServicePrincipalsAADRoleAssignedOn'
+    Write-Host '  processing Summary ServicePrincipalsAADRoleAssignedOn'
     $servicePrincipalsAADRoleAssignedOn = $cu.where( { $_.SPAAADRoleAssignedOn.Count -ne 0 } )
     $servicePrincipalsAADRoleAssignedOnCount = $servicePrincipalsAADRoleAssignedOn.Count
     if ($servicePrincipalsAADRoleAssignedOnCount -gt 0) {
@@ -2102,7 +2102,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYApplicationsAADRoleAssignedOn
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ApplicationsAADRoleAssignedOn'
+    Write-Host '  processing Summary ApplicationsAADRoleAssignedOn'
     $applicationsAADRoleAssignedOn = $cu.where( { $_.APPAAADRoleAssignedOn.Count -ne 0 } )
     $applicationsAADRoleAssignedOnCount = $applicationsAADRoleAssignedOn.Count
     if ($applicationsAADRoleAssignedOnCount -gt 0) {
@@ -2229,7 +2229,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsAppRoleAssignments
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ServicePrincipalsAppRoleAssignments'
+    Write-Host '  processing Summary ServicePrincipalsAppRoleAssignments'
     $servicePrincipalsAppRoleAssignments = $cu.where( { $_.SPAppRoleAssignments.Count -ne 0 } )
     $servicePrincipalsAppRoleAssignmentsCount = $servicePrincipalsAppRoleAssignments.Count
     if ($servicePrincipalsAppRoleAssignmentsCount -gt 0) {
@@ -2410,7 +2410,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsAppRoleAssignedTo
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ServicePrincipalsAppRoleAssignedTo'
+    Write-Host '  processing Summary ServicePrincipalsAppRoleAssignedTo'
     $servicePrincipalsAppRoleAssignedTo = $cu.where( { $_.SPAppRoleAssignedTo.Count -ne 0 -and ($_.SPAppRoleAssignedTo.principalType -like 'User*' -or $_.SPAppRoleAssignedTo.principalType -eq 'Group') } )
 
     #$servicePrincipalsAppRoleAssignedTo = $cu.where( { $_.SPAppRoleAssignedTo.Count -ne 0} )
@@ -2538,7 +2538,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsOauth2PermissionGrants
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ServicePrincipalsOauth2PermissionGrants'
+    Write-Host '  processing Summary ServicePrincipalsOauth2PermissionGrants'
 
     $servicePrincipalsOauth2PermissionGrants = $cu.where( { $_.SPOauth2PermissionGrants.Count -ne 0 } )
     $servicePrincipalsOauth2PermissionGrantsCount = $servicePrincipalsOauth2PermissionGrants.Count
@@ -2722,7 +2722,7 @@ extensions: [{ name: 'sort' }]
     if (-not $NoAzureRoleAssignments) {
         #region SUMMARYServicePrincipalsAzureRoleAssignments
         $startCustPolLoop = get-date
-        Write-Host '  processing TenantSummary ServicePrincipalsAzureRoleAssignments'
+        Write-Host '  processing Summary ServicePrincipalsAzureRoleAssignments'
 
         $servicePrincipalsAzureRoleAssignments = $cu.where( { $_.SPAzureRoleAssignments.Count -ne 0 } )
         $servicePrincipalsAzureRoleAssignmentsCount = $servicePrincipalsAzureRoleAssignments.Count
@@ -2872,7 +2872,7 @@ extensions: [{ name: 'sort' }]
 
     #region SUMMARYServicePrincipalsGroupMemberships
     $startCustPolLoop = get-date
-    Write-Host '  processing TenantSummary ServicePrincipalsGroupMemberships'
+    Write-Host '  processing Summary ServicePrincipalsGroupMemberships'
 
     $servicePrincipalsGroupMemberships = $cu.where( { $_.SPGroupMemberships.Count -ne 0 } )
     $servicePrincipalsGroupMembershipsCount = $servicePrincipalsGroupMemberships.Count
@@ -3100,7 +3100,7 @@ var chartSecretExpiryNoteWorthy = new Chart(ctx, {
         }
 
         $startCustPolLoop = get-date
-        Write-Host '  processing TenantSummary ApplicationSecrets'
+        Write-Host '  processing Summary ApplicationSecrets'
 
         #if ($applicationSecretsCount -gt 0) {
         $tfCount = $applicationSecretsCount
@@ -3123,6 +3123,7 @@ var chartSecretExpiryNoteWorthy = new Chart(ctx, {
 <tbody>
 "@)
 
+        $arrayApplicationSecrets4CSV = [System.Collections.ArrayList]@()
         foreach ($sp in ($applicationSecrets)) {
             if ($sp.APP) {
 
@@ -3136,6 +3137,20 @@ var chartSecretExpiryNoteWorthy = new Chart(ctx, {
                         $array = @()
                         foreach ($secret in $sp.APPPasswordCredentials) {
                             $array += "$($secret.keyId)/$($secret.displayName) ($($secret.expiryInfo); $($secret.endDateTimeFormated))"
+                            $null = $arrayApplicationSecrets4CSV.Add([PSCustomObject]@{
+                                    SPObjectId                   = $sp.ObjectId
+                                    SPAppId                      = $sp.SP.SPappId
+                                    SPDisplayName                = $sp.SP.SPDisplayName
+                                    SPAppOwnerOrgId              = $sp.SP.SPappOwnerOrganizationId
+                                    SPObjectType                 = $sp.ObjectType
+                                    APPObjectId                  = $sp.APP.APPObjectId
+                                    APPAppClientId               = $sp.APP.APPAppClientId
+                                    APPDisplayName               = $sp.APP.APPDisplayName
+                                    APPSecretDisplayName         = $secret.displayName
+                                    APPSecretKeyId               = $secret.keyId
+                                    APPSecretExpiryInfo          = $secret.expiryInfo
+                                    APPSecretEndDateTimeFormated = $secret.endDateTimeFormated
+                                })
                         }
                         $APPPasswordCredentials = "$(($sp.APPPasswordCredentials).Count) ($($array -join "$CsvDelimiterOpposite "))"
                     }
@@ -3158,6 +3173,15 @@ var chartSecretExpiryNoteWorthy = new Chart(ctx, {
 "@)
             }
         }
+
+        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
+            $fileName = "$($Product)_$($ManagementGroupId)_AppSecrets_"
+        }
+        else {
+            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($ManagementGroupId)_AppSecrets_"
+        }
+        $arrayApplicationSecrets4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPSecretDisplayName, APPSecretKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter ';' -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayApplicationSecrets4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
         </tbody>
@@ -3328,7 +3352,7 @@ type: 'pie',
         }
 
         $startCustPolLoop = get-date
-        Write-Host '  processing TenantSummary ApplicationCertificates'
+        Write-Host '  processing Summary ApplicationCertificates'
 
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -3349,6 +3373,7 @@ type: 'pie',
 <tbody>
 "@)
 
+        $arrayApplicationCertificates4CSV = [System.Collections.ArrayList]@()
         foreach ($sp in ($applicationCertificates)) {
             if ($sp.APP) {
 
@@ -3363,6 +3388,21 @@ type: 'pie',
                         $array = @()
                         foreach ($key in $sp.APPKeyCredentials) {
                             $array += "$($key.keyId)($($key.customKeyIdentifier))/$($key.displayName) ($($key.expiryInfo); $($key.endDateTimeFormated))"
+                            $null = $arrayApplicationCertificates4CSV.Add([PSCustomObject]@{
+                                    SPObjectId                         = $sp.ObjectId
+                                    SPAppId                            = $sp.SP.SPappId
+                                    SPDisplayName                      = $sp.SP.SPDisplayName
+                                    SPAppOwnerOrgId                    = $sp.SP.SPappOwnerOrganizationId
+                                    SPObjectType                       = $sp.ObjectType
+                                    APPObjectId                        = $sp.APP.APPObjectId
+                                    APPAppClientId                     = $sp.APP.APPAppClientId
+                                    APPDisplayName                     = $sp.APP.APPDisplayName
+                                    APPCertificateDisplayName          = $key.displayName
+                                    APPCertificateKeyId                = $key.keyId
+                                    APPCertificateCuistomKeyIdentifier = $key.customKeyIdentifier
+                                    APPCertificateExpiryInfo           = $key.expiryInfo
+                                    APPCertificateEndDateTimeFormated  = $key.endDateTimeFormated
+                                })
                         }
                         $APPKeyCredentials = "$(($sp.APPKeyCredentials).Count) ($($array -join "$CsvDelimiterOpposite "))"
                     }
@@ -3385,6 +3425,15 @@ type: 'pie',
 "@)
             }
         }
+
+        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
+            $fileName = "$($Product)_$($ManagementGroupId)_AppCertificates_"
+        }
+        else {
+            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($ManagementGroupId)_AppCertificates_"
+        }
+        $arrayApplicationCertificates4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPCertificateDisplayName, APPCertificateKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter ';' -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayApplicationCertificates4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
         </tbody>
@@ -3452,6 +3501,271 @@ extensions: [{ name: 'sort' }]
     $endCustPolLoop = get-date
     Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYApplicationCertificates
+
+    #region SUMMARYApplicationFederatedIdentityCredentials
+    $applicationFederatedIdentityCredentials = $cu.where( { $_.APPFederatedIdentityCredentials.Count -gt 0 } )
+    $applicationFederatedIdentityCredentialsCount = $applicationFederatedIdentityCredentials.Count
+
+    if ($applicationFederatedIdentityCredentialsCount -gt 0) {
+
+        $tfCount = $applicationFederatedIdentityCredentialsCount
+        $htmlTableId = 'TenantSummary_ApplicationFederatedIdentityCredentials'
+        $tf = "tf$($htmlTableId)"
+
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Federated Identity Credentials" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+
+        <#
+        $applicationCertificatesExpireSoon = $applicationCertificates.APPKeyCredentials.expiryInfo.where( { $_ -like 'expires soon*' } )
+        $applicationCertificatesExpireSoonCount = $applicationCertificatesExpireSoon.Count
+
+        if ($applicationCertificatesExpireSoonCount -gt 0) {
+            [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates ($applicationCertificatesExpireSoonCount expire soon)" /></button>
+        <div class="content TenantSummaryContent">
+"@)
+        }
+        else {
+            [void]$htmlTenantSummary.AppendLine(@'
+                <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates" /></button>
+                <div class="content TenantSummaryContent">
+'@)
+        }
+
+        $groupedExpiryNoteWorthy = $applicationCertificates.APPKeyCredentials.expiryInfo.where( { $_ -like 'expires soon*' -or $_ -eq 'expired' } ) | group-Object
+        if (($groupedExpiryNoteWorthy | Measure-Object).Count -gt 0) {
+            $arrExpiryNoteWorthyCounts = @()
+            $arrExpiryNoteWorthyStates = @()
+            foreach ($grp in $groupedExpiryNoteWorthy | sort-object -property count -Descending) {
+                $arrExpiryNoteWorthyCounts += $grp.Count
+                $arrExpiryNoteWorthyStates += $grp.Name
+            }
+            $ExpiryNoteWorthyCounts = "'{0}'" -f ($arrExpiryNoteWorthyCounts -join "','")
+            $ExpiryNoteWorthyStates = "'{0}'" -f ($arrExpiryNoteWorthyStates -join "','")
+
+            $categoryColoreExpiryNoteWorthy = ($categoryColorsMax[0..1])
+            $categoryColorsSeperatedExpiryNoteWorthy = "'{0}'" -f ($categoryColoreExpiryNoteWorthy -join "','")
+
+            [void]$htmlTenantSummary.AppendLine(@"
+    <div class="noFloat">
+        <button type="button" class="decollapsible">Charts</button>
+
+        <div class="showContent chart-container">
+            <div class="chartDiv">
+                <span>Noteworthy expiry states count: <b>$($arrExpiryNoteWorthyCounts.Count)</b></span>
+                <canvas id="chartCertExpiryNoteWorthy" style="height:150px; width: 250px"></canvas>
+            </div>
+        </div>
+    </div>
+
+<script>
+var ctx = document.getElementById('chartCertExpiryNoteWorthy');
+var chartCertExpiryNoteWorthy = new Chart(ctx, {
+type: 'pie',
+            data: {
+                datasets: [
+                    {
+                        data: [$($ExpiryNoteWorthyCounts)],
+                        backgroundColor: [$($categoryColorsSeperatedExpiryNoteWorthy)],
+                        labels: [$($ExpiryNoteWorthyStates)],
+                        borderWidth:0.5,
+                    }
+                ]
+            },
+            options: {
+                responsive: false,
+                legend: {
+                    display: false,
+                },
+                tooltips: {
+                    bodyFontSize: 10,
+                    callbacks: {
+                        label: function (tooltipItem, data) {
+                            var dataset = data.datasets[tooltipItem.datasetIndex];
+                            var index = tooltipItem.index;
+                            window. datasetitem = tooltipItem.datasetIndex;
+                            window.target = dataset.labels[index];
+                            return dataset.labels[index] + ': ' + dataset.data[index];
+                        }
+                    }
+                },
+
+                onClick: (e) => {
+                    if (window. datasetitem == 0){
+                        window. targetcolumn = '7'
+                    }
+                    $($tf).clearFilters();
+                    $($tf).setFilterValue((window. targetcolumn), (window.target));
+                    $($tf).filter();
+
+                }
+            }
+});
+
+</script>
+"@)
+
+        }
+        #>
+
+        $startCustPolLoop = get-date
+        Write-Host '  processing Summary ApplicationFederatedIdentityCredentials'
+
+
+        [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>SP object Id</th>
+<th>SP application Id</th>
+<th>SP displayName</th>
+<th>SP App Owner Organization Id</th>
+<th>Application ObjectId</th>
+<th>Application (client) Id</th>
+<th>Application DisplayName</th>
+<th>Application Federated Identity Credentials</th>
+</tr>
+</thead>
+<tbody>
+"@)
+        $arrayApplicationFederatedIdentityCredentials4CSV = [System.Collections.ArrayList]@()
+        foreach ($sp in ($applicationFederatedIdentityCredentials)) {
+            if ($sp.APP) {
+
+                $spType = $sp.SP.servicePrincipalType
+                $appObjectId = $sp.APP.APPObjectId
+                $appId = $sp.APP.APPAppClientId
+                $appDisplayName = $sp.APP.APPDisplayName
+
+                $APPFederatedIdentityCredentials = $null
+                if (($sp.APPFederatedIdentityCredentials)) {
+                    if (($sp.APPFederatedIdentityCredentials.count -gt 0)) {
+                        $array = @()
+                        foreach ($fic in $sp.APPFederatedIdentityCredentials) {
+                            if ([string]::IsNullOrWhiteSpace($fic.description)){
+                                $descriptionFederatedIdentityCredential = 'not given'
+                            }
+                            else{
+                                $descriptionFederatedIdentityCredential = $fic.description
+                            }
+                            $array += "$($fic.name)(id: $($fic.id)) / description: '$($descriptionFederatedIdentityCredential)' (issuer: $($fic.issuer); subject: $($fic.subject); audiences: $((($fic.audiences | Sort-Object) -join "$CsvDelimiterOpposite ")))"
+                            $null = $arrayApplicationFederatedIdentityCredentials4CSV.Add([PSCustomObject]@{
+                                    SPObjectId                                = $sp.ObjectId
+                                    SPAppId                                   = $sp.SP.SPappId
+                                    SPDisplayName                             = $sp.SP.SPDisplayName
+                                    SPAppOwnerOrgId                           = $sp.SP.SPappOwnerOrganizationId
+                                    SPObjectType                              = $sp.ObjectType
+                                    APPObjectId                               = $sp.APP.APPObjectId
+                                    APPAppClientId                            = $sp.APP.APPAppClientId
+                                    APPDisplayName                            = $sp.APP.APPDisplayName
+                                    APPFederatedIdentityCredentialName        = $fic.name
+                                    APPFederatedIdentityCredentialDescription = $descriptionFederatedIdentityCredential
+                                    APPFederatedIdentityCredentialId          = $fic.id
+                                    APPFederatedIdentityCredentialIssuer      = $fic.issuer
+                                    APPFederatedIdentityCredentialSubject     = $fic.subject
+                                    APPFederatedIdentityCredentialAudiences   = (($fic.audiences | Sort-Object) -join "$CsvDelimiterOpposite ")
+                                })
+                        }
+                        $APPFederatedIdentityCredentials = "$(($sp.APPFederatedIdentityCredentials).Count) ($($array -join "$CsvDelimiterOpposite "))"
+                    }
+                    else {
+                        $APPFederatedIdentityCredentials = $null
+                    }
+                }
+
+                [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($sp.SP.SPObjectId)</td>
+<td>$($sp.SP.SPappId)</td>
+<td class="breakwordall">$($sp.SP.SPdisplayName)</td>
+<td>$($sp.SP.SPappOwnerOrganizationId)</td>
+<td>$($appObjectId)</td>
+<td>$($appId)</td>
+<td class="breakwordall">$($appDisplayName)</td>
+<td class="breakwordall">$($APPFederatedIdentityCredentials)</td>
+</tr>
+"@)
+            }
+        }
+
+        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
+            $fileName = "$($Product)_$($ManagementGroupId)_FederatedIdentityCredentials_"
+        }
+        else {
+            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($ManagementGroupId)_FederatedIdentityCredentials_"
+        }
+        $arrayApplicationFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPFederatedIdentityCredentialName, APPFederatedIdentityCredentialId, APPFederatedIdentityCredentialIssuer, APPFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter ';' -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayApplicationFederatedIdentityCredentials4CSV = $null
+
+        [void]$htmlTenantSummary.AppendLine(@"
+        </tbody>
+    </table>
+
+<script>
+    var tfConfig4$htmlTableId = {
+        base_path: 'https://www.azadvertizer.net/azadserviceprincipalinsights/tablefilter/', rows_counter: true,
+"@)
+        if ($tfCount -gt 10) {
+            $spectrum = "10, $tfCount"
+            if ($tfCount -gt 50) {
+                $spectrum = "10, 25, 50, $tfCount"
+            }
+            if ($tfCount -gt 100) {
+                $spectrum = "10, 30, 50, 100, $tfCount"
+            }
+            if ($tfCount -gt 500) {
+                $spectrum = "10, 30, 50, 100, 250, $tfCount"
+            }
+            if ($tfCount -gt 1000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+            }
+            if ($tfCount -gt 2000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+            }
+            if ($tfCount -gt 3000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+        }
+        [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
+col_widths: ['10%', '10%', '10%', '10%', '10%', '10%', '10%', '20%'],
+        locale: 'en-US',
+        col_types: [
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring'
+        ],
+extensions: [{ name: 'sort' }]
+    };
+    var $tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+    $($tf).init();
+</script>
+"@)
+
+        [void]$htmlTenantSummary.AppendLine(@'
+</div>
+'@)
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@'
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="Application Federated Identity Credentials" /></button>
+'@)
+    }
+
+    $endCustPolLoop = get-date
+    Write-Host "   processing duration: $((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    #endregion ApplicationFederatedIdentityCredentials
 
     $script:html += $htmlTenantSummary
 
@@ -3878,6 +4192,7 @@ else {
     $htApplications = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htSPOwners = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htAppOwners = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
+    $htFederatedIdentityCredentials = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htOwnedBy = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htProcessedTracker = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htMeanwhileDeleted = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
@@ -4028,6 +4343,7 @@ else {
         $indicator = $using:indicator
         $htSPOwners = $using:htSPOwners
         $htAppOwners = $using:htAppOwners
+        $htFederatedIdentityCredentials = $using:htFederatedIdentityCredentials
         $htOwnedBy = $using:htOwnedBy
         $htProcessedTracker = $using:htProcessedTracker
         $htMeanwhileDeleted = $using:htMeanwhileDeleted
@@ -4567,6 +4883,20 @@ else {
                             }
                         }
                         #endregion getAppOwner
+
+                        #region getFederatedIdentityCredentials
+                        #"https://graph.microsoft.com/beta/applications/b8997c96-efbf-49da-93c3-fccd44834d15/federatedIdentityCredentials"
+                        $currentTask = "getFederatedIdentityCredentials $($getApplication.id)"
+                        $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/applications/$($getApplication.id)/federatedIdentityCredentials"
+                        $method = 'GET'
+                        $getFederatedIdentityCredentials = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask
+
+                        if ($getFederatedIdentityCredentials.Count -gt 0) {
+                            if (-not $htFederatedIdentityCredentials.($getApplication.id)) {
+                                $script:htFederatedIdentityCredentials.($getApplication.id) = $getFederatedIdentityCredentials
+                            }
+                        }
+                        #endregion getFederatedIdentityCredentials
 
                         #region spAppKeyCredentials
                         if (($getApplication.keyCredentials).Count -gt 0) {
@@ -5368,6 +5698,7 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     $htServicePrincipalsPublishedPermissionScopes = $using:htServicePrincipalsPublishedPermissionScopes
     $htSpLookup = $using:htSpLookup
     $getClassifications = $using:getClassifications
+    $htFederatedIdentityCredentials = $using:htFederatedIdentityCredentials
     #functions
     $function:getClassification = $using:funcGetClassification
 
@@ -6105,6 +6436,25 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
         }
         #endregion ApplicationOwner
 
+        #region ApplicationFederatedIdentityCredentials
+        $start = get-date
+        $arrayFederatedIdentityCredentialsOpt = [System.Collections.ArrayList]@()
+        if ($htFederatedIdentityCredentials.($object.Application.ApplicationDetails.id)) {
+            
+            foreach ($federatedIdentityCredential in $htFederatedIdentityCredentials.($object.Application.ApplicationDetails.id)) {
+                $htOptInfo = [ordered] @{}
+                $htOptInfo.name = $federatedIdentityCredential.name
+                $htOptInfo.description = $federatedIdentityCredential.description
+                $htOptInfo.id = $federatedIdentityCredential.id
+                $htOptInfo.issuer = $federatedIdentityCredential.issuer
+                $htOptInfo.subject = $federatedIdentityCredential.subject
+                $htOptInfo.audiences = $federatedIdentityCredential.audiences
+                $null = $arrayFederatedIdentityCredentialsOpt.Add($htOptInfo)
+            }
+            $durationPerfTrackFederatedIdentityCredentials = [math]::Round((NEW-TIMESPAN -Start $start -End (Get-Date)).TotalMilliseconds)
+        }
+        #endregion ApplicationFederatedIdentityCredentials
+
         #region ApplicationSecrets
         $start = get-date
         $currentDateUTC = (Get-Date).ToUniversalTime()
@@ -6274,28 +6624,29 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                     #SPType                      = $object.ServicePrincipalDetails.servicePrincipalType
                     #SPAppRoles                  = $object.ServicePrincipalDetails.appRoles
                     #SPpublishedPermissionScopes = $object.ServicePrincipalDetails.publishedPermissionScopes
-                    ObjectType                  = $object.objectTypeConcatinated
-                    ObjectId                    = $spId
+                    ObjectType                      = $object.objectTypeConcatinated
+                    ObjectId                        = $spId
                     #SP                          = $object.ServicePrincipalDetails | Select-Object -ExcludeProperty '@odata.id'
-                    SP                          = $spArray
-                    SPOwners                    = $arrayServicePrincipalOwnerOpt
-                    SPOwnedObjects              = $arrayServicePrincipalOwnedObjectsOpt
-                    SPAADRoleAssignments        = $arrayServicePrincipalAADRoleAssignmentsOpt
-                    SPAAADRoleAssignedOn        = $arrayServicePrincipalAADRoleAssignedOnOpt
-                    SPOauth2PermissionGrants    = $arrayServicePrincipalOauth2PermissionGrantsOpt
-                    SPOauth2PermissionGrantedTo = $arraySPOauth2PermissionGrantedTo
-                    SPAppRoleAssignments        = $arrayServicePrincipalAppRoleAssignmentsOpt
-                    SPAppRoleAssignedTo         = $arrayServicePrincipalAppRoleAssignedToOpt
-                    SPGroupMemberships          = $arrayServicePrincipalGroupMembershipsOpt
-                    SPAzureRoleAssignments      = $arrayServicePrincipalAzureRoleAssignmentsOpt
+                    SP                              = $spArray
+                    SPOwners                        = $arrayServicePrincipalOwnerOpt
+                    SPOwnedObjects                  = $arrayServicePrincipalOwnedObjectsOpt
+                    SPAADRoleAssignments            = $arrayServicePrincipalAADRoleAssignmentsOpt
+                    SPAAADRoleAssignedOn            = $arrayServicePrincipalAADRoleAssignedOnOpt
+                    SPOauth2PermissionGrants        = $arrayServicePrincipalOauth2PermissionGrantsOpt
+                    SPOauth2PermissionGrantedTo     = $arraySPOauth2PermissionGrantedTo
+                    SPAppRoleAssignments            = $arrayServicePrincipalAppRoleAssignmentsOpt
+                    SPAppRoleAssignedTo             = $arrayServicePrincipalAppRoleAssignedToOpt
+                    SPGroupMemberships              = $arrayServicePrincipalGroupMembershipsOpt
+                    SPAzureRoleAssignments          = $arrayServicePrincipalAzureRoleAssignmentsOpt
                     #APP                         = $object.Application.ApplicationDetails | Select-Object -ExcludeProperty '@odata.id'
-                    APP                         = $appArray
-                    APPAAADRoleAssignedOn       = $arrayApplicationAADRoleAssignedOnOpt
+                    APP                             = $appArray
+                    APPAAADRoleAssignedOn           = $arrayApplicationAADRoleAssignedOnOpt
                     #approles always inherited from sp
                     #APPAppRoles                 = $object.Application.ApplicationDetails.appRoles
-                    APPAppOwners                = $arrayApplicationOwnerOpt
-                    APPPasswordCredentials      = $arrayApplicationPasswordCredentialsOpt
-                    APPKeyCredentials           = $arrayApplicationKeyCredentialsOpt
+                    APPAppOwners                    = $arrayApplicationOwnerOpt
+                    APPPasswordCredentials          = $arrayApplicationPasswordCredentialsOpt
+                    APPKeyCredentials               = $arrayApplicationKeyCredentialsOpt
+                    APPFederatedIdentityCredentials = $arrayFederatedIdentityCredentialsOpt
                 })
         }
         if ($spOrAppWithoutSP.SPOrAppOnly -eq 'AppOnly') {
@@ -6305,17 +6656,18 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                     #SPType                      = $object.ServicePrincipalDetails.servicePrincipalType
                     #SPAppRoles                  = $object.ServicePrincipalDetails.appRoles
                     #SPpublishedPermissionScopes = $object.ServicePrincipalDetails.publishedPermissionScopes
-                    ObjectType             = $object.objectTypeConcatinated
-                    ObjectId               = $object.Application.ApplicationDetails.id
+                    ObjectType                      = $object.objectTypeConcatinated
+                    ObjectId                        = $object.Application.ApplicationDetails.id
                     #SP                          = $object.ServicePrincipalDetails | Select-Object -ExcludeProperty '@odata.id'
                     #APP                         = $object.Application.ApplicationDetails | Select-Object -ExcludeProperty '@odata.id'
-                    APP                    = $appArray
-                    APPAAADRoleAssignedOn  = $arrayApplicationAADRoleAssignedOnOpt
+                    APP                             = $appArray
+                    APPAAADRoleAssignedOn           = $arrayApplicationAADRoleAssignedOnOpt
                     #approles always inherited from sp
                     #APPAppRoles                 = $object.Application.ApplicationDetails.appRoles
-                    APPAppOwners           = $arrayApplicationOwnerOpt
-                    APPPasswordCredentials = $arrayApplicationPasswordCredentialsOpt
-                    APPKeyCredentials      = $arrayApplicationKeyCredentialsOpt
+                    APPAppOwners                    = $arrayApplicationOwnerOpt
+                    APPPasswordCredentials          = $arrayApplicationPasswordCredentialsOpt
+                    APPKeyCredentials               = $arrayApplicationKeyCredentialsOpt
+                    APPFederatedIdentityCredentials = $arrayFederatedIdentityCredentialsOpt
                 })
         }
     }
@@ -6382,29 +6734,30 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
 
     $processedServicePrincipalsCount++
     $null = $script:arrayPerformanceTracking.Add([PSCustomObject]@{
-            Type                                   = $spOrAppWithoutSP.SPOrAppOnly
-            ServicePrincipalId                     = $spId
-            ServicePrincipalDisplayName            = $object.ServicePrincipalDetails.displayName
-            ApplicationId                          = $object.Application.ApplicationDetails.id
-            ApplicationDisplayName                 = $object.Application.ApplicationDetails.displayName
-            ProcessedSequenceCount                 = $processedServicePrincipalsCount
-            ServicePrincipalOwnedObjects           = $durationPerfTrackServicePrincipalOwnedObjects
-            ServicePrincipalOwners                 = $durationPerfTrackServicePrincipalOwners
-            ServicePrincipalAADRoleAssignments     = $durationPerfTrackServicePrincipalAADRoleAssignments
-            ServicePrincipalAADRoleAssignedOn      = $durationPerfTrackServicePrincipalAADRoleAssignedOn
-            ServicePrincipalOauth2PermissionGrants = $durationPerfTrackServicePrincipalOauth2PermissionGrants
-            SPOauth2PermissionGrantedTo            = $durationPerfTrackSPOauth2PermissionGrantedTo
-            ServicePrincipalAppRoleAssignments     = $durationPerfTrackServicePrincipalAppRoleAssignments
-            ServicePrincipalAppRoleAssignedTo      = $durationPerfTrackServicePrincipalAppRoleAssignedTo
-            AzureRoleAssignmentsPrep               = $durationPerfTrackAzureRoleAssignmentsPrep
-            AzureRoleAssignmentsOpt1               = $durationPerfTrackAzureRoleAssignmentsOpt1
-            AzureRoleAssignmentsOpt2               = $durationPerfTrackAzureRoleAssignmentsOpt2
-            ApplicationAADRoleAssignedOn           = $durationPerfTrackApplicationAADRoleAssignedOn
-            ApplicationOwner                       = $durationPerfTrackApplicationOwner
-            ApplicationSecrets                     = $durationPerfTrackApplicationSecrets
-            ApplicationCertificates                = $durationPerfTrackApplicationCertificates
-            ManagedIdentity                        = $durationPerfTrackManagedIdentity
-            FinalArray                             = $durationPerfTrackFinalArray
+            Type                                    = $spOrAppWithoutSP.SPOrAppOnly
+            ServicePrincipalId                      = $spId
+            ServicePrincipalDisplayName             = $object.ServicePrincipalDetails.displayName
+            ApplicationId                           = $object.Application.ApplicationDetails.id
+            ApplicationDisplayName                  = $object.Application.ApplicationDetails.displayName
+            ProcessedSequenceCount                  = $processedServicePrincipalsCount
+            ServicePrincipalOwnedObjects            = $durationPerfTrackServicePrincipalOwnedObjects
+            ServicePrincipalOwners                  = $durationPerfTrackServicePrincipalOwners
+            ServicePrincipalAADRoleAssignments      = $durationPerfTrackServicePrincipalAADRoleAssignments
+            ServicePrincipalAADRoleAssignedOn       = $durationPerfTrackServicePrincipalAADRoleAssignedOn
+            ServicePrincipalOauth2PermissionGrants  = $durationPerfTrackServicePrincipalOauth2PermissionGrants
+            SPOauth2PermissionGrantedTo             = $durationPerfTrackSPOauth2PermissionGrantedTo
+            ServicePrincipalAppRoleAssignments      = $durationPerfTrackServicePrincipalAppRoleAssignments
+            ServicePrincipalAppRoleAssignedTo       = $durationPerfTrackServicePrincipalAppRoleAssignedTo
+            AzureRoleAssignmentsPrep                = $durationPerfTrackAzureRoleAssignmentsPrep
+            AzureRoleAssignmentsOpt1                = $durationPerfTrackAzureRoleAssignmentsOpt1
+            AzureRoleAssignmentsOpt2                = $durationPerfTrackAzureRoleAssignmentsOpt2
+            ApplicationAADRoleAssignedOn            = $durationPerfTrackApplicationAADRoleAssignedOn
+            ApplicationOwner                        = $durationPerfTrackApplicationOwner
+            ApplicationFederatedIdentityCredentials = $durationPerfTrackFederatedIdentityCredentials
+            ApplicationSecrets                      = $durationPerfTrackApplicationSecrets
+            ApplicationCertificates                 = $durationPerfTrackApplicationCertificates
+            ManagedIdentity                         = $durationPerfTrackManagedIdentity
+            FinalArray                              = $durationPerfTrackFinalArray
         })
 
 
@@ -6421,6 +6774,7 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     $durationPerfTrackAzureRoleAssignmentsOpt2 = $null
     $durationPerfTrackApplicationAADRoleAssignedOn = $null
     $durationPerfTrackApplicationOwner = $null
+    $durationPerfTrackFederatedIdentityCredentials = $null
     $durationPerfTrackApplicationSecrets = $null
     $durationPerfTrackApplicationCertificates = $null
     $durationPerfTrackManagedIdentity = $null
@@ -6472,6 +6826,7 @@ Write-Host 'AzureRoleAssignmentsOpt1:' ($arrayPerformanceTracking.AzureRoleAssig
 Write-Host 'AzureRoleAssignmentsOpt2:' ($arrayPerformanceTracking.AzureRoleAssignmentsOpt2 | Measure-Object -Sum).Sum
 Write-Host 'ApplicationAADRoleAssignedOn:' ($arrayPerformanceTracking.ApplicationAADRoleAssignedOn | Measure-Object -Sum).Sum
 Write-Host 'ApplicationOwner:' ($arrayPerformanceTracking.ApplicationOwner | Measure-Object -Sum).Sum
+Write-Host 'ApplicationFederatedIdentityCredentials:' ($arrayPerformanceTracking.ApplicationFederatedIdentityCredentials | Measure-Object -Sum).Sum
 Write-Host 'ApplicationSecrets:' ($arrayPerformanceTracking.ApplicationSecrets | Measure-Object -Sum).Sum
 Write-Host 'ApplicationCertificates:' ($arrayPerformanceTracking.ApplicationCertificates | Measure-Object -Sum).Sum
 Write-Host 'ManagedIdentity:' ($arrayPerformanceTracking.ManagedIdentity | Measure-Object -Sum).Sum
@@ -6641,7 +6996,7 @@ summary
 #[System.GC]::Collect()
 
 $endSummary = get-date
-Write-Host " Building TenantSummary duration: $((NEW-TIMESPAN -Start $startSummary -End $endSummary).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startSummary -End $endSummary).TotalSeconds) seconds)"
+Write-Host " Building Summary duration: $((NEW-TIMESPAN -Start $startSummary -End $endSummary).TotalMinutes) minutes ($((NEW-TIMESPAN -Start $startSummary -End $endSummary).TotalSeconds) seconds)"
 
 
 $html += @'
@@ -6855,4 +7210,11 @@ else {
 
 if ($DoTranscript) {
     Stop-Transcript
+}
+
+Write-Host ""
+Write-Host "--------------------"
+Write-Host "Completed successful" -ForegroundColor Green
+if ($Error.Count -gt 0) {
+    Write-Host "Don't bother about dumped errors"
 }
