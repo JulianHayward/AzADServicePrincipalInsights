@@ -4,7 +4,11 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 
 # Updates
 
-* 20220404_1 - add FederatedIdentityCredentials
+* 20220425_2
+    * add parameter `-ManagementGroupId` (if undefined, then Tenant Root Management Group will be used)
+    * use AzAPICall module version 1.1.9
+* 20220404_1 
+    * add FederatedIdentityCredentials
 
 # Features
 
