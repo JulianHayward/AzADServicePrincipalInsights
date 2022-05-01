@@ -3,7 +3,13 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
-
+* 20220501_5
+    * parameter `-ManagementGroupId` accepts multiple Management Groups in form of an array e.g. `.\pwsh\AzADServicePrincipalInsights.ps1 -ManagementGroupId @('mgId0', 'mgId1')`
+    * new parameter `-OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes`. You may want to only report on Service Principals that have RBAC permissions on Azure resources at and below that Management Group scope(s) (Management Groups, Subscriptions, Resource Groups and Resources)
+    * Role assignments on Azure resources - mark those RBAC Role assignments which leverage a RBAC Role definitions that can create role assignments as critical
+    * updated YAML workflow/pipeline files
+    * minor bug fixes
+    * performance optimization
 * 20220425_2
     * add parameter `-ManagementGroupId` (if undefined, then Tenant Root Management Group will be used)
     * use AzAPICall module version 1.1.11

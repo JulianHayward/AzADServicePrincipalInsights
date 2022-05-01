@@ -1,7 +1,14 @@
+#change line 8 accordingly
+#if you want to leverage parameters, add them in line 53
+
 name: AzADServicePrincipalInsights_OIDC
 
 env:
   OutputPath: wiki
+  ManagementGroups_s: managementGroupId #example multiple ManagementGroups: 'mgId0,mgId1'
+  ScriptDir: pwsh #example: 'my folder\pwsh' or 'my folder/pwsh'
+  ScriptPrereqFile: prerequisites.ps1
+  ScriptFile: AzADServicePrincipalInsights.ps1
 
 on:
   #schedule:
@@ -18,35 +25,36 @@ permissions:
 jobs:
   AzADServicePrincipalInsights:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-       
+
       - name: Connect Azure OIDC
         uses: azure/login@v1
         with:
           client-id: ${{secrets.CLIENT_ID}}
           tenant-id: ${{secrets.TENANT_ID}}
-          subscription-id: ${{secrets.SUBSCRIPTION_ID}} 
+          subscription-id: ${{secrets.SUBSCRIPTION_ID}}
           enable-AzPSSession: true
-       
+
       - name: Check prerequisites
         uses: azure/powershell@v1
         with:
           inlineScript: |
-            .\pwsh\prerequisites.ps1
+            . .\$($env:ScriptDir)\$($env:ScriptPrereqFile) -OutputPath ${env:OutputPath}
           azPSVersion: "latest"
 
       - name: Run AzADServicePrincipalInsights
         uses: azure/powershell@v1
         with:
           inlineScript: |
-            .\pwsh\AzADServicePrincipalInsightsParallel.ps1 -SubscriptionId4AzContext ${{secrets.SUBSCRIPTION_ID}} -OutputPath ${env:OutputPath}
+            $ManagementGroupId = (${env:ManagementGroups_s}).split(',')
+            . .\$($env:ScriptDir)\$($env:ScriptFile) -ScriptPath ${env:ScriptDir} -OutputPath ${env:OutputPath} -SubscriptionId4AzContext ${{secrets.SUBSCRIPTION_ID}} -ManagementGroupId $ManagementGroupId
           azPSVersion: "latest"
-      
+
       - name: Push AzADServicePrincipalInsights output to repository
-        run: |        
+        run: |
           git config --global user.email "AzADServicePrincipalInsightsGHActions@ghActions.com"
           git config --global user.name "azgvz"
           git config pull.rebase false

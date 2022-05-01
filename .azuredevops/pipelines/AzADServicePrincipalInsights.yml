@@ -1,15 +1,25 @@
+#change parameter managementGroupIds from line 9 accordingly / single or multiple managementGroupIds
+#check line 35 branch match master/main
+#if you want to leverage parameters, add them in line 58
+
 trigger: none
 
 pr: none
 
 parameters:
+- name: managementGroupIds
+  type: object
+  default:
+    - 'mgId0'
+    #- 'mgid1'
 - name: subscriptionQuotaIdWhitelistParameters
   type: object
   default:
     - undefined
 
 variables:
-  ServiceConnection: AzADServicePrincipalInsights
+  ServiceConnection: AzAdServicePrincipalInsights
+  ManagementGroupId: ${{ join(',',parameters.managementGroupIds) }}
   SubscriptionQuotaIdWhitelist: ${{ join(',',parameters.subscriptionQuotaIdWhitelistParameters) }}
   WikiDir: wiki
   CsvDelimiter: ;
@@ -22,10 +32,10 @@ schedules:
   always: true
   branches:
     include:
-    - main
+    - main #CHECK branch 'main' is applicable? - delete me :)
 
 jobs:
-- job: AzADServicePrincipalInsights  
+- job: AzADServicePrincipalInsights
   timeoutInMinutes: 0
 
   pool:
@@ -45,7 +55,7 @@ jobs:
       scriptType: filePath
       pwsh: true
       scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(Script)'
-      scriptArguments: '-OutputPath $(WikiDir) -ScriptPath $(ScriptDir)'
+      scriptArguments: '-OutputPath $(WikiDir) -ScriptPath $(ScriptDir) -ManagementGroupId $(ManagementGroupId)'
       azurePowerShellVersion: latestVersion
     displayName: 'Run AzADServicePrincipalInsights v1'
   - powershell: |
