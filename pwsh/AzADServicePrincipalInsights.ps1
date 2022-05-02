@@ -4021,11 +4021,11 @@ if (-not $NoAzureRoleAssignments) {
         $selectedManagementGroupId = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn 'Content' -validateAccess -noPaging
 
         if ($selectedManagementGroupId -eq 'failed') {
-            $permissionCheckResults += "MG ($($managementGroupIdEntry)) Reader permission check FAILED"
+            $permissionCheckResults += "MG '$($managementGroupIdEntry)' Reader permission check FAILED"
             $permissionsCheckFailed = $true
         }
         else {
-            $permissionCheckResults += "MG ($($managementGroupIdEntry)) Reader permission check PASSED"
+            $permissionCheckResults += "MG '$($managementGroupIdEntry)' Reader permission check PASSED"
         }
     }
 

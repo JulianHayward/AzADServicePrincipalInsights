@@ -10,8 +10,8 @@ parameters:
 - name: managementGroupIds
   type: object
   default:
-    - 'mgId0'
-    #- 'mgid1'
+    - '<yourManagementGroupId_0>' #e.g. 55ca6640-f705-4a6d-8574-549c57acf4ed (can be Tenant Root Group Management Group Id or child Management Group Id)
+    #- '<yourManagementGroupId_1>' #use this (and you may create more lines) if you want to run against multiple Management Groups
 - name: subscriptionQuotaIdWhitelistParameters
   type: object
   default:
@@ -39,7 +39,7 @@ jobs:
   timeoutInMinutes: 0
 
   pool:
-    vmImage: 'ubuntu-18.04'
+    vmImage: 'ubuntu-20.04'
 
   steps:
   - task: PowerShell@2
