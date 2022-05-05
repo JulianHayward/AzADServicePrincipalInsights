@@ -3,10 +3,12 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
+* 20220505_1
+    * fix: `using:scriptPath` variable in foreach parallel (this is only relevant for Azure DevOps and GitHub if you have a non default folder structure in your repository) - thanks Matt :)
 * 20220501_1
     * parameter `-ManagementGroupId` accepts multiple Management Groups in form of an array e.g. `.\pwsh\AzADServicePrincipalInsights.ps1 -ManagementGroupId @('mgId0', 'mgId1')`
     * new parameter `-OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes`. You may want to only report on Service Principals that have RBAC permissions on Azure resources at and below that Management Group scope(s) (Management Groups, Subscriptions, Resource Groups and Resources)
-    * Role assignments on Azure resources - mark those RBAC Role assignments which leverage a RBAC Role definitions that can create role assignments as critical
+    * Role assignments on Azure resources - mark those RBAC Role assignments which leverage a RBAC Role definition that can create role assignments as critical
     * updated YAML workflow/pipeline files
     * minor bug fixes
     * performance optimization
@@ -91,3 +93,22 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 ![previewHTML](img/preview.png)  
 ![previewHTML2](img/preview2.png)  
 ![previewJSON](img/previewJSON.png)
+
+## AzAdvertizer
+
+![alt text](img/azadvertizer70.png "example output")
+
+Also check <https://www.azadvertizer.net> - AzAdvertizer helps you to keep up with the pace by providing overview and insights on new releases and changes/updates for Azure Governance capabilities such as Azure Policy's Policy definitions, initiatives (Set definitions), aliases and Azure RBAC's Role definitions and resource provider operations.
+
+## AzGovViz
+
+![alt text](img/AzGovVizConnectingDots_v4.2_h120.png "example output")
+
+Also check <https://aka.ms/AzGovViz> - Azure Governance Visualizer is intended to help you to get a holistic overview on your technical Azure Governance implementation by connecting the dots.  
+It is a PowerShell script that iterates your Azure Tenant's Management Group hierarchy down to Subscription level, it captures most relevant Azure governance capabilities such as Azure Policy, RBAC and Blueprints and a lot more..
+* Listed as [tool](https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/reference/tools-templates#govern) for the Govern discipline in the Microsoft Cloud Adoption Framework (CAF)  
+* Listed as [security monitoring tool](https://docs.microsoft.com/en-us/azure/architecture/framework/security/monitor-tools) in the Microsoft Well Architected Framework (WAF)
+
+## Closing Note
+
+Please note that while being developed by a Microsoft employee, AzADServicePrincipalInsights is not a Microsoft service or product. AzADServicePrincipalInsights is a personal/community driven project, there are none implicit or explicit obligations related to this project, it is provided 'as is' with no warranties and confer no rights.
