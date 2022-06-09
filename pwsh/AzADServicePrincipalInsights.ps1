@@ -3,7 +3,8 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20220505_1',
+    [string]$ProductVersion = 'v1_20220609_1',
+    [string]$azAPICallVersion = '1.1.13',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -29,8 +30,8 @@ Param
     [int]$ApplicationCertificateExpiryWarning = 14,
     [int]$ApplicationCertificateExpiryMax = 730,
     [string]$DirectorySeparatorChar = [IO.Path]::DirectorySeparatorChar,
-    [string]$azAPICallVersion = '1.1.11',
-    [switch]$OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes
+    [switch]$OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes,
+    [array]$CriticalAADRoles = @('62e90394-69f5-4237-9190-012177145e10', 'e8611ab8-c189-46e8-94e1-60213ab1f814', '7be44c8a-adaf-4e2a-84d6-ab2649e08a13') #Global Administrator, Privileged Role Administrator, Privileged Authentication Administrator
 )
 
 $Error.clear()
@@ -252,6 +253,35 @@ $parameters4AzAPICallModule = @{
 $azAPICallConf = initAzAPICall @parameters4AzAPICallModule
 Write-Host " Initialize 'AzAPICall' succeeded" -ForegroundColor Green
 #EndRegion initAZAPICall
+
+#region checkVersion
+function checkVersion {
+    try {
+        $getRepoVersion = Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/master/version.txt'
+        $versionThis = ($ProductVersion -split '_')[1]
+        $script:versionOnRepositoryFull = $getRepoVersion.Content -replace "`n"
+        $versionOnRepository = ($versionOnRepositoryFull -split '_')[1]
+        $script:newerVersionAvailable = $false
+        if ([int]$versionOnRepository -gt [int]$versionThis) {
+            $script:newerVersionAvailable = $true
+            $script:newerVersionAvailableHTML = '<span style="color:#FF5733; font-weight:bold">Get the latest ' + $Product + ' version (' + $versionOnRepositoryFull + ')!</span> <a href="https://aka.ms/AzADServicePrincipalInsights" target="_blank"><i class="fa fa-external-link" aria-hidden="true"></i></a>'
+        }
+        if ($newerVersionAvailable) {
+            if (-not $azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions) {
+                Write-Host ''
+                Write-Host " * * * This $Product version ($ProductVersion) is not up to date. Get the latest $Product version ($versionOnRepositoryFull)! * * *" -ForegroundColor Green
+                Write-Host 'https://aka.ms/AzADServicePrincipalInsights'
+                Write-Host ' * * * * * * * * * * * * * * * * * * * * * *' -ForegroundColor Green
+                Pause
+            }
+        }
+    }
+    catch {
+        #skip
+    }
+}
+checkVersion
+#endregion checkVersion
 
 if ($NoAzureRoleAssignments) {
     if ($OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes) {
@@ -886,7 +916,7 @@ function summary() {
 
     #region SUMMARYServicePrincipals
     [void]$htmlTenantSummary.AppendLine(@'
-    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="Service Principals" /></button>
+    <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textServicePrincipal" data-content="&nbsp;Service Principals" /></button>
     <div class="content TenantSummaryContent">
 '@)
 
@@ -1451,7 +1481,7 @@ col_widths: ['6%', '6%', '7%', '8%', '8%', '6%', '7%', '6%', '6%', '8%', '8%', '
 
     if ($cu.SPOwners.Count -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal Owners" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="&nbsp;Service Principal Owners" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
@@ -1600,7 +1630,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-    <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Service Principal Owners" /></button>
+    <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="&nbsp;Service Principal Owners" /></button>
 '@)
     }
 
@@ -1614,7 +1644,7 @@ extensions: [{ name: 'sort' }]
 
     if ($cu.APPAppOwners.Count -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Application Owners" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="&nbsp;Application Owners" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
@@ -1764,7 +1794,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Application Owners" /></button>
+        <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="&nbsp;Application Owners" /></button>
 '@)
     }
 
@@ -1779,7 +1809,7 @@ extensions: [{ name: 'sort' }]
 
     if ($cu.SPOwnedObjects.Count -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal Owned Objects" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="&nbsp;Service Principal Owned Objects" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
@@ -1882,7 +1912,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Service Principal Owned Objects" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="&nbsp;Service Principal Owned Objects" /></button>
 '@)
     }
 
@@ -1897,7 +1927,7 @@ extensions: [{ name: 'sort' }]
     $servicePrincipalsAADRoleAssignmentsCount = $servicePrincipalsAADRoleAssignments.Count
     if ($servicePrincipalsAADRoleAssignmentsCount -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Service Principal AAD RoleAssignments" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="&nbsp;Service Principal AAD RoleAssignments" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
@@ -1913,6 +1943,8 @@ extensions: [{ name: 'sort' }]
 <th>SP displayName</th>
 <th>SP type</th>
 <th>SP App Owner Organization Id</th>
+<th>Classification</th>
+<th>#</th>
 <th>SP AAD RoleAssignments</th>
 </tr>
 </thead>
@@ -1932,9 +1964,45 @@ extensions: [{ name: 'sort' }]
                 if (($sp.SPAADRoleAssignments.count -gt 0)) {
                     $array = @()
                     $cnt = 0
-
+                    $roleClassification = ''
                     foreach ($ra in $sp.SPAADRoleAssignments) {
                         $cnt++
+
+                        if ($cntRow % 2 -eq 0) {
+                            if ($cnt % 2 -eq 0) {
+                                $class = 'class="odd"'
+                            }
+                            else {
+                                $class = 'class="even"'
+                            }
+                        }
+                        else {
+                            if ($cnt % 2 -eq 0) {
+                                $class = 'class="even"'
+                            }
+                            else {
+                                $class = 'class="odd"'
+                            }
+                        }
+
+                        $raRoleDefinitionName = $ra.roleDefinitionName
+
+                        if ($ra.roleType -eq 'BuiltIn') {
+                            $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($ra.roleDefinitionName -replace ' ', '-')`" target=`"_blank`">$($ra.roleDefinitionName)</a>"
+                        }
+
+                        $faIcon = ''
+                        if ($ra.roleIsCritical -eq $true) {
+                            $roleClassification = 'critical'
+                            $faIcon = '<i class="fa fa-exclamation-triangle" aria-hidden="true" style="color: #ff5e00; font-size: 9px;"></i> '
+                        }
+
+                        if ($ra.scopeDetail) {
+                            $array += "$faIcon<span $class><b>$($ra.roleType)</b> '$($raRoleDefinitionName)' $($ra.roleDefinitionId) (scope: $($ra.scopeDetail))</span>"
+                        }
+                        else {
+                            $array += "$faIcon<span $class><b>$($ra.roleType)</b> '$($raRoleDefinitionName)' $($ra.roleDefinitionId)</span>"
+                        }
 
                         $null = $arrayServicePrincipalsAADRoleAssignments4CSV.Add([PSCustomObject]@{
                                 SPObjectType = $sp.ObjectType
@@ -1953,32 +2021,10 @@ extensions: [{ name: 'sort' }]
                                 DirectoryScopeId = $ra.directoryScopeId
                                 ResourceScope = $ra.resourceScope
                                 ScopeDetail = $ra.scopeDetail
+                                Classification = $roleClassification
                             })
-
-                        if ($cntRow % 2 -eq 0) {
-                            if ($cnt % 2 -eq 0) {
-                                $class = 'class="odd"'
-                            }
-                            else {
-                                $class = 'class="even"'
-                            }
-                        }
-                        else {
-                            if ($cnt % 2 -eq 0) {
-                                $class = 'class="even"'
-                            }
-                            else {
-                                $class = 'class="odd"'
-                            }
-                        }
-                        if ($ra.scopeDetail) {
-                            $array += "<span $class><b>$($ra.roleType)</b> '$($ra.roleDefinitionName)' $($ra.roleDefinitionId) (scope: $($ra.scopeDetail))</span>"
-                        }
-                        else {
-                            $array += "<span $class><b>$($ra.roleType)</b> '$($ra.roleDefinitionName)' $($ra.roleDefinitionId)</span>"
-                        }
                     }
-                    $spAADRoleAssignments = "$(($sp.SPAADRoleAssignments).Count) ($($array -join "$CsvDelimiterOpposite "))"
+                    $spAADRoleAssignments = "$($array -join '<br>')"
 
                 }
                 else {
@@ -1993,6 +2039,8 @@ extensions: [{ name: 'sort' }]
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
+<td>$($roleClassification)</td>
+<td>$(($sp.SPAADRoleAssignments).Count)</td>
 <td class="breakwordall">$($spAADRoleAssignments)</td>
 </tr>
 "@)
@@ -2040,16 +2088,19 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],
+col_widths: ['10%', '10%', '10%', '10%', '10%', '10%', '3%', '37%'],
             locale: 'en-US',
             col_3: 'multiple',
             col_4: 'select',
+            col_5: 'select',
             col_types: [
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
+                'caseinsensitivestring',
+                'number',
                 'caseinsensitivestring'
             ],
 extensions: [{ name: 'sort' }]
@@ -2065,7 +2116,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="Service Principal AAD RoleAssignments" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="&nbsp;Service Principal AAD RoleAssignments" /></button>
 '@)
     }
 
@@ -2080,7 +2131,7 @@ extensions: [{ name: 'sort' }]
     $servicePrincipalsAADRoleAssignedOnCount = $servicePrincipalsAADRoleAssignedOn.Count
     if ($servicePrincipalsAADRoleAssignedOnCount -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Service Principal AAD RoleAssignedOn" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="&nbsp;Service Principal AAD RoleAssignedOn" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
@@ -2111,7 +2162,15 @@ extensions: [{ name: 'sort' }]
                 if (($sp.SPAAADRoleAssignedOn.count -gt 0)) {
                     $array = @()
                     foreach ($rao in $sp.SPAAADRoleAssignedOn) {
-                        $array += "$($rao.roleName) ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
+
+                        $raRoleDefinitionName = $rao.roleName
+                        if ($htAadRoleDefinitions.($rao.roleId)) {
+                            if ($htAadRoleDefinitions.($rao.roleId).isBuiltIn -eq $true) {
+                                $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($rao.roleName -replace ' ', '-')`" target=`"_blank`">$($rao.roleName)</a>"
+                            }
+                        }
+
+                        $array += "$raRoleDefinitionName ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
                     }
                     $SPAAADRoleAssignedOn = "$(($sp.SPAAADRoleAssignedOn).Count) ($($array -join "$CsvDelimiterOpposite "))"
 
@@ -2192,7 +2251,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="Service Principal AAD RoleAssignedOn" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="&nbsp;Service Principal AAD RoleAssignedOn" /></button>
 '@)
     }
 
@@ -2207,7 +2266,7 @@ extensions: [{ name: 'sort' }]
     $applicationsAADRoleAssignedOnCount = $applicationsAADRoleAssignedOn.Count
     if ($applicationsAADRoleAssignedOnCount -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="Application AAD RoleAssignedOn" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment" data-content="&nbsp;Application AAD RoleAssignedOn" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
@@ -2238,7 +2297,15 @@ extensions: [{ name: 'sort' }]
                 if (($sp.APPAAADRoleAssignedOn.count -gt 0)) {
                     $array = @()
                     foreach ($rao in $sp.APPAAADRoleAssignedOn) {
-                        $array += "$($rao.roleName) ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
+
+                        $raRoleDefinitionName = $rao.roleName
+                        if ($htAadRoleDefinitions.($rao.roleId)) {
+                            if ($htAadRoleDefinitions.($rao.roleId).isBuiltIn -eq $true) {
+                                $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($rao.roleName -replace ' ', '-')`" target=`"_blank`">$($rao.roleName)</a>"
+                            }
+                        }
+
+                        $array += "$raRoleDefinitionName ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
                     }
                     $APPAAADRoleAssignedOn = "$(($sp.APPAAADRoleAssignedOn).Count) ($($array -join "$CsvDelimiterOpposite "))"
 
@@ -2319,7 +2386,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="Application AAD RoleAssignedOn" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAADRoleAssignment fontGrey" data-content="&nbsp;Application AAD RoleAssignedOn" /></button>
 '@)
     }
 
@@ -2345,7 +2412,7 @@ extensions: [{ name: 'sort' }]
         }
 
         [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="$buttonDataContent" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="&nbsp;$buttonDataContent" /></button>
         <div class="content TenantSummaryContent">
 "@)
 
@@ -2500,7 +2567,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions fontGrey" data-content="Service Principal App RoleAssignments (API permissions Application)" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions fontGrey" data-content="&nbsp;Service Principal App RoleAssignments (API permissions Application)" /></button>
 '@)
     }
 
@@ -2517,7 +2584,7 @@ extensions: [{ name: 'sort' }]
     $servicePrincipalsAppRoleAssignedToCount = $servicePrincipalsAppRoleAssignedTo.Count
     if ($servicePrincipalsAppRoleAssignedToCount -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal App RoleAssignedTo (Users and Groups)" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="&nbsp;Service Principal App RoleAssignedTo (Users and Groups)" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
@@ -2628,7 +2695,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Service Principal App RoleAssignedTo (Users and Groups)" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="&nbsp;Service Principal App RoleAssignedTo (Users and Groups)" /></button>
 '@)
     }
 
@@ -2656,7 +2723,7 @@ extensions: [{ name: 'sort' }]
 
     if ($servicePrincipalsOauth2PermissionGrantsCount -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@"
-            <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="$buttonDataContent" /></button>
+            <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions" data-content="&nbsp;$buttonDataContent" /></button>
             <div class="content TenantSummaryContent">
 "@)
 
@@ -2807,7 +2874,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions fontGrey" data-content="Service Principal  Oauth Permission grants (API permissions Delegated)" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAPIPermissions fontGrey" data-content="&nbsp;Service Principal  Oauth Permission grants (API permissions Delegated)" /></button>
 '@)
     }
 
@@ -2829,7 +2896,7 @@ extensions: [{ name: 'sort' }]
 
         if ($servicePrincipalsAzureRoleAssignmentsCount -gt 0) {
             [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment" data-content="Service Principal  Azure RoleAssignments" /></button>
+            <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment" data-content="&nbsp;Service Principal  Azure RoleAssignments" /></button>
             <div class="content TenantSummaryContent">
 '@)
 
@@ -2890,10 +2957,10 @@ extensions: [{ name: 'sort' }]
                             if ($azureroleAss.roleIsCritical -eq $true) {
                                 $RBACClassification = 'critical'
                                 $faIcon = '<i class="fa fa-exclamation-triangle" aria-hidden="true" style="color: #ff5e00; font-size: 9px;"></i> '
-                                $array += "$($faIcon)$($roleName) (<b>$($azureroleAss.roleAssignmentAssignmentResourceType)</b> $($azureroleAss.roleAssignmentAssignmentScopeName))$($pimRef)$($indirectRef)"
+                                $array += "$($faIcon)$($roleName) (<b>$($azureroleAss.roleAssignmentAssignmentResourceType)</b> $($azureroleAss.roleAssignmentAssignmentScopeName -replace '<', '&lt;' -replace '>', '&gt;'))$($pimRef)$($indirectRef)"
                             }
                             else {
-                                $array += "$($roleName) (<b>$($azureroleAss.roleAssignmentAssignmentResourceType)</b> $($azureroleAss.roleAssignmentAssignmentScopeName))$($pimRef)$($indirectRef)"
+                                $array += "$($roleName) (<b>$($azureroleAss.roleAssignmentAssignmentResourceType)</b> $($azureroleAss.roleAssignmentAssignmentScopeName -replace '<', '&lt;' -replace '>', '&gt;'))$($pimRef)$($indirectRef)"
                             }
 
                         }
@@ -2980,7 +3047,7 @@ extensions: [{ name: 'sort' }]
         }
         else {
             [void]$htmlTenantSummary.AppendLine(@'
-                <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment fontGrey" data-content="Service Principal  Azure RoleAssignments" /></button>
+                <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment fontGrey" data-content="&nbsp;Service Principal  Azure RoleAssignments" /></button>
 '@)
         }
 
@@ -2990,7 +3057,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment fontGrey" data-content="Service Principal  Azure RoleAssignments" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment fontGrey" data-content="&nbsp;Service Principal  Azure RoleAssignments" /></button>
 '@)
     }
 
@@ -3003,7 +3070,7 @@ extensions: [{ name: 'sort' }]
 
     if ($servicePrincipalsGroupMembershipsCount -gt 0) {
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="Service Principal  Group memberships" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup" data-content="&nbsp;Service Principal  Group memberships" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
@@ -3114,7 +3181,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="Service Principal  Group memberships" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textGroup fontGrey" data-content="&nbsp;Service Principal  Group memberships" /></button>
 '@)
     }
 
@@ -3123,6 +3190,9 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYServicePrincipalsGroupMemberships
 
     #region SUMMARYApplicationSecrets
+    $startCustPolLoop = Get-Date
+    Write-Host '  processing Summary ApplicationSecrets'
+
     $applicationSecrets = $cu.where( { $_.APPPasswordCredentials.Count -gt 0 } )
     $applicationSecretsCount = $applicationSecrets.Count
 
@@ -3137,13 +3207,13 @@ extensions: [{ name: 'sort' }]
 
         if ($applicationSecretsExpireSoonCount -gt 0) {
             [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Secrets ($applicationSecretsExpireSoonCount expire soon)" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="&nbsp;Application Secrets ($applicationSecretsExpireSoonCount expire soon)" /></button>
         <div class="content TenantSummaryContent">
 "@)
         }
         else {
             [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Secrets" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="&nbsp;Application Secrets" /></button>
         <div class="content TenantSummaryContent">
 '@)
         }
@@ -3223,10 +3293,6 @@ var chartSecretExpiryNoteWorthy = new Chart(ctx, {
 
         }
 
-        $startCustPolLoop = Get-Date
-        Write-Host '  processing Summary ApplicationSecrets'
-
-        #if ($applicationSecretsCount -gt 0) {
         $tfCount = $applicationSecretsCount
         $htmlTableId = 'TenantSummary_ApplicationSecrets'
         [void]$htmlTenantSummary.AppendLine(@"
@@ -3366,7 +3432,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="Application Secrets" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="&nbsp;Application Secrets" /></button>
 '@)
     }
 
@@ -3375,6 +3441,9 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYApplicationSecrets
 
     #region SUMMARYApplicationCertificates
+    $startCustPolLoop = Get-Date
+    Write-Host '  processing Summary ApplicationCertificates'
+
     $applicationCertificates = $cu.where( { $_.APPKeyCredentials.Count -gt 0 } )
     $applicationCertificatesCount = $applicationCertificates.Count
 
@@ -3389,13 +3458,13 @@ extensions: [{ name: 'sort' }]
 
         if ($applicationCertificatesExpireSoonCount -gt 0) {
             [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates ($applicationCertificatesExpireSoonCount expire soon)" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="&nbsp;Application Certificates ($applicationCertificatesExpireSoonCount expire soon)" /></button>
         <div class="content TenantSummaryContent">
 "@)
         }
         else {
             [void]$htmlTenantSummary.AppendLine(@'
-                <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates" /></button>
+                <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="&nbsp;Application Certificates" /></button>
                 <div class="content TenantSummaryContent">
 '@)
         }
@@ -3474,10 +3543,6 @@ type: 'pie',
 "@)
 
         }
-
-        $startCustPolLoop = Get-Date
-        Write-Host '  processing Summary ApplicationCertificates'
-
 
         [void]$htmlTenantSummary.AppendLine(@"
 <i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
@@ -3618,7 +3683,7 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="Application Certificates" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="&nbsp;Application Certificates" /></button>
 '@)
     }
 
@@ -3627,6 +3692,9 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYApplicationCertificates
 
     #region SUMMARYApplicationFederatedIdentityCredentials
+    $startCustPolLoop = Get-Date
+    Write-Host '  processing Summary ApplicationFederatedIdentityCredentials'
+
     $applicationFederatedIdentityCredentials = $cu.where( { $_.APPFederatedIdentityCredentials.Count -gt 0 } )
     $applicationFederatedIdentityCredentialsCount = $applicationFederatedIdentityCredentials.Count
 
@@ -3637,106 +3705,9 @@ extensions: [{ name: 'sort' }]
         $tf = "tf$($htmlTableId)"
 
         [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Federated Identity Credentials" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="&nbsp;Application Federated Identity Credentials" /></button>
         <div class="content TenantSummaryContent">
 '@)
-
-        <#
-        $applicationCertificatesExpireSoon = $applicationCertificates.APPKeyCredentials.expiryInfo.where( { $_ -like 'expires soon*' } )
-        $applicationCertificatesExpireSoonCount = $applicationCertificatesExpireSoon.Count
-
-        if ($applicationCertificatesExpireSoonCount -gt 0) {
-            [void]$htmlTenantSummary.AppendLine(@"
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates ($applicationCertificatesExpireSoonCount expire soon)" /></button>
-        <div class="content TenantSummaryContent">
-"@)
-        }
-        else {
-            [void]$htmlTenantSummary.AppendLine(@'
-                <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="Application Certificates" /></button>
-                <div class="content TenantSummaryContent">
-'@)
-        }
-
-        $groupedExpiryNoteWorthy = $applicationCertificates.APPKeyCredentials.expiryInfo.where( { $_ -like 'expires soon*' -or $_ -eq 'expired' } ) | group-Object
-        if (($groupedExpiryNoteWorthy | Measure-Object).Count -gt 0) {
-            $arrExpiryNoteWorthyCounts = @()
-            $arrExpiryNoteWorthyStates = @()
-            foreach ($grp in $groupedExpiryNoteWorthy | sort-object -property count -Descending) {
-                $arrExpiryNoteWorthyCounts += $grp.Count
-                $arrExpiryNoteWorthyStates += $grp.Name
-            }
-            $ExpiryNoteWorthyCounts = "'{0}'" -f ($arrExpiryNoteWorthyCounts -join "','")
-            $ExpiryNoteWorthyStates = "'{0}'" -f ($arrExpiryNoteWorthyStates -join "','")
-
-            $categoryColoreExpiryNoteWorthy = ($categoryColorsMax[0..1])
-            $categoryColorsSeperatedExpiryNoteWorthy = "'{0}'" -f ($categoryColoreExpiryNoteWorthy -join "','")
-
-            [void]$htmlTenantSummary.AppendLine(@"
-    <div class="noFloat">
-        <button type="button" class="decollapsible">Charts</button>
-
-        <div class="showContent chart-container">
-            <div class="chartDiv">
-                <span>Noteworthy expiry states count: <b>$($arrExpiryNoteWorthyCounts.Count)</b></span>
-                <canvas id="chartCertExpiryNoteWorthy" style="height:150px; width: 250px"></canvas>
-            </div>
-        </div>
-    </div>
-
-<script>
-var ctx = document.getElementById('chartCertExpiryNoteWorthy');
-var chartCertExpiryNoteWorthy = new Chart(ctx, {
-type: 'pie',
-            data: {
-                datasets: [
-                    {
-                        data: [$($ExpiryNoteWorthyCounts)],
-                        backgroundColor: [$($categoryColorsSeperatedExpiryNoteWorthy)],
-                        labels: [$($ExpiryNoteWorthyStates)],
-                        borderWidth:0.5,
-                    }
-                ]
-            },
-            options: {
-                responsive: false,
-                legend: {
-                    display: false,
-                },
-                tooltips: {
-                    bodyFontSize: 10,
-                    callbacks: {
-                        label: function (tooltipItem, data) {
-                            var dataset = data.datasets[tooltipItem.datasetIndex];
-                            var index = tooltipItem.index;
-                            window. datasetitem = tooltipItem.datasetIndex;
-                            window.target = dataset.labels[index];
-                            return dataset.labels[index] + ': ' + dataset.data[index];
-                        }
-                    }
-                },
-
-                onClick: (e) => {
-                    if (window. datasetitem == 0){
-                        window. targetcolumn = '7'
-                    }
-                    $($tf).clearFilters();
-                    $($tf).setFilterValue((window. targetcolumn), (window.target));
-                    $($tf).filter();
-
-                }
-            }
-});
-
-</script>
-"@)
-
-        }
-        #>
-
-        $startCustPolLoop = Get-Date
-        Write-Host '  processing Summary ApplicationFederatedIdentityCredentials'
-
 
         [void]$htmlTenantSummary.AppendLine(@"
 <i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
@@ -3883,13 +3854,258 @@ extensions: [{ name: 'sort' }]
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="Application Federated Identity Credentials" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="&nbsp;Application Federated Identity Credentials" /></button>
 '@)
     }
 
     $endCustPolLoop = Get-Date
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion ApplicationFederatedIdentityCredentials
+
+    #region SUMMARYHipos
+    $startCustPolLoop = Get-Date
+    Write-Host '  processing Summary HiPo Users'
+
+    $arrayHipos = [System.Collections.ArrayList]@()
+    foreach ($object in $cu) {
+        if ($object.SPOwners.principalType -contains 'User (Member)' -or $object.SPOwners.principalType -contains 'User (Guest)') {
+
+            foreach ($user in $object.SPOwners.where({ $_.principalType -like 'User*' })) {
+
+
+                #
+                if ($object.SPAppRoleAssignments.count -gt 0) {
+                    foreach ($SPAppRoleAssignment in $object.SPAppRoleAssignments) {
+                        if ($SPAppRoleAssignment.AppRolePermissionSensitivity -ne 'unclassified') {
+                            $null = $arrayHipos.Add([PSCustomObject]@{
+                                    user = $user.displayName
+                                    userId = $user.id
+                                    userType = $user.principalType
+                                    ownership = $user.applicability
+                                    SPDisplaName = $object.SP.SPDisplayName
+                                    SPType = $object.ObjectType
+                                    SPId = $object.SP.SPObjectId
+                                    SPAppId = $object.SP.SPAppId
+                                    capability = 'AppRoleAssignment'
+                                    permission = "$($SPAppRoleAssignment.AppRoleAssignmentResourceDisplayName) ($($SPAppRoleAssignment.AppRolePermission))"
+                                    permission4HTML = "$($SPAppRoleAssignment.AppRoleAssignmentResourceDisplayName) ($($SPAppRoleAssignment.AppRolePermission))"
+                                })
+                        }
+                    }
+                }
+
+                if ($object.SPOauth2PermissionGrants.count -gt 0) {
+                    foreach ($SPOauth2PermissionGrant in $object.SPOauth2PermissionGrants) {
+                        if ($SPOauth2PermissionGrant.permissionSensitivity -ne 'unclassified') {
+                            $null = $arrayHipos.Add([PSCustomObject]@{
+                                    user = $user.displayName
+                                    userId = $user.id
+                                    userType = $user.principalType
+                                    ownership = $user.applicability
+                                    SPDisplaName = $object.SP.SPDisplayName
+                                    SPType = $object.ObjectType
+                                    SPId = $object.SP.SPObjectId
+                                    SPAppId = $object.SP.SPAppId
+                                    capability = 'Oauth2PermissionGrant'
+                                    permission = "$($SPOauth2PermissionGrant.SPDisplayName) ($($SPOauth2PermissionGrant.permission))"
+                                    permission4HTML = "$($SPOauth2PermissionGrant.SPDisplayName) ($($SPOauth2PermissionGrant.permission))"
+                                })
+                        }
+                    }
+                }
+                #>
+
+                if ($object.SPAzureRoleAssignments.count -gt 0) {
+                    foreach ($SPAzureRoleAssignment in $object.SPAzureRoleAssignments) {
+                        if ($SPAzureRoleAssignment.roleIsCritical -eq $true) {
+                            if ($htCacheDefinitionsRole.($SPAzureRoleAssignment.roleId)) {
+                                if ($htCacheDefinitionsRole.($SPAzureRoleAssignment.roleId).definition.properties.type -eq 'BuiltInRole') {
+                                    $roleName = "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azrolesadvertizer/$($SPAzureRoleAssignment.roleId).html`" target=`"_blank`">$($SPAzureRoleAssignment.roleName)</a>"
+                                }
+                                else {
+                                    $roleName = $SPAzureRoleAssignment.roleName
+                                }
+
+                            }
+                            else {
+                                $roleName = $SPAzureRoleAssignment.roleName
+                            }
+                            $null = $arrayHipos.Add([PSCustomObject]@{
+                                    user = $user.displayName
+                                    userId = $user.id
+                                    userType = $user.principalType
+                                    ownership = $user.applicability
+                                    SPDisplaName = $object.SP.SPDisplayName
+                                    SPType = $object.ObjectType
+                                    SPId = $object.SP.SPObjectId
+                                    SPAppId = $object.SP.SPAppId
+                                    capability = 'AzureRoleAssignment'
+                                    permission = "$($SPAzureRoleAssignment.roleName) ($($SPAzureRoleAssignment.roleAssignmentAssignmentResourceType): $($SPAzureRoleAssignment.roleAssignmentAssignmentScopeName))"
+                                    permission4HTML = "$($roleName) ($($SPAzureRoleAssignment.roleAssignmentAssignmentResourceType): $($SPAzureRoleAssignment.roleAssignmentAssignmentScopeName))"
+                                })
+                        }
+                    }
+                }
+
+                if ($object.SPAADRoleAssignments.count -gt 0) {
+                    foreach ($SPAADRoleAssignment in $object.SPAADRoleAssignments) {
+                        if ($SPAADRoleAssignment.roleIsCritical -eq $true) {
+                            if ($SPAADRoleAssignment.roleType -eq 'BuiltIn') {
+                                $roleName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($SPAADRoleAssignment.roleDefinitionName -replace ' ', '-')`" target=`"_blank`">$($SPAADRoleAssignment.roleDefinitionName)</a>"
+                            }
+                            else {
+                                $roleName = $SPAADRoleAssignment.roleDefinitionName
+                            }
+                            $null = $arrayHipos.Add([PSCustomObject]@{
+                                    user = $user.displayName
+                                    userId = $user.id
+                                    userType = $user.principalType
+                                    ownership = $user.applicability
+                                    SPDisplaName = $object.SP.SPDisplayName
+                                    SPType = $object.ObjectType
+                                    SPId = $object.SP.SPObjectId
+                                    SPAppId = $object.SP.SPAppId
+                                    capability = 'AADRoleAssignment'
+                                    permission = "$($SPAADRoleAssignment.roleDefinitionName) ($($SPAADRoleAssignment.roleDefinitionId))"
+                                    permission4HTML = "$($roleName) ($($SPAADRoleAssignment.roleDefinitionId))"
+                                })
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    if ($arrayHipos.Count -gt 0) {
+        $arrayHiposGrouped = $arrayHipos | Group-Object -Property userId
+        $arrayHiposGroupedCount = ($arrayHiposGrouped | Measure-Object).Count
+        $tfCount = $arrayHipos.Count
+        $htmlTableId = 'TenantSummary_Hipos'
+        $tf = "tf$($htmlTableId)"
+
+        [void]$htmlTenantSummary.AppendLine(@"
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textHiPoUsers" data-content="&nbsp;HiPo Users ($arrayHiposGroupedCount)" /></button>
+        <div class="content TenantSummaryContent">
+        <i class="padlx fa fa-lightbulb-o" aria-hidden="true" style="color: #FFB100"></i> A HiPo User has direct or indirect ownership on a ServicePrincipal(s) with classified permissions<br>
+"@)
+
+
+        [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>User</th>
+<th>UserId</th>
+<th>UserType</th>
+<th>ownership</th>
+<th>SP displayName</th>
+<th>SP objectId</th>
+<th>SP appId</th>
+<th>Capability</th>
+<th>Permissions</th>
+</tr>
+</thead>
+<tbody>
+"@)
+
+        $arrayHiposSorted = $arrayHipos | Sort-Object -Property userId, SPId, capability, permission
+        foreach ($hipo in ($arrayHiposSorted)) {
+
+            [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($hipo.user)</td>
+<td>$($hipo.userId)</td>
+<td>$($hipo.userType)</td>
+<td>$($hipo.ownership)</td>
+<td class="breakwordall">$($hipo.SPDisplaName)</td>
+<td>$($hipo.SPId)</td>
+<td>$($hipo.SPappId)</td>
+<td>$($hipo.capability)</td>
+<td>$($hipo.permission4HTML)</td>
+</tr>
+"@)
+
+        }
+
+        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
+            $fileName = "$($Product)_$($fileNameMGRef)_HiPoUsers_"
+        }
+        else {
+            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_HiPoUsers_"
+        }
+        $arrayHiposSorted | Select-Object -ExcludeProperty permission4HTML | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter ';' -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+
+        [void]$htmlTenantSummary.AppendLine(@"
+        </tbody>
+    </table>
+
+<script>
+    var tfConfig4$htmlTableId = {
+        base_path: 'https://www.azadvertizer.net/azadserviceprincipalinsights/tablefilter/', rows_counter: true,
+"@)
+        if ($tfCount -gt 10) {
+            $spectrum = "10, $tfCount"
+            if ($tfCount -gt 50) {
+                $spectrum = "10, 25, 50, $tfCount"
+            }
+            if ($tfCount -gt 100) {
+                $spectrum = "10, 30, 50, 100, $tfCount"
+            }
+            if ($tfCount -gt 500) {
+                $spectrum = "10, 30, 50, 100, 250, $tfCount"
+            }
+            if ($tfCount -gt 1000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+            }
+            if ($tfCount -gt 2000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+            }
+            if ($tfCount -gt 3000) {
+                $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+        }
+        [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
+col_widths: ['10%', '10%', '5%', '10%', '10%', '10%', '10%', '10%', '25%'],
+        locale: 'en-US',
+        col_2: 'select',
+        col_3: 'select',
+        col_7: 'select',
+        col_types: [
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring'
+        ],
+extensions: [{ name: 'sort' }]
+    };
+    var $tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+    $($tf).init();
+</script>
+"@)
+
+        [void]$htmlTenantSummary.AppendLine(@'
+</div>
+'@)
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@'
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textHiPoUsers fontGrey" data-content="&nbsp;HiPo Users" /></button>
+'@)
+    }
+
+    $endCustPolLoop = Get-Date
+    Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+    #endregion SUMMARYHipos
 
     $script:html += $htmlTenantSummary
 
@@ -5818,13 +6034,6 @@ foreach ($aadRoleAssignment in $htServicePrincipalsAndAppsOnlyEnriched.values.Se
             if (-not $htSPandAPPHelper4AADRoleAssignmentsWithScope.($aadRoleAssignment.resourceScope -replace '/')) {
                 $hlp = $htApplications.($aadRoleAssignment.resourceScope -replace '/')
                 $htSPandAPPHelper4AADRoleAssignmentsWithScope.($aadRoleAssignment.resourceScope -replace '/') = "Application: $($hlp.displayname) ($($hlp.id))"
-                <#if (-not $htAADRoleAssignmentOnSPOrAPP.APP.($hlp.id)) {
-                    $htAADRoleAssignmentOnSPOrAPP.APP.($hlp.id) = [array]$aadRoleAssignment
-                }
-                else {
-                    $htAADRoleAssignmentOnSPOrAPP.APP.($hlp.id) += $aadRoleAssignment
-                }
-                #>
             }
 
         }
@@ -5833,12 +6042,6 @@ foreach ($aadRoleAssignment in $htServicePrincipalsAndAppsOnlyEnriched.values.Se
                 if (-not $htSPandAPPHelper4AADRoleAssignmentsWithScope.($aadRoleAssignment.resourceScope -replace '/')) {
                     $hlp = $htServicePrincipalsAndAppsOnlyEnriched.($aadRoleAssignment.resourceScope -replace '/').ServicePrincipalDetails
                     $htSPandAPPHelper4AADRoleAssignmentsWithScope.($aadRoleAssignment.resourceScope -replace '/') = "ServicePrincipal: $($hlp.displayname) ($($hlp.id))"
-                    <#if (-not $htAADRoleAssignmentOnSPOrAPP.SP.($hlp.id)) {
-                        $htAADRoleAssignmentOnSPOrAPP.SP.($hlp.id) = [array]$aadRoleAssignment
-                    }
-                    else {
-                        $htAADRoleAssignmentOnSPOrAPP.SP.($hlp.id) += $aadRoleAssignment
-                    }#>
                 }
             }
         }
@@ -5852,8 +6055,6 @@ $enrichmentProcessindicator = 100
 $processedServicePrincipalsCount = 0
 $startEnrichmentSP = Get-Date
 $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
-#foreach ($sp in $htServicePrincipalsAndAppsOnlyEnriched.values) {
-#foreach ($spOrAppWithoutSP in ($htServicePrincipalsAndAppsOnlyEnriched.values).where( { -not $_.MeanWhileDeleted } )) {
 ($htServicePrincipalsAndAppsOnlyEnriched.values).where( { -not $_.MeanWhileDeleted } ) | ForEach-Object -Parallel {
     #parallel
     $spOrAppWithoutSP = $_
@@ -5883,15 +6084,12 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     $htAadRoleDefinitions = $using:htAadRoleDefinitions
     $htPublishedPermissionScopes = $using:htPublishedPermissionScopes
     $htSPOauth2PermissionGrantedTo = $using:htSPOauth2PermissionGrantedTo
-    #$htServicePrincipalsAndAppsOnlyEnriched = $using:htServicePrincipalsAndAppsOnlyEnriched
     $htAppRoles = $using:htAppRoles
     $htPrincipalsResolved = $using:htPrincipalsResolved
     $htAppRoleAssignments = $using:htAppRoleAssignments
-    #$htUsersAndGroupsAppRoleAssignments = $using:htUsersAndGroupsAppRoleAssignments
     $htUsersAndGroupsAppRoleAssignmentsUser = $using:htUsersAndGroupsAppRoleAssignmentsUser
     $htUsersAndGroupsAppRoleAssignmentsGroup = $using:htUsersAndGroupsAppRoleAssignmentsGroup
     $htAaDGroups = $using:htAaDGroups
-    #$htAssignmentsByPrincipalId = $using:htAssignmentsByPrincipalId
     $htAssignmentsByPrincipalIdGroups = $using:htAssignmentsByPrincipalIdGroups
     $htAssignmentsByPrincipalIdServicePrincipals = $using:htAssignmentsByPrincipalIdServicePrincipals
     $htAppOwners = $using:htAppOwners
@@ -5899,6 +6097,7 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     $htSpLookup = $using:htSpLookup
     $getClassifications = $using:getClassifications
     $htFederatedIdentityCredentials = $using:htFederatedIdentityCredentials
+    $CriticalAADRoles = $using:CriticalAADRoles
     #functions
     $function:getClassification = $using:funcGetClassification
 
@@ -5997,12 +6196,18 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                     $roleType = 'Custom'
                 }
 
+                $aadRoleIsCritical = $false
+                if ($CriticalAADRoles -contains $servicePrincipalAADRoleAssignment.roleDefinitionId) {
+                    $aadRoleIsCritical = $true
+                }
+
                 $htOptInfo = [ordered] @{}
                 $htOptInfo.id = $servicePrincipalAADRoleAssignment.id
                 $htOptInfo.roleDefinitionId = $servicePrincipalAADRoleAssignment.roleDefinitionId
                 $htOptInfo.roleDefinitionName = $hlper.displayName
                 $htOptInfo.roleDefinitionDescription = $hlper.description
                 $htOptInfo.roleType = $roleType
+                $htOptInfo.roleIsCritical = $aadRoleIsCritical
                 $htOptInfo.directoryScopeId = $servicePrincipalAADRoleAssignment.directoryScopeId
                 $htOptInfo.resourceScope = $servicePrincipalAADRoleAssignment.resourceScope
                 if ($servicePrincipalAADRoleAssignment.resourceScope -ne '/') {
@@ -7021,7 +7226,7 @@ Write-Host ' FinalArray:' ($arrayPerformanceTracking.FinalArray | Measure-Object
 
 #region BuildHTML
 #testhelper
-#$fileTimestamp = (get-date -format $FileTimeStampFormat)
+$fileTimestamp = (Get-Date -Format $FileTimeStampFormat)
 
 $startBuildHTML = Get-Date
 
@@ -7049,7 +7254,7 @@ $html += @"
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>$($Product)</title>
-    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_006.css">
+    <link rel="stylesheet" type="text/css" href="https://www.azadvertizer.net/azadserviceprincipalinsights/css/azadserviceprincipalinsightsmain_001_007.css">
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/jquery-3.6.0.min.js"></script>
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/jquery-ui-1.13.0.min.js"></script>
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/fontawesome-0c0b5cbde8.js"></script>
@@ -7194,7 +7399,7 @@ $html += @'
 
 
 $html += @"
-        <abbr style="text-decoration:none" title="$($paramsUsed)"><i class="fa fa-question-circle" aria-hidden="true"></i></abbr>
+        <abbr style="text-decoration:none" title="$($paramsUsed)"><i class="fa fa-question-circle" aria-hidden="true"></i></abbr> $newerVersionAvailableHTML
         <hr>
 "@
 
@@ -7202,7 +7407,7 @@ $html += @'
     </div>
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/toggle_v004_004.js"></script>
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/collapsetable_v004_002.js"></script>
-    <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/version_v001_002.js"></script>
+    <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/version_v001_003.js"></script>
 </body>
 </html>
 '@
