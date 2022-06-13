@@ -3,8 +3,8 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20220609_1',
-    [string]$azAPICallVersion = '1.1.13',
+    [string]$ProductVersion = 'v1_20220613_1',
+    [string]$azAPICallVersion = '1.1.16',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -262,6 +262,7 @@ function checkVersion {
         $script:versionOnRepositoryFull = $getRepoVersion.Content -replace "`n"
         $versionOnRepository = ($versionOnRepositoryFull -split '_')[1]
         $script:newerVersionAvailable = $false
+        $script:newerVersionAvailableHTML = ''
         if ([int]$versionOnRepository -gt [int]$versionThis) {
             $script:newerVersionAvailable = $true
             $script:newerVersionAvailableHTML = '<span style="color:#FF5733; font-weight:bold">Get the latest ' + $Product + ' version (' + $versionOnRepositoryFull + ')!</span> <a href="https://aka.ms/AzADServicePrincipalInsights" target="_blank"><i class="fa fa-external-link" aria-hidden="true"></i></a>'
@@ -3882,11 +3883,12 @@ extensions: [{ name: 'sort' }]
                                     userId = $user.id
                                     userType = $user.principalType
                                     ownership = $user.applicability
-                                    SPDisplaName = $object.SP.SPDisplayName
+                                    SPDisplayName = $object.SP.SPDisplayName
                                     SPType = $object.ObjectType
                                     SPId = $object.SP.SPObjectId
                                     SPAppId = $object.SP.SPAppId
                                     capability = 'AppRoleAssignment'
+                                    classification = $SPAppRoleAssignment.AppRolePermissionSensitivity
                                     permission = "$($SPAppRoleAssignment.AppRoleAssignmentResourceDisplayName) ($($SPAppRoleAssignment.AppRolePermission))"
                                     permission4HTML = "$($SPAppRoleAssignment.AppRoleAssignmentResourceDisplayName) ($($SPAppRoleAssignment.AppRolePermission))"
                                 })
@@ -3902,11 +3904,12 @@ extensions: [{ name: 'sort' }]
                                     userId = $user.id
                                     userType = $user.principalType
                                     ownership = $user.applicability
-                                    SPDisplaName = $object.SP.SPDisplayName
+                                    SPDisplayName = $object.SP.SPDisplayName
                                     SPType = $object.ObjectType
                                     SPId = $object.SP.SPObjectId
                                     SPAppId = $object.SP.SPAppId
                                     capability = 'Oauth2PermissionGrant'
+                                    classification = $SPOauth2PermissionGrant.permissionSensitivity
                                     permission = "$($SPOauth2PermissionGrant.SPDisplayName) ($($SPOauth2PermissionGrant.permission))"
                                     permission4HTML = "$($SPOauth2PermissionGrant.SPDisplayName) ($($SPOauth2PermissionGrant.permission))"
                                 })
@@ -3935,11 +3938,12 @@ extensions: [{ name: 'sort' }]
                                     userId = $user.id
                                     userType = $user.principalType
                                     ownership = $user.applicability
-                                    SPDisplaName = $object.SP.SPDisplayName
+                                    SPDisplayName = $object.SP.SPDisplayName
                                     SPType = $object.ObjectType
                                     SPId = $object.SP.SPObjectId
                                     SPAppId = $object.SP.SPAppId
                                     capability = 'AzureRoleAssignment'
+                                    classification = 'critical'
                                     permission = "$($SPAzureRoleAssignment.roleName) ($($SPAzureRoleAssignment.roleAssignmentAssignmentResourceType): $($SPAzureRoleAssignment.roleAssignmentAssignmentScopeName))"
                                     permission4HTML = "$($roleName) ($($SPAzureRoleAssignment.roleAssignmentAssignmentResourceType): $($SPAzureRoleAssignment.roleAssignmentAssignmentScopeName))"
                                 })
@@ -3961,11 +3965,12 @@ extensions: [{ name: 'sort' }]
                                     userId = $user.id
                                     userType = $user.principalType
                                     ownership = $user.applicability
-                                    SPDisplaName = $object.SP.SPDisplayName
+                                    SPDisplayName = $object.SP.SPDisplayName
                                     SPType = $object.ObjectType
                                     SPId = $object.SP.SPObjectId
                                     SPAppId = $object.SP.SPAppId
                                     capability = 'AADRoleAssignment'
+                                    classification = 'critical'
                                     permission = "$($SPAADRoleAssignment.roleDefinitionName) ($($SPAADRoleAssignment.roleDefinitionId))"
                                     permission4HTML = "$($roleName) ($($SPAADRoleAssignment.roleDefinitionId))"
                                 })
@@ -4001,9 +4006,11 @@ extensions: [{ name: 'sort' }]
 <th>UserType</th>
 <th>ownership</th>
 <th>SP displayName</th>
+<th>SP type</th>
 <th>SP objectId</th>
 <th>SP appId</th>
 <th>Capability</th>
+<th>Classification</th>
 <th>Permissions</th>
 </tr>
 </thead>
@@ -4019,10 +4026,12 @@ extensions: [{ name: 'sort' }]
 <td>$($hipo.userId)</td>
 <td>$($hipo.userType)</td>
 <td>$($hipo.ownership)</td>
-<td class="breakwordall">$($hipo.SPDisplaName)</td>
+<td class="breakwordall">$($hipo.SPDisplayName)</td>
+<td>$($hipo.SPType)</td>
 <td>$($hipo.SPId)</td>
 <td>$($hipo.SPappId)</td>
 <td>$($hipo.capability)</td>
+<td>$($hipo.classification)</td>
 <td>$($hipo.permission4HTML)</td>
 </tr>
 "@)
@@ -4071,12 +4080,17 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['10%', '10%', '5%', '10%', '10%', '10%', '10%', '10%', '25%'],
+col_widths: ['10%', '10%', '5%', '5%', '10%', '5%', '10%', '10%', '10%', '5%', '20%'],
         locale: 'en-US',
         col_2: 'select',
         col_3: 'select',
-        col_7: 'select',
+        col_5: 'multiple',
+        col_8: 'select',
+        col_9: 'select',
         col_types: [
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
             'caseinsensitivestring',
             'caseinsensitivestring',
             'caseinsensitivestring',
@@ -7226,7 +7240,7 @@ Write-Host ' FinalArray:' ($arrayPerformanceTracking.FinalArray | Measure-Object
 
 #region BuildHTML
 #testhelper
-$fileTimestamp = (Get-Date -Format $FileTimeStampFormat)
+#$fileTimestamp = (Get-Date -Format $FileTimeStampFormat)
 
 $startBuildHTML = Get-Date
 
