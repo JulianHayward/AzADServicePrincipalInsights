@@ -3,6 +3,10 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
+* 20220622_1
+    * Fix `/providers/Microsoft.Authorization/roleAssignmentScheduleInstances` AzAPICall errorhandling (error 400, 500)
+    * Optimize procedure to update the AzAPICall module
+    * Use AzAPICall PowerShell module version 1.1.17
 * 20220613_1
     * use AzAPICall module version 1.1.16
     * enhance HiPo Users HTML output
