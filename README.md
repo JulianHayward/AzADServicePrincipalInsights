@@ -3,6 +3,9 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
+* 20220630
+    * __Breaking Change__ on the Azure side: Instead of __RoleManagement.Read.All__ we require __RoleManagement.Read.Directory__
+
 * 20220622_1
     * Fix `/providers/Microsoft.Authorization/roleAssignmentScheduleInstances` AzAPICall errorhandling (error 400, 500)
     * Optimize procedure to update the AzAPICall module
@@ -74,7 +77,8 @@ Management Group (Tenant Root Management Group) RBAC: __Reader__
 
 Microsoft Graph API | Application | __Application.Read.All__  
 Microsoft Graph API | Application | __Group.Read.All__  
-Microsoft Graph API | Application | __RoleManagement.Read.All__  
+~~Microsoft Graph API | Application | __RoleManagement.Read.All__~~  
+Microsoft Graph API | Application | __RoleManagement.Read.Directory__  
 Microsoft Graph API | Application | __User.Read.All__
 
 ### Azure DevOps
