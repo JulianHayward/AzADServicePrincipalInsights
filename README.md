@@ -3,9 +3,11 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
+* 20220717
+    * Removed identity governance state validation
+    * Use AzAPICall PowerShell module version 1.1.18  
 * 20220630
     * __Breaking Change__ on the Azure side: Instead of __RoleManagement.Read.All__ we require __RoleManagement.Read.Directory__
-
 * 20220622_1
     * Fix `/providers/Microsoft.Authorization/roleAssignmentScheduleInstances` AzAPICall errorhandling (error 400, 500)
     * Optimize procedure to update the AzAPICall module
@@ -64,6 +66,7 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 * Application Secrets
 * Application Certificates
 * Application Federated Identity Credentials
+* HiPo Users (wip)
 
 # Prerequisites
 

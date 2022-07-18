@@ -3,8 +3,8 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20220622_1',
-    [string]$azAPICallVersion = '1.1.17',
+    [string]$ProductVersion = 'v1_20220717_1',
+    [string]$azAPICallVersion = '1.1.18',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -4631,6 +4631,7 @@ else {
         $htAadRoleDefinitions.($aadRoleDefinition.id) = $aadRoleDefinition
     }
 
+    <# Not needed
     Write-Host 'Validating Identity Governance state'
     $currentTask = 'Validate roleAssignmentScheduleInstance'
     $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/roleManagement/directory/roleAssignmentScheduleInstances?`$count=true&`$top=1"
@@ -4657,6 +4658,7 @@ else {
         Write-Host 'Identity Governance state (roleAssignmentSchedules): available'
         $identityGovernance = 'true'
     }
+    #>
 
     $arraySPsAndAppsWithoutSP = [System.Collections.ArrayList]@()
     if ($OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes) {
@@ -4772,7 +4774,7 @@ else {
             Import-Module -Name AzAPICall -RequiredVersion $azAPICallConf['htParameters'].azAPICallModuleVersion -Force -ErrorAction Stop
         }
         #var
-        $identityGovernance = $using:identityGovernance
+        #$identityGovernance = $using:identityGovernance
 
         #write-host "processing $($object.id) - $($object.displayName) (type: $($object.servicePrincipalType) org: $($object.appOwnerOrganizationId))"
 
