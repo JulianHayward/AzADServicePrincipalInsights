@@ -1328,7 +1328,7 @@ var myChart = new Chart(ctx, {
 </script>
 "@)
 
-        $abbrMIRelict = "<abbr title=`"relict: the bound Azure Resource does not exist (anymore)&#13;`"><i class=`"fa fa-question-circle`" aria-hidden=`"true`"></i></abbr>"
+        $abbrMIRelict = "<abbr title=`"relict: the associated Azure Resource does not exist (anymore)&#13;`"><i class=`"fa fa-question-circle`" aria-hidden=`"true`"></i></abbr>"
         [void]$htmlTenantSummary.AppendLine(@"
 <div>
 <i class="padlx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
@@ -1352,8 +1352,8 @@ var myChart = new Chart(ctx, {
 <th>MI Resource type</th>
 <th>MI Resource scope</th>
 <th>MI Relict $abbrMIRelict</th>
-<th>MI bound Resource(s) count</th>
-<th>MI bound Resource(s)</th>
+<th>MI associated Resource(s) count</th>
+<th>MI associated Resource(s)</th>
 </tr>
 </thead>
 <tbody>
@@ -1440,10 +1440,9 @@ var myChart = new Chart(ctx, {
                 $miAssignedToResources = $SP.ManagedIdentity.alternativeName
             }
             if ($spType -eq 'SP MI User assigned') {
-                #$miAssignedToResourcesCount = $arrayUserAssignedIdentities4ResourcesGroupedByMI.where({ $_.Name -eq $sp.SP.SPObjectId }).Group.Count
-                $miAssignedToResourcesCount = $SP.ManagedIdentity.boundAzureResources.Count
+                $miAssignedToResourcesCount = $SP.ManagedIdentity.associatedAzureResources.Count
                 if ($miAssignedToResourcesCount -gt 0) {
-                    $miAssignedToResources = 'check <i>Managed Identity User Assigned - bound Azure Resources</i>'
+                    $miAssignedToResources = 'check <i>Managed Identity User Assigned - associated Azure Resources</i>'
                 }
                 else {
                     $miAssignedToResources = ''
@@ -2005,9 +2004,9 @@ extensions: [{ name: 'sort' }]
     #endregion SUMMARYServicePrincipalOwnedObjects
 
     if (-not $NoAzureResourceSideRelations) {
-        #region SUMMARYManagedIdentityUserAssignedBoundAzureResources
+        #region SUMMARYManagedIdentityUserAssignedAssociatedAzureResources
 
-        Write-Host '  processing TenantSummary Managed Identity User Assigned bound to Azure Resources'
+        Write-Host '  processing TenantSummary Managed Identity User Assigned associated Azure Resources'
         $arrayUserAssignedIdentities4ResourcesCount = $arrayUserAssignedIdentities4Resources.Count
         $tfCount = $arrayUserAssignedIdentities4ResourcesCount
         $startUserAssignedIdentities4Resources = Get-Date
@@ -2036,11 +2035,11 @@ extensions: [{ name: 'sort' }]
             }
 
             [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textManagedIdentity" data-content="&nbsp;Managed Identity User Assigned - bound Azure Resources" /></button>
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textManagedIdentity" data-content="&nbsp;Managed Identity User Assigned - associated Azure Resources" /></button>
         <div class="content TenantSummaryContent">
 '@)
 
-            $htmlTableId = 'TenantSummary_ManagedIdentityUserAssignedBoundAzureResources'
+            $htmlTableId = 'TenantSummary_ManagedIdentityUserAssignedAssociatedAzureResources'
 
             [void]$htmlTenantSummary.AppendLine(@"
 <i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
@@ -2121,8 +2120,8 @@ extensions: [{ name: 'sort' }]
             }
 
             if (-not $NoCsvExport) {
-                Write-Host "   Exporting ManagedIdentityUserAssignedBoundAzureResources CSV '$($outputPath)$($DirectorySeparatorChar)$($fileName)_ManagedIdentityUserAssignedBoundAzureResources.csv'"
-                $userAssignedIdentities4Resources4CSVExport | Sort-Object -Property MIResourceId, ResId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ManagedIdentityUserAssignedBoundAzureResources.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+                Write-Host "   Exporting ManagedIdentityUserAssignedAssociatedAzureResources CSV '$($outputPath)$($DirectorySeparatorChar)$($fileName)_ManagedIdentityUserAssignedAssociatedAzureResources.csv'"
+                $userAssignedIdentities4Resources4CSVExport | Sort-Object -Property MIResourceId, ResId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ManagedIdentityUserAssignedAssociatedAzureResources.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
             }
 
             [void]$htmlTenantSummary.AppendLine(@"
@@ -2189,16 +2188,16 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
         }
         else {
             [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textManagedIdentity fontGrey" data-content="&nbsp;Managed Identity User Assigned - bound Azure Resources" /></button>
+        <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textManagedIdentity fontGrey" data-content="&nbsp;Managed Identity User Assigned - associated Azure Resources" /></button>
 '@)
         }
         $endUserAssignedIdentities4Resources = Get-Date
-        Write-Host "   Managed Identity User Assigned bound to Azure Resources processing duration: $((New-TimeSpan -Start $startUserAssignedIdentities4Resources -End $endUserAssignedIdentities4Resources).TotalMinutes) minutes ($((New-TimeSpan -Start $startUserAssignedIdentities4Resources -End $endUserAssignedIdentities4Resources).TotalSeconds) seconds)"
-        #endregion SUMMARYManagedIdentityUserAssignedBoundAzureResources
+        Write-Host "   Managed Identity User Assigned associated Azure Resources processing duration: $((New-TimeSpan -Start $startUserAssignedIdentities4Resources -End $endUserAssignedIdentities4Resources).TotalMinutes) minutes ($((New-TimeSpan -Start $startUserAssignedIdentities4Resources -End $endUserAssignedIdentities4Resources).TotalSeconds) seconds)"
+        #endregion SUMMARYManagedIdentityUserAssignedAssociatedAzureResources
     }
     else {
         [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textManagedIdentity fontGrey" data-content="&nbsp;Managed Identity User Assigned - bound Azure Resources" /></button>
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textManagedIdentity fontGrey" data-content="&nbsp;Managed Identity User Assigned - associated Azure Resources" /></button>
 '@)
     }
 
@@ -4818,7 +4817,7 @@ else {
     }
     Write-Host "Paramter -NoAzureResourceSideRelations = '$NoAzureResourceSideRelations'" -ForegroundColor Yellow
     Write-Host "Running $($Product) without resolving 'Role assignments' on the Azure Resource side" -ForegroundColor Yellow
-    Write-Host "Running $($Product) without feature 'Managed Identity User Assigned - bound Azure Resources' in Azure" -ForegroundColor Yellow
+    Write-Host "Running $($Product) without feature 'Managed Identity User Assigned - associated Azure Resources' in Azure" -ForegroundColor Yellow
 }
 #region AADSP
 
@@ -6771,13 +6770,13 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
             $htOptInfo = [ordered]@{}
 
             if ($object.subtype -eq 'User assigned') {
-                $azureResourcesBound = $arrayUserAssignedIdentities4ResourcesGroupedByMI.where({ $_.Name -eq $spId }).Group
+                $azureResourcesAssociated = $arrayUserAssignedIdentities4ResourcesGroupedByMI.where({ $_.Name -eq $spId }).Group
 
-                if ($azureResourcesBound.Count -gt 0) {
-                    $htOptInfo.boundAzureResources = $azureResourcesBound | Select-Object -Property resource* | Sort-Object -Property resourceId
+                if ($azureResourcesAssociated.Count -gt 0) {
+                    $htOptInfo.associatedAzureResources = $azureResourcesAssociated | Select-Object -Property resource* | Sort-Object -Property resourceId
                 }
                 else {
-                    $htOptInfo.boundAzureResources = [System.Collections.ArrayList]@()
+                    $htOptInfo.associatedAzureResources = [System.Collections.ArrayList]@()
                 }
             }
 

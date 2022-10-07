@@ -4,12 +4,12 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 
 # Updates
 * 20221007
-    * New feature - Managed Identity User Assigned bound Azure Resources
+    * New feature - Managed Identity User Assigned associated Azure Resources
     * Changed parameter name `NoAzureRoleAssignments` to `NoAzureResourceSideRelations`
         * Using `NoAzureResourceSideRelations`:
             * No (Azure Resource side) RBAC Role assignments collection
             * No (Azure Resource side) Policy assignments collection
-            * No (Azure Resource side) Resources collection ('Managed Identity User Assigned bound Azure Resources' feature annul)
+            * No (Azure Resource side) Resources collection ('Managed Identity User Assigned associated Azure Resources' feature annul)
     * Azure DevOps pipeline yml - update vmImage ~~ubuntu-20.04~~ ubuntu-22.04
     * Minor fixes and optimizations
     * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.33 
@@ -65,7 +65,7 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 * ServicePrincipal  owners
 * Application owners
 * ServicePrincipal owned objects
-* Managed Identity User Assigned - bound Azure Resources
+* Managed Identity User Assigned - associated Azure Resources
 * ServicePrincipal  AAD Role assignments
 * ServicePrincipal AAD Role assignedOn
 * Application AAD Role assignedOn
