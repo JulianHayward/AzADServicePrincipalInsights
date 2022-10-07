@@ -1433,6 +1433,7 @@ var myChart = new Chart(ctx, {
                 $appSignInAudience = $sp.APP.APPSignInAudience
             }
 
+            $miAssignedToResourcesCount = ''
             $miAssignedToResources = ''
             if ($spType -eq 'SP MI System assigned') {
                 $miAssignedToResourcesCount = 1
