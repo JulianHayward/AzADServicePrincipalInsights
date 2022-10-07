@@ -3,6 +3,16 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
+* 20221007
+    * New feature - Managed Identity User Assigned bound Azure Resources
+    * Changed parameter name `NoAzureRoleAssignments` to `NoAzureResourceSideRelations`
+        * Using `NoAzureResourceSideRelations`:
+            * No (Azure Resource side) RBAC Role assignments collection
+            * No (Azure Resource side) Policy assignments collection
+            * No (Azure Resource side) Resources collection ('Managed Identity User Assigned bound Azure Resources' feature annul)
+    * Azure DevOps pipeline yml - update vmImage ~~ubuntu-20.04~~ ubuntu-22.04
+    * Minor fixes and optimizations
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.33 
 * 20220717
     * Removed identity governance state validation
     * Use AzAPICall PowerShell module version 1.1.18  
@@ -55,6 +65,7 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 * ServicePrincipal  owners
 * Application owners
 * ServicePrincipal owned objects
+* Managed Identity User Assigned - bound Azure Resources
 * ServicePrincipal  AAD Role assignments
 * ServicePrincipal AAD Role assignedOn
 * Application AAD Role assignedOn
@@ -106,6 +117,7 @@ AzAPICall resources:
 ```
 $pscredential = Get-Credential
 Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredential
+.\pwsh\AzADServicePrincipalInsights.ps1
 ```
 
 # Preview

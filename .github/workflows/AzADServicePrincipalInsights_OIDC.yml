@@ -56,7 +56,7 @@ jobs:
       - name: Push AzADServicePrincipalInsights output to repository
         run: |
           git config --global user.email "AzADServicePrincipalInsightsGHActions@ghActions.com"
-          git config --global user.name "azgvz"
+          git config --global user.name "$GITHUB_ACTOR"
           git config pull.rebase false
           git add --all
           git commit -m "$GITHUB_WORKFLOW $GITHUB_JOB"
