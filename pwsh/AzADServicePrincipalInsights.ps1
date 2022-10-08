@@ -3,7 +3,7 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20221007_1',
+    [string]$ProductVersion = 'v1_20221008_1',
     [string]$azAPICallVersion = '1.1.33',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
@@ -745,6 +745,7 @@ function dataCollection($mgId) {
                 $htRoleAssignmentsFromAPIInheritancePrevention = $using:htRoleAssignmentsFromAPIInheritancePrevention
                 $arrayUserAssignedIdentities4Resources = $using:arrayUserAssignedIdentities4Resources
                 $htDoARMRoleAssignmentScheduleInstances = $using:htDoARMRoleAssignmentScheduleInstances
+                $arrayMIUserAssignedFederatedCreds = $using:arrayMIUserAssignedFederatedCreds
                 #endregion UsingVARs
 
                 $childMgSubId = $childMgSubDetail.subscriptionId
@@ -927,6 +928,21 @@ function dataCollection($mgId) {
                                                 miResourceId = $_.Name
                                                 miResourceName = $_.Name -replace '.*/'
                                             })
+                                    }
+                                }
+                            }
+
+                            if ($resource.type -eq 'Microsoft.ManagedIdentity/userAssignedIdentities') {
+                                $currentTask = "Getting MI USER federatedCreds: 'MI: $($resource.name)' '$($scopeDisplayName)' ('$scopeId') [quotaId:'$subscriptionQuotaId']"
+                                $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/$($resource.Id)/federatedIdentityCredentials?api-version=2022-01-31-PREVIEW"
+                                $method = 'GET'
+                                $miUserAssignedFederaterCreds = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
+                                if ($miUserAssignedFederaterCreds.Count -gt 0) {
+                                    Write-Host 'MI:' $($resource.name) $miUserAssignedFederaterCreds.Count
+                                    foreach ($miUserAssignedFederaterCred in $miUserAssignedFederaterCreds) {
+                                        $miUserAssignedFederaterCredCust = $miUserAssignedFederaterCred
+                                        $miUserAssignedFederaterCredCust | Add-Member -MemberType NoteProperty -Name miResourceId -Value $resource.Id
+                                        $null = $script:arrayMIUserAssignedFederatedCreds.Add($miUserAssignedFederaterCredCust)
                                     }
                                 }
                             }
@@ -2013,24 +2029,24 @@ extensions: [{ name: 'sort' }]
 
         if ($arrayUserAssignedIdentities4ResourcesCount -gt 0) {
 
-            $script:htUserAssignedIdentitiesAssignedResources = @{}
-            $script:htResourcesAssignedUserAssignedIdentities = @{}
+            $htUserAssignedIdentitiesAssignedResources = @{}
+            $htResourcesAssignedUserAssignedIdentities = @{}
             foreach ($entry in $arrayUserAssignedIdentities4Resources) {
                 #UserAssignedIdentities
                 if (-not $htUserAssignedIdentitiesAssignedResources.($entry.miPrincipalId)) {
-                    $script:htUserAssignedIdentitiesAssignedResources.($entry.miPrincipalId) = @{}
-                    $script:htUserAssignedIdentitiesAssignedResources.($entry.miPrincipalId).ResourcesCount = 1
+                    $htUserAssignedIdentitiesAssignedResources.($entry.miPrincipalId) = @{}
+                    $htUserAssignedIdentitiesAssignedResources.($entry.miPrincipalId).ResourcesCount = 1
                 }
                 else {
-                    $script:htUserAssignedIdentitiesAssignedResources.($entry.miPrincipalId).ResourcesCount++
+                    $htUserAssignedIdentitiesAssignedResources.($entry.miPrincipalId).ResourcesCount++
                 }
                 #Resources
                 if (-not $htResourcesAssignedUserAssignedIdentities.(($entry.resourceId).tolower())) {
-                    $script:htResourcesAssignedUserAssignedIdentities.(($entry.resourceId).tolower()) = @{}
-                    $script:htResourcesAssignedUserAssignedIdentities.(($entry.resourceId).tolower()).UserAssignedIdentitiesCount = 1
+                    $htResourcesAssignedUserAssignedIdentities.(($entry.resourceId).tolower()) = @{}
+                    $htResourcesAssignedUserAssignedIdentities.(($entry.resourceId).tolower()).UserAssignedIdentitiesCount = 1
                 }
                 else {
-                    $script:htResourcesAssignedUserAssignedIdentities.(($entry.resourceId).tolower()).UserAssignedIdentitiesCount++
+                    $htResourcesAssignedUserAssignedIdentities.(($entry.resourceId).tolower()).UserAssignedIdentitiesCount++
                 }
             }
 
@@ -2196,9 +2212,9 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
         #endregion SUMMARYManagedIdentityUserAssignedAssociatedAzureResources
     }
     else {
-        [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textManagedIdentity fontGrey" data-content="&nbsp;Managed Identity User Assigned - associated Azure Resources" /></button>
-'@)
+        [void]$htmlTenantSummary.AppendLine(@"
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textManagedIdentity fontGrey" data-content="&nbsp;Managed Identity User Assigned - associated Azure Resources (parameter NoAzureResourceSideRelations = $NoAzureResourceSideRelations)" /></button>
+"@)
     }
 
     #region SUMMARYServicePrincipalsAADRoleAssignments
@@ -3337,9 +3353,9 @@ extensions: [{ name: 'sort' }]
         #endregion SUMMARYServicePrincipalsAzureRoleAssignments
     }
     else {
-        [void]$htmlTenantSummary.AppendLine(@'
-            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment fontGrey" data-content="&nbsp;Service Principal  Azure RoleAssignments" /></button>
-'@)
+        [void]$htmlTenantSummary.AppendLine(@"
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textAzureRoleAssignment fontGrey" data-content="&nbsp;Service Principal  Azure RoleAssignments (parameter NoAzureResourceSideRelations = $NoAzureResourceSideRelations)" /></button>
+"@)
     }
 
     #region SUMMARYServicePrincipalsGroupMemberships
@@ -4142,6 +4158,154 @@ extensions: [{ name: 'sort' }]
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion ApplicationFederatedIdentityCredentials
 
+    if (-not $NoAzureResourceSideRelations) {
+        #region SUMMARYManagedIdentityFederatedIdentityCredentials
+        $startCustPolLoop = Get-Date
+        Write-Host '  processing Summary ManagedIdentityFederatedIdentityCredentials'
+
+        $managedIdentityFederatedIdentityCredentials = $cu.where( { $_.ManagedIdentityFederatedIdentityCredentials.Count -gt 0 } )
+        $managedIdentityFederatedIdentityCredentialsCount = $managedIdentityFederatedIdentityCredentials.Count
+
+        if ($managedIdentityFederatedIdentityCredentialsCount -gt 0) {
+
+            $tfCount = $managedIdentityFederatedIdentityCredentialsCount
+            $htmlTableId = 'TenantSummary_ManagedIdentityFederatedIdentityCredentials'
+            $tf = "tf$($htmlTableId)"
+
+            [void]$htmlTenantSummary.AppendLine(@'
+        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="&nbsp;Managed Identity User Assigned Federated Identity Credentials" /></button>
+        <div class="content TenantSummaryContent">
+'@)
+
+            [void]$htmlTenantSummary.AppendLine(@"
+<i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
+<table id="$htmlTableId" class="summaryTable">
+<thead>
+<tr>
+<th>Managed Identity ObjectId</th>
+<th>Managed Identity (client) Id</th>
+<th>Managed Identity DisplayName</th>
+<th>Managed Identity Federated Identity Credentials</th>
+</tr>
+</thead>
+<tbody>
+"@)
+            $arrayManagedIdentityFederatedIdentityCredentials4CSV = [System.Collections.ArrayList]@()
+            foreach ($sp in ($managedIdentityFederatedIdentityCredentials)) {
+
+                $ManagedIdentityFederatedIdentityCredentials = $null
+                if (($sp.ManagedIdentityFederatedIdentityCredentials)) {
+                    if (($sp.ManagedIdentityFederatedIdentityCredentials.count -gt 0)) {
+                        $array = @()
+                        foreach ($fic in $sp.ManagedIdentityFederatedIdentityCredentials) {
+                            $array += "$($fic.name) (id: $($fic.id)) (issuer: $($fic.properties.issuer); subject: $($fic.properties.subject); audiences: $((($fic.properties.audiences | Sort-Object) -join "$CsvDelimiterOpposite ")))"
+                            $null = $arrayManagedIdentityFederatedIdentityCredentials4CSV.Add([PSCustomObject]@{
+                                    MIObjectId = $sp.ObjectId
+                                    MIAppId = $sp.SP.SPappId
+                                    MIDisplayName = $sp.SP.SPDisplayName
+                                    SPObjectType = $sp.ObjectType
+                                    MIFederatedIdentityCredentialName = $fic.name
+                                    MIFederatedIdentityCredentialId = $fic.id
+                                    MIFederatedIdentityCredentialIssuer = $fic.properties.issuer
+                                    MIFederatedIdentityCredentialSubject = $fic.properties.subject
+                                    MIFederatedIdentityCredentialAudiences = (($fic.properties.audiences | Sort-Object) -join "$CsvDelimiterOpposite ")
+                                })
+                        }
+                        $MIFederatedIdentityCredentials = "$(($sp.ManagedIdentityFederatedIdentityCredentials).Count) ($($array -join "$CsvDelimiterOpposite "))"
+                    }
+                    else {
+                        $MIFederatedIdentityCredentials = $null
+                    }
+                }
+
+                [void]$htmlTenantSummary.AppendLine(@"
+<tr>
+<td>$($sp.SP.SPObjectId)</td>
+<td>$($sp.SP.SPappId)</td>
+<td class="breakwordall">$($sp.SP.SPdisplayName)</td>
+<td class="breakwordall">$($MIFederatedIdentityCredentials)</td>
+</tr>
+"@)
+
+            }
+
+            if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
+                $fileName = "$($Product)_$($fileNameMGRef)_FederatedIdentityCredentialsManagedIdentity_"
+            }
+            else {
+                $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_FederatedIdentityCredentialsManagedIdentity_"
+            }
+            $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, MIFederatedIdentityCredentialName, MIFederatedIdentityCredentialId, MIFederatedIdentityCredentialIssuer, MIFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter ';' -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayManagedIdentityFederatedIdentityCredentials4CSV = $null
+
+            [void]$htmlTenantSummary.AppendLine(@"
+        </tbody>
+    </table>
+
+<script>
+    var tfConfig4$htmlTableId = {
+        base_path: 'https://www.azadvertizer.net/azadserviceprincipalinsights/tablefilter/', rows_counter: true,
+"@)
+            if ($tfCount -gt 10) {
+                $spectrum = "10, $tfCount"
+                if ($tfCount -gt 50) {
+                    $spectrum = "10, 25, 50, $tfCount"
+                }
+                if ($tfCount -gt 100) {
+                    $spectrum = "10, 30, 50, 100, $tfCount"
+                }
+                if ($tfCount -gt 500) {
+                    $spectrum = "10, 30, 50, 100, 250, $tfCount"
+                }
+                if ($tfCount -gt 1000) {
+                    $spectrum = "10, 30, 50, 100, 250, 500, 750, $tfCount"
+                }
+                if ($tfCount -gt 2000) {
+                    $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, $tfCount"
+                }
+                if ($tfCount -gt 3000) {
+                    $spectrum = "10, 30, 50, 100, 250, 500, 750, 1000, 1500, 3000, $tfCount"
+                }
+                [void]$htmlTenantSummary.AppendLine(@"
+paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_storage'], filters: true, page_number: true, page_length: true, sort: true},*/
+"@)
+            }
+            [void]$htmlTenantSummary.AppendLine(@"
+btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
+
+        locale: 'en-US',
+        col_types: [
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring',
+            'caseinsensitivestring'
+        ],
+extensions: [{ name: 'sort' }]
+    };
+    var $tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
+    $($tf).init();
+</script>
+"@)
+
+            [void]$htmlTenantSummary.AppendLine(@'
+</div>
+'@)
+        }
+        else {
+            [void]$htmlTenantSummary.AppendLine(@'
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="&nbsp;Managed Identity User Assigned Federated Identity Credentials" /></button>
+'@)
+        }
+        $endCustPolLoop = Get-Date
+        Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
+        #endregion SUMMARYManagedIdentityFederatedIdentityCredentials
+    }
+    else {
+        [void]$htmlTenantSummary.AppendLine(@"
+            <button type="button" class="nonCollapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert fontGrey" data-content="&nbsp;Managed Identity User Assigned Federated Identity Credentials (parameter NoAzureResourceSideRelations = $NoAzureResourceSideRelations)" /></button>
+"@)
+    }
+
     #region SUMMARYHipos
     $startCustPolLoop = Get-Date
     Write-Host '  processing Summary HiPo Users'
@@ -4446,12 +4610,15 @@ $customDataCollectionDuration = [System.Collections.ArrayList]::Synchronized((Ne
 $arrayDataCollectionProgressMg = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
 $arrayDataCollectionProgressSub = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
 $arrayUserAssignedIdentities4Resources = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+
 $htAssignmentsByPrincipalIdServicePrincipals = @{}
 $htAssignmentsByPrincipalIdGroups = @{}
 $arrayAPICallTracking = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
 $arrayAPICallTrackingCustomDataCollection = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
 $htDoARMRoleAssignmentScheduleInstances = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
 $htDoARMRoleAssignmentScheduleInstances.Do = $true
+$arrayMIUserAssignedFederatedCreds = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+$htMIUserAssignedFederatedCreds = @{}
 #endregion helper ht / collect results /save some time
 
 $permissionCheckResults = @()
@@ -4518,6 +4685,7 @@ if ($azAPICallConf['htParameters'].onAzureDevOps -eq $true -or $azAPICallConf['c
 if (-not $NoAzureResourceSideRelations) {
     Write-Host "Running $($Product) for ManagementGroupId: '$($ManagementGroupId -join ', ')'" -ForegroundColor Yellow
 
+    #region permissionsCheck
     foreach ($managementGroupIdEntry in $ManagementGroupId) {
         $currentTask = "Checking permissions for ManagementGroup '$managementGroupIdEntry'"
         Write-Host $currentTask
@@ -4553,6 +4721,7 @@ if (-not $NoAzureResourceSideRelations) {
             Throw 'Error - check the last console output for details'
         }
     }
+    #endregion permissionsCheck
 
     #region GettingEntities
     $startEntities = Get-Date
@@ -4774,6 +4943,16 @@ if (-not $NoAzureResourceSideRelations) {
     dataCollection -mgId $ManagementGroupId
 
     Write-Host '**** arrayUserAssignedIdentities4ResourcesCount:' $arrayUserAssignedIdentities4Resources.Count
+    Write-Host '**** arrayMIUserAssignedFederatedCredsCount:' $arrayMIUserAssignedFederatedCreds.Count
+
+    if ($arrayMIUserAssignedFederatedCreds.Count -gt 0) {
+        $arrayMIUserAssignedFederatedCredsGroupedbyMiResourceId = $arrayMIUserAssignedFederatedCreds | Group-Object -Property miResourceId
+        foreach ($entry in $arrayMIUserAssignedFederatedCredsGroupedbyMiResourceId) {
+            $htMIUserAssignedFederatedCreds.($entry.Name) = @{}
+            $htMIUserAssignedFederatedCreds.($entry.Name).federatedCredentials = $entry.Group | Sort-Object -Property name
+        }
+    }
+    Write-Host "**** htMIUserAssignedFederatedCredsCount: $($htMIUserAssignedFederatedCreds.Keys.count)"
 
     #region dataColletionAz summary
     $endDataCollection = Get-Date
@@ -6261,6 +6440,7 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
     $htFederatedIdentityCredentials = $using:htFederatedIdentityCredentials
     $CriticalAADRoles = $using:CriticalAADRoles
     $arrayUserAssignedIdentities4ResourcesGroupedByMI = $using:arrayUserAssignedIdentities4ResourcesGroupedByMI
+    $htMIUserAssignedFederatedCreds = $using:htMIUserAssignedFederatedCreds
     #functions
     $function:getClassification = $using:funcGetClassification
 
@@ -6714,6 +6894,8 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
         #region ManagedIdentity
         $start = Get-Date
         $arrayManagedIdentityOpt = [System.Collections.ArrayList]@()
+        $arrayManagedIdentityFederatedIdentityCredentialOpt = [System.Collections.ArrayList]@()
+        $arrayManagedIdentityAssociatedResourcesOpt = [System.Collections.ArrayList]@()
         if ($object.ManagedIdentity) {
 
             foreach ($altName in $object.ManagedIdentity.ManagedIdentityAlternativeNames) {
@@ -6772,12 +6954,23 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
             if ($object.subtype -eq 'User assigned') {
                 $azureResourcesAssociated = $arrayUserAssignedIdentities4ResourcesGroupedByMI.where({ $_.Name -eq $spId }).Group
 
+                #$htOptInfoAssociatedResources = [ordered]@{}
                 if ($azureResourcesAssociated.Count -gt 0) {
-                    $htOptInfo.associatedAzureResources = $azureResourcesAssociated | Select-Object -Property resource* | Sort-Object -Property resourceId
+                    $htOptInfoAssociatedResources = $azureResourcesAssociated | Select-Object -Property resource* | Sort-Object -Property resourceId
                 }
                 else {
-                    $htOptInfo.associatedAzureResources = [System.Collections.ArrayList]@()
+                    $htOptInfoAssociatedResources = [System.Collections.ArrayList]@()
                 }
+                $null = $arrayManagedIdentityAssociatedResourcesOpt.Add($htOptInfoAssociatedResources)
+
+                $htOptInfoMIFedCreds = [ordered]@{}
+                if ($htMIUserAssignedFederatedCreds.($altname)) {
+                    $htOptInfoMIFedCreds = $htMIUserAssignedFederatedCreds.($altname).federatedCredentials | Select-Object -ExcludeProperty miResourceId
+                }
+                else {
+                    $htOptInfoMIFedCreds = [System.Collections.ArrayList]@()
+                }
+                $null = $arrayManagedIdentityFederatedIdentityCredentialOpt.Add($htOptInfoMIFedCreds)
             }
 
             $htOptInfo.type = $object.subtype
@@ -7123,7 +7316,8 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
             $arraySPOauth2PermissionGrantedTo = ($arraySPOauth2PermissionGrantedTo | Sort-Object { $_.servicePrincipalDisplayName }, { $_.scope }, { $_.permissionId }, { $_.consentType })
         }
 
-        $null = $script:cu.Add([PSCustomObject]@{
+        $customObjectMi = [System.Collections.ArrayList]@()
+        $null = $script:customObjectMi.Add([PSCustomObject]@{
                 #SPObjId                     = $spId
                 #SPDisplayName               = $object.ServicePrincipalDetails.displayName
                 #SPType                      = $object.ServicePrincipalDetails.servicePrincipalType
@@ -7145,6 +7339,13 @@ $arrayPerformanceTracking = [System.Collections.ArrayList]::Synchronized((New-Ob
                 SPAzureRoleAssignments = $arrayServicePrincipalAzureRoleAssignmentsOpt
                 ManagedIdentity = $arrayManagedIdentityOpt
             })
+
+        if ($object.objectTypeConcatinated -eq 'SP MI User assigned') {
+            $customObjectMi | Add-Member -NotePropertyName ManagedIdentityAssociatedAzureResources -NotePropertyValue $arrayManagedIdentityAssociatedResourcesOpt
+            $customObjectMi | Add-Member -NotePropertyName ManagedIdentityFederatedIdentityCredentials -NotePropertyValue $arrayManagedIdentityFederatedIdentityCredentialOpt
+        }
+
+        $null = $script:cu.Add($customObjectMi)
     }
     else {
         #Write-Host "$($object.ServicePrincipalDetails.displayName) is neither App, nore MI"

@@ -3,6 +3,9 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
+* 20221008
+    * New feature - Managed Identity User Assigned Federated Identity Credentials
+    * Rearrange JSON output for Managed Identity associated Azure Resources
 * 20221007
     * New feature - Managed Identity User Assigned associated Azure Resources
     * Changed parameter name `NoAzureRoleAssignments` to `NoAzureResourceSideRelations`
@@ -122,7 +125,7 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 
 # Preview
 
-![previewHTML](img/preview.png)  
+![previewHTML](img/preview_v1_20221008_1.png)  
 ![previewHTML2](img/preview2.png)  
 ![previewJSON](img/previewJSON.png)
 
