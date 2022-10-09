@@ -4172,20 +4172,18 @@ extensions: [{ name: 'sort' }]
             $htmlTableId = 'TenantSummary_ManagedIdentityFederatedIdentityCredentials'
             $tf = "tf$($htmlTableId)"
 
-            [void]$htmlTenantSummary.AppendLine(@'
-        <button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="&nbsp;Managed Identity User Assigned Federated Identity Credentials" /></button>
-        <div class="content TenantSummaryContent">
-'@)
-
             [void]$htmlTenantSummary.AppendLine(@"
+<button type="button" class="collapsible" id="tenantSummaryPolicy"><hr class="hr-textSecretCert" data-content="&nbsp;Managed Identity User Assigned Federated Identity Credentials" /></button>
+<div class="content TenantSummaryContent">
 <i class="padlxx fa fa-table" aria-hidden="true"></i> Download CSV <a class="externallink" href="#" onclick="download_table_as_csv_semicolon('$htmlTableId');">semicolon</a> | <a class="externallink" href="#" onclick="download_table_as_csv_comma('$htmlTableId');">comma</a>
 <table id="$htmlTableId" class="summaryTable">
 <thead>
 <tr>
-<th>Managed Identity ObjectId</th>
-<th>Managed Identity (client) Id</th>
-<th>Managed Identity DisplayName</th>
-<th>Managed Identity Federated Identity Credentials</th>
+<th>SP (MI) ObjectId</th>
+<th>SP (MI) Application Id</th>
+<th>SP (MI) DisplayName</th>
+<th>Resource Id (ARM)</th>
+<th>Federated Identity Credentials</th>
 </tr>
 </thead>
 <tbody>
@@ -4200,15 +4198,16 @@ extensions: [{ name: 'sort' }]
                         foreach ($fic in $sp.ManagedIdentityFederatedIdentityCredentials) {
                             $array += "$($fic.name) (id: $($fic.id)) (issuer: $($fic.properties.issuer); subject: $($fic.properties.subject); audiences: $((($fic.properties.audiences | Sort-Object) -join "$CsvDelimiterOpposite ")))"
                             $null = $arrayManagedIdentityFederatedIdentityCredentials4CSV.Add([PSCustomObject]@{
-                                    MIObjectId = $sp.ObjectId
-                                    MIAppId = $sp.SP.SPappId
-                                    MIDisplayName = $sp.SP.SPDisplayName
+                                    ObjectId = $sp.ObjectId
+                                    AppId = $sp.SP.SPappId
+                                    DisplayName = $sp.SP.SPDisplayName
+                                    ARMResourceId = $sp.ManagedIdentity.alternativeName
                                     SPObjectType = $sp.ObjectType
-                                    MIFederatedIdentityCredentialName = $fic.name
-                                    MIFederatedIdentityCredentialId = $fic.id
-                                    MIFederatedIdentityCredentialIssuer = $fic.properties.issuer
-                                    MIFederatedIdentityCredentialSubject = $fic.properties.subject
-                                    MIFederatedIdentityCredentialAudiences = (($fic.properties.audiences | Sort-Object) -join "$CsvDelimiterOpposite ")
+                                    FederatedIdentityCredentialName = $fic.name
+                                    FederatedIdentityCredentialId = $fic.id
+                                    FederatedIdentityCredentialIssuer = $fic.properties.issuer
+                                    FederatedIdentityCredentialSubject = $fic.properties.subject
+                                    FederatedIdentityCredentialAudiences = (($fic.properties.audiences | Sort-Object) -join "$CsvDelimiterOpposite ")
                                 })
                         }
                         $MIFederatedIdentityCredentials = "$(($sp.ManagedIdentityFederatedIdentityCredentials).Count) ($($array -join "$CsvDelimiterOpposite "))"
@@ -4223,6 +4222,7 @@ extensions: [{ name: 'sort' }]
 <td>$($sp.SP.SPObjectId)</td>
 <td>$($sp.SP.SPappId)</td>
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
+<td class="breakwordall">$($sp.ManagedIdentity.alternativeName)</td>
 <td class="breakwordall">$($MIFederatedIdentityCredentials)</td>
 </tr>
 "@)
@@ -4275,6 +4275,7 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
 
         locale: 'en-US',
         col_types: [
+            'caseinsensitivestring',
             'caseinsensitivestring',
             'caseinsensitivestring',
             'caseinsensitivestring',
