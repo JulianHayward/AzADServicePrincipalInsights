@@ -3,6 +3,9 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
+* 20221014
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.38 
+        * Handle error `405` [Support for federated identity credentials not enabled](https://learn.microsoft.com/en-us/azure/active-directory/develop/workload-identity-federation-considerations#errors)
 * 20221008
     * New feature - Managed Identity User Assigned Federated Identity Credentials
     * Rearrange JSON output for Managed Identity associated Azure Resources
