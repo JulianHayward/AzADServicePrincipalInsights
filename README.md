@@ -4,7 +4,7 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 
 # Updates
 * 20221017
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.39
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.40
         * Issue #10 - Handle error `404` User Assigned Managed Identity / ResourceGroup not found  
 * 20221014
     * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.38 
