@@ -3,8 +3,8 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20221014_1',
-    [string]$azAPICallVersion = '1.1.38',
+    [string]$ProductVersion = 'v1_20221017_1',
+    [string]$azAPICallVersion = '1.1.39',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -937,7 +937,7 @@ function dataCollection($mgId) {
                                 $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/$($resource.Id)/federatedIdentityCredentials?api-version=2022-01-31-PREVIEW"
                                 $method = 'GET'
                                 $miUserAssignedFederaterCreds = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -caller 'CustomDataCollection'
-                                if ($miUserAssignedFederaterCreds -eq 'SupportForFederatedIdentityCredentialsNotEnabled') {
+                                if ($miUserAssignedFederaterCreds -eq 'SupportForFederatedIdentityCredentialsNotEnabled' -or $miUserAssignedFederaterCreds -eq 'NotFound') {
                                     #skipping
                                 }
                                 else {

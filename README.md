@@ -3,6 +3,9 @@ __AzADServicePrincipalInsights__
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
 
 # Updates
+* 20221017
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.39
+        * Issue #10 - Handle error `404` User Assigned Managed Identity / ResourceGroup not found  
 * 20221014
     * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.38 
         * Handle error `405` [Support for federated identity credentials not enabled](https://learn.microsoft.com/en-us/azure/active-directory/develop/workload-identity-federation-considerations#errors)
@@ -63,6 +66,8 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
   * AppSecrets
   * AppCertificates
   * AppFederatedIdentityCredentials
+  * MIFederatedIdentityCredentials
+  * MI User Assigned associated resources
 * Customizable permission classification (permissionClassification.json)
 
 # Data
@@ -83,6 +88,7 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 * Application Secrets
 * Application Certificates
 * Application Federated Identity Credentials
+* Managed Identity User Assigned Federated Identity Credentials
 * HiPo Users (wip)
 
 # Prerequisites
