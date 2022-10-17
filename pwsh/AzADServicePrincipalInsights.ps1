@@ -942,7 +942,6 @@ function dataCollection($mgId) {
                                 }
                                 else {
                                     if ($miUserAssignedFederaterCreds.Count -gt 0) {
-                                        Write-Host 'MI:' $($resource.name) $miUserAssignedFederaterCreds.Count
                                         foreach ($miUserAssignedFederaterCred in $miUserAssignedFederaterCreds) {
                                             $miUserAssignedFederaterCredCust = $miUserAssignedFederaterCred
                                             $miUserAssignedFederaterCredCust | Add-Member -MemberType NoteProperty -Name miResourceId -Value $resource.Id
