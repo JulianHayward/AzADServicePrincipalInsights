@@ -76,7 +76,6 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
 * `ManagementGroupId` 
    * Option1: The Management Group ID that should be queried for the report. If undefined the Root Management group will be used.
    * Option2: accepts multiple Management Groups in form of an array e.g. .\pwsh\AzADServicePrincipalInsights.ps1 -ManagementGroupId @('mgId0', 'mgId1')
-* 
 * `NoCsvExport`  - Switch to disable exporting enriched data in CSV format
 * `CsvDelimiter` - The world is split into two kinds of delimiters - comma and semicolon - choose yours (default : ';')
 * `OutputPath` - Define the path where you want the output files to be stored
