@@ -70,6 +70,33 @@ Insights and change tracking on Azure Active Directory Service Principals (Enter
   * MI User Assigned associated resources
 * Customizable permission classification (permissionClassification.json)
 
+# Parameters
+
+* `DebugAzAPICall` - Switch to enable AzAPICall debug function for troubleshooting API calls using the AzAPICall module
+* `ManagementGroupId` - The top-level Management Group ID that should be queried for the report. Do not use or set to Tenant Root ID to extract data for the whole tenant.
+* `NoCsvExport`  - Switch to disable exporting enriched data in CSV format
+* `CsvDelimiter` - The world is split into two kinds of delimiters - comma and semicolon - choose yours (default : ';')
+* `OutputPath` - Define the path where you want the output files to be stored
+* `SubscriptionQuotaIdWhitelist` - Process only Subscriptions with defined QuotaId(s). Example: .\AzADServicePrincipalInsights.ps1 -SubscriptionQuotaIdWhitelist MSDN_,Enterprise_ (default : @('undefined')
+* `DoTranscript` - Switch to enable logging to console output
+* `HtmlTableRowsLimit` Threshold for the HTML output (table formatted) to prevent unresponsive browser issue due to limited client device performance. A recommendation will be shown to download the CSV instead of opening the TF table (default : 20000)
+* `ThrottleLimitARM` - Limit the parallel Azure Resource Manager API requests (default : 10)
+* `ThrottleLimitGraph` - Limit the parallel Graph API requests (default : 20)
+* `ThrottleLimitLocal` - Limit the parallelism of Powershell task to process the results (default : 100)
+* `SubscriptionId4AzContext` - If needed set a specific SubscriptionID as context for the AzAPICall module (default : 'undefined')
+* `FileTimeStampFormat` - Define the time format for the output files (default : 'yyyyMMdd_HHmmss')
+* `NoJsonExport` - Switch to disable exporting enriched data in Json formatted files
+* `AADGroupMembersLimit` - Defines the limit of AAD Group members; For AAD Groups that have more members than the defined limit Group members will not be resolved (default : 500)
+* `NoAzureResourceSideRelations` - Switch to disable the processing of Azure resource side relations 
+* `StatsOptOut` - Switch to opt out sending statistics for usage analysis
+* `ApplicationSecretExpiryWarning` - Define warning period for Service Principal secret expiry (default : 14 days)
+* `ApplicationSecretExpiryMax` - Define maximum expiry period for Service Principal secrets (default : 730 days)
+* `ApplicationCertificateExpiryWarning` - Define warning period for Service Principal certificate expiry (default : 14 days)
+* `ApplicationCertificateExpiryMax` - Define maximum expiry period for Service Principal certificates (default : 730 days)
+* `DirectorySeparatorChar` - Set the character for directory seperation (default : [IO.Path]::DirectorySeparatorChar)
+* `OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes` - Switch to only report on Service Principals that have a role assigment within the scope of the data  collection contaxt
+* `CriticalAADRoles` - Azure Active Directory roles that should be considered as highly privileged/critical (default :@('62e90394-69f5-4237-9190-012177145e10', 'e8611ab8-c189-46e8-94e1-60213ab1f814', '7be44c8a-adaf-4e2a-84d6-ab2649e08a13') which are Global Administrator, Privileged Role Administrator, Privileged Authentication Administrator)
+
 # Data
 
 * ServicePrincipals by type
