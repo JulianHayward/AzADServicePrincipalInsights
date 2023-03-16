@@ -1,6 +1,12 @@
-__AzADServicePrincipalInsights__
+__AzADServicePrincipalInsights aka AzADSPI__
 
-Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
+Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)  
+aka links:
+* aka.ms/AzADSPI  
+* aka.ms/AzADServicePrincipalInsights
+
+# Content
+- [Content](#content)
 - [Updates](#updates)
 - [Features](#features)
 - [Parameters](#parameters)
