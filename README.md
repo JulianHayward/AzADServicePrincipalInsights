@@ -173,11 +173,11 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 
 Also check <https://www.azadvertizer.net> - AzAdvertizer helps you to keep up with the pace by providing overview and insights on new releases and changes/updates for Azure Governance capabilities such as Azure Policy's Policy definitions, initiatives (Set definitions), aliases and Azure RBAC's Role definitions and resource provider operations.
 
-## AzGovViz
+## Azure Governance Visualizer aka AzGovViz
 
 ![alt text](img/AzGovVizConnectingDots_v4.2_h120.png "example output")
 
-Also check <https://aka.ms/AzGovViz> - Azure Governance Visualizer is intended to help you to get a holistic overview on your technical Azure Governance implementation by connecting the dots.  
+Also check out the [__Azure Governance Visualizer__](https://aka.ms/AzGovViz). The tool is intended to help you to get a holistic overview on your technical Azure Governance implementation by connecting the dots.  
 It is a PowerShell script that iterates your Azure Tenant's Management Group hierarchy down to Subscription level, it captures most relevant Azure governance capabilities such as Azure Policy, RBAC and Blueprints and a lot more..
 * Listed as [tool](https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/reference/tools-templates#govern) for the Govern discipline in the Microsoft Cloud Adoption Framework (CAF)  
 * Listed as [security monitoring tool](https://docs.microsoft.com/en-us/azure/architecture/framework/security/monitor-tools) in the Microsoft Well Architected Framework (WAF)
