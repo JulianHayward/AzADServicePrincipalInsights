@@ -1,8 +1,25 @@
 __AzADServicePrincipalInsights__
 
 Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)
+- [Updates](#updates)
+- [Features](#features)
+- [Parameters](#parameters)
+- [Data](#data)
+- [Prerequisites](#prerequisites)
+  - [Permissions](#permissions)
+    - [Azure](#azure)
+    - [Azure Active Directory](#azure-active-directory)
+    - [Azure DevOps](#azure-devops)
+  - [PowerShell](#powershell)
+- [Execute as Service Principal / Application](#execute-as-service-principal--application)
+- [Preview](#preview)
+- [AzAdvertizer](#azadvertizer)
+- [Azure Governance Visualizer aka AzGovViz](#azure-governance-visualizer-aka-azgovviz)
+- [Closing Note](#closing-note)
 
 # Updates
+* 20230316
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.70
 * 20221017
     * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.40
         * Issue #10 - Handle error `404` User Assigned Managed Identity / ResourceGroup not found  
@@ -167,13 +184,13 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 ![previewHTML2](img/preview2.png)  
 ![previewJSON](img/previewJSON.png)
 
-## AzAdvertizer
+# AzAdvertizer
 
 ![alt text](img/azadvertizer70.png "example output")
 
 Also check <https://www.azadvertizer.net> - AzAdvertizer helps you to keep up with the pace by providing overview and insights on new releases and changes/updates for Azure Governance capabilities such as Azure Policy's Policy definitions, initiatives (Set definitions), aliases and Azure RBAC's Role definitions and resource provider operations.
 
-## Azure Governance Visualizer aka AzGovViz
+# Azure Governance Visualizer aka AzGovViz
 
 ![alt text](img/AzGovVizConnectingDots_v4.2_h120.png "example output")
 
@@ -182,6 +199,6 @@ It is a PowerShell script that iterates your Azure Tenant's Management Group hie
 * Listed as [tool](https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/reference/tools-templates#govern) for the Govern discipline in the Microsoft Cloud Adoption Framework (CAF)  
 * Listed as [security monitoring tool](https://docs.microsoft.com/en-us/azure/architecture/framework/security/monitor-tools) in the Microsoft Well Architected Framework (WAF)
 
-## Closing Note
+# Closing Note
 
 Please note that while being developed by a Microsoft employee, AzADServicePrincipalInsights is not a Microsoft service or product. AzADServicePrincipalInsights is a personal/community driven project, there are none implicit or explicit obligations related to this project, it is provided 'as is' with no warranties and confer no rights.
