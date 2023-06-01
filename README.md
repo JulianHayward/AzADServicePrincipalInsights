@@ -93,6 +93,10 @@ aka links:
   * MIFederatedIdentityCredentials
   * MI User Assigned associated resources
 * Customizable permission classification (permissionClassification.json)
+  * sources/resources
+    * https://m365internals.com/2021/07/24/everything-about-service-principals-applications-and-api-permissions/ -> What applications are considered critical?
+    * https://docs.microsoft.com/en-us/security/compass/incident-response-playbook-app-consent#classifying-risky-permissions -> Classifying risky permissions   
+    * https://www.youtube.com/watch?v=T-ZnAUt1IP8 -> Monitoring and Incident Response in Azure AD
 
 # Parameters
 
