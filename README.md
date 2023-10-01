@@ -30,6 +30,8 @@ aka links:
 Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecycle Management and Operational Monitoring](https://www.cloud-architekt.net/entra-workload-id-lifecycle-management-monitoring/). In the article Thomas walks you through the different lifecycle phases and other aspects for workload identities in your Microsoft Entra environment. Also referencing AzADServicePrincipalInsights as part of the toolset for comprehensive reporting on application and service principal objects in your Entra ID environment.
 
 # Updates
+* 20231001
+    * fix hardcoded delimiter for export-csv - thanks @cjtous1
 * 20230316
     * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.70
 * 20221017

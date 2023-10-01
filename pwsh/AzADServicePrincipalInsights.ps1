@@ -3,7 +3,7 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20230316_1',
+    [string]$ProductVersion = 'v1_20231001_1',
     [string]$azAPICallVersion = '1.1.70',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
@@ -2353,7 +2353,7 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
         else {
             $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_AADRoleAssignments_"
         }
-        $arrayServicePrincipalsAADRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, RoleDefinitionName, ScopeDetail | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter"  -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayServicePrincipalsAADRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, RoleDefinitionName, ScopeDetail | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayServicePrincipalsAADRoleAssignments4CSV = $null
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -2804,7 +2804,7 @@ extensions: [{ name: 'sort' }]
         else {
             $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_AppRoleAssignments_"
         }
-        $arrayServicePrincipalsAppRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, AppRoleAssignmentResourceDisplayName, AppRolePermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter"  -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayServicePrincipalsAppRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, AppRoleAssignmentResourceDisplayName, AppRolePermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayServicePrincipalsAppRoleAssignments4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -3115,7 +3115,7 @@ extensions: [{ name: 'sort' }]
         else {
             $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_Oauth2PermissionGrants_"
         }
-        $arrayServicePrincipalsOauth2PermissionGrants4CSV | Sort-Object -Property SPDisplayName, SPObjectId, Oauth2PermissionGrantResourceDisplayName, Oauth2PermissionGrantPermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter"  -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayServicePrincipalsOauth2PermissionGrants4CSV | Sort-Object -Property SPDisplayName, SPObjectId, Oauth2PermissionGrantResourceDisplayName, Oauth2PermissionGrantPermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayServicePrincipalsOauth2PermissionGrants4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -3671,7 +3671,7 @@ var chartSecretExpiryNoteWorthy = new Chart(ctx, {
         else {
             $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_AppSecrets_"
         }
-        $arrayApplicationSecrets4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPSecretDisplayName, APPSecretKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter"  -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayApplicationSecrets4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPSecretDisplayName, APPSecretKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayApplicationSecrets4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -3921,7 +3921,7 @@ type: 'pie',
         else {
             $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_AppCertificates_"
         }
-        $arrayApplicationCertificates4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPCertificateDisplayName, APPCertificateKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter"  -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayApplicationCertificates4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPCertificateDisplayName, APPCertificateKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayApplicationCertificates4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -4092,7 +4092,7 @@ extensions: [{ name: 'sort' }]
         else {
             $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_FederatedIdentityCredentials_"
         }
-        $arrayApplicationFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPFederatedIdentityCredentialName, APPFederatedIdentityCredentialId, APPFederatedIdentityCredentialIssuer, APPFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter"  -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayApplicationFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPFederatedIdentityCredentialName, APPFederatedIdentityCredentialId, APPFederatedIdentityCredentialIssuer, APPFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayApplicationFederatedIdentityCredentials4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -4239,7 +4239,7 @@ extensions: [{ name: 'sort' }]
             else {
                 $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_FederatedIdentityCredentialsManagedIdentity_"
             }
-            $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, MIFederatedIdentityCredentialName, MIFederatedIdentityCredentialId, MIFederatedIdentityCredentialIssuer, MIFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter"  -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, MIFederatedIdentityCredentialName, MIFederatedIdentityCredentialId, MIFederatedIdentityCredentialIssuer, MIFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
             $arrayManagedIdentityFederatedIdentityCredentials4CSV = $null
 
             [void]$htmlTenantSummary.AppendLine(@"
@@ -4489,7 +4489,7 @@ extensions: [{ name: 'sort' }]
         else {
             $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_HiPoUsers_"
         }
-        $arrayHiposSorted | Select-Object -ExcludeProperty permission4HTML | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter"  -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+        $arrayHiposSorted | Select-Object -ExcludeProperty permission4HTML | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
 
         [void]$htmlTenantSummary.AppendLine(@"
         </tbody>
