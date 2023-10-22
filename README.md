@@ -198,7 +198,7 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 
 # Preview
 
-![previewHTML](img/preview_v1_20221008_1.png)  
+![previewHTML](img/azadserviceprincipalinsights_preview_entra-id.png)  
 ![previewHTML2](img/preview2.png)  
 ![previewJSON](img/previewJSON.png)
 
