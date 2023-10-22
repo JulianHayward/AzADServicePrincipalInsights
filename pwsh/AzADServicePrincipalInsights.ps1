@@ -7637,7 +7637,7 @@ $html += @"
 
 $html += @"
     <div class="summprnt" id="summprnt">
-    <div class="summary" id="summary"><p class="pbordered">Azure Active Directory Service Principal Insights ($($ProductVersion))</p>
+    <div class="summary" id="summary"><p class="pbordered">Microsoft Entra ID Service Principal Insights ($($ProductVersion))</p>
 "@
 
 $startSummary = Get-Date

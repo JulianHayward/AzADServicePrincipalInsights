@@ -1,6 +1,6 @@
 __AzADServicePrincipalInsights aka AzADSPI__
 
-Insights and change tracking on Azure Active Directory Service Principals (Enterprise Applications and Applications)  
+Insights and change tracking on Microsoft Entra ID Service Principals (Enterprise Applications and Applications)  
 
 aka links:
 * aka.ms/AzADSPI  
@@ -16,7 +16,7 @@ aka links:
 - [Prerequisites](#prerequisites)
   - [Permissions](#permissions)
     - [Azure](#azure)
-    - [Azure Active Directory](#azure-active-directory)
+    - [Microsoft Entra ID](#microsoft-entra-id)
     - [Azure DevOps](#azure-devops)
   - [PowerShell](#powershell)
 - [Execute as Service Principal / Application](#execute-as-service-principal--application)
@@ -132,7 +132,7 @@ Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecyc
 * `ApplicationCertificateExpiryMax` - Define maximum expiry period for Service Principal certificates (default : 730 days)
 * `DirectorySeparatorChar` - Set the character for directory seperation (default : [IO.Path]::DirectorySeparatorChar)
 * `OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes` - Switch to only report on Service Principals that have a role assigment within the scope of the data  collection contaxt
-* `CriticalAADRoles` - Azure Active Directory roles that should be considered as highly privileged/critical (default :@('62e90394-69f5-4237-9190-012177145e10', 'e8611ab8-c189-46e8-94e1-60213ab1f814', '7be44c8a-adaf-4e2a-84d6-ab2649e08a13') which are Global Administrator, Privileged Role Administrator, Privileged Authentication Administrator)
+* `CriticalAADRoles` - Microsoft Entra ID roles that should be considered as highly privileged/critical (default :@('62e90394-69f5-4237-9190-012177145e10', 'e8611ab8-c189-46e8-94e1-60213ab1f814', '7be44c8a-adaf-4e2a-84d6-ab2649e08a13') which are Global Administrator, Privileged Role Administrator, Privileged Authentication Administrator)
 
 # Data
 
@@ -163,7 +163,7 @@ Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecyc
 
 Management Group (Tenant Root Management Group) RBAC: __Reader__
 
-### Azure Active Directory
+### Microsoft Entra ID
 
 Microsoft Graph API | Application | __Application.Read.All__  
 Microsoft Graph API | Application | __Group.Read.All__  
