@@ -1401,15 +1401,16 @@ var myChart = new Chart(ctx, {
             $appId = ''
             $appDisplayName = ''
             $appTags = ''
+            $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
             if ($sp.APP) {
                 $appObjectId = $sp.APP.APPObjectId
                 $appId = $sp.APP.APPAppClientId
                 $appDisplayName = $sp.APP.APPDisplayName
                 $appTags = $sp.APP.APPTags -join "$CsvDelimiterOpposite "
+                if($sp.SP.SPTags -and $sp.APP.APPTags){
                 #App tags are automatically propagated to the service principal, removing redundant information.
                 $spTags = (Compare-Object -ReferenceObject $sp.SP.SPTags -DifferenceObject $sp.APP.APPTags -PassThru) -join "$CsvDelimiterOpposite "
-            }else{
-                $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
+                }              
             }
 
             $miResourceType = ''
