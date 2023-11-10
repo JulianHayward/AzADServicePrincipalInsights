@@ -1363,12 +1363,14 @@ var myChart = new Chart(ctx, {
 <th>SP Owners</th>
 <th>SP App Owner Organization Id</th>
 <th>Type</th>
+<th>SP Tags</th>
 <th>App object Id</th>
 <th>App application (client) Id</th>
 <th>App displayName</th>
 <th>App Owners</th>
 <th>AppReg</th>
-<th>App SignIn Audience
+<th>App SignIn Audience</th>
+<th>App Tags</th>
 <th>MI Resource type</th>
 <th>MI Resource scope</th>
 <th>MI Relict $abbrMIRelict</th>
@@ -1398,10 +1400,16 @@ var myChart = new Chart(ctx, {
             $appObjectId = ''
             $appId = ''
             $appDisplayName = ''
+            $appTags = ''
             if ($sp.APP) {
                 $appObjectId = $sp.APP.APPObjectId
                 $appId = $sp.APP.APPAppClientId
                 $appDisplayName = $sp.APP.APPDisplayName
+                $appTags = $sp.APP.APPTags -join "$CsvDelimiterOpposite "
+                #App tags are automatically propagated to the service principal, removing redundant information.
+                $spTags = (Compare-Object -ReferenceObject $sp.SP.SPTags -DifferenceObject $sp.APP.APPTags -PassThru) -join "$CsvDelimiterOpposite "
+            }else{
+                $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
             }
 
             $miResourceType = ''
@@ -1478,12 +1486,14 @@ var myChart = new Chart(ctx, {
 <td class="breakwordall">$($spOwners)</td>
 <td>$($sp.SP.SPAppOwnerOrganizationId)</td>
 <td>$($spType)</td>
+<td class="breakwordall">$($spTags)</td>
 <td>$($appObjectId)</td>
 <td>$($appId)</td>
 <td class="breakwordall">$($appDisplayName)</td>
 <td class="breakwordall">$($appOwners)</td>
 <td>$($hasApp)</td>
 <td class="breakwordall">$($appSignInAudience)</td>
+<td class="breakwordall">$($appTags)</td>
 <td class="breakwordall">$($miResourceType)</td>
 <td class="breakwordall">$($miResourceScope)</td>
 <td>$($miRelict)</td>
@@ -1527,14 +1537,16 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['6%', '6%', '6%', '6%', '6%', '6%', '6%', '6%', '6%', '6%', '6%', '5%', '6%', '4%', '5%', '4%', '4%', '7%'],
+col_widths: ['5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '4%', '6%'],
             col_5: 'select',
             col_6: 'multiple',
-            col_11: 'select',
             col_12: 'select',
-            col_15: 'select',
+            col_13: 'select',
+            col_17: 'select',
             locale: 'en-US',
             col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
