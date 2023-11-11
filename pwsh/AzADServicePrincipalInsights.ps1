@@ -2256,6 +2256,8 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
 <th>SP application Id</th>
 <th>SP displayName</th>
 <th>SP type</th>
+<th>SP Tags</th>
+<th>App Tags</th>
 <th>SP App Owner Organization Id</th>
 <th>Classification</th>
 <th>#</th>
@@ -2272,7 +2274,15 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
             $cnt = 0
 
             $spType = $sp.ObjectType
-
+            $appTags = ''
+            $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
+            if ($sp.APP) {
+                $appTags = $sp.APP.APPTags -join "$CsvDelimiterOpposite "
+                if($sp.SP.SPTags -and $sp.APP.APPTags){
+                    #App tags are automatically propagated to the service principal, removing redundant information.
+                    $spTags = (Compare-Object -ReferenceObject $sp.SP.SPTags -DifferenceObject $sp.APP.APPTags -PassThru) -join "$CsvDelimiterOpposite "
+                }              
+            }
             $spAADRoleAssignments = $null
             if (($sp.SPAADRoleAssignments)) {
                 if (($sp.SPAADRoleAssignments.count -gt 0)) {
@@ -2322,6 +2332,8 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
                                 SPObjectType = $sp.ObjectType
                                 SPObjectId = $sp.ObjectId
                                 SPDisplayName = $sp.SP.SPDisplayName
+                                SPTags = $spTags
+                                AppTags = $appTags
                                 APPObjectId = $sp.APP.APPObjectId
                                 APPAppClientId = $sp.APP.APPAppClientId
                                 APPDisplayName = $sp.APP.APPDisplayName
@@ -2352,6 +2364,8 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
 <td>$($sp.SP.SPappId)</td>
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
+<td class="breakwordall">$spTags</td>
+<td class="breakwordall">$appTags</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
 <td>$($roleClassification)</td>
 <td>$(($sp.SPAADRoleAssignments).Count)</td>
@@ -2402,12 +2416,14 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['10%', '10%', '10%', '10%', '10%', '10%', '3%', '37%'],
+col_widths: ['8%', '8%', '8%', '8%', '8%', '8%', '8%', '8%', '3%', '33%'],
             locale: 'en-US',
             col_3: 'multiple',
-            col_4: 'select',
-            col_5: 'select',
+            col_6: 'select',
+            col_7: 'select',
             col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -2460,6 +2476,8 @@ extensions: [{ name: 'sort' }]
 <th>SP application Id</th>
 <th>SP displayName</th>
 <th>SP type</th>
+<th>SP Tags</th>
+<th>App Tags</th>
 <th>SP App Owner Organization Id</th>
 <th>SP AAD RoleAssignedOn</th>
 </tr>
@@ -2470,7 +2488,7 @@ extensions: [{ name: 'sort' }]
         foreach ($sp in ($servicePrincipalsAADRoleAssignedOn)) {
 
             $spType = $sp.ObjectType
-
+            
             $SPAAADRoleAssignedOn = $null
             if (($sp.SPAAADRoleAssignedOn)) {
                 if (($sp.SPAAADRoleAssignedOn.count -gt 0)) {
@@ -2741,6 +2759,8 @@ extensions: [{ name: 'sort' }]
 <th>SP application Id</th>
 <th>SP displayName</th>
 <th>SP type</th>
+<th>SP Tags</th>
+<th>App Tags</th>
 <th>SP App Owner Organization Id</th>
 <th>Classification</th>
 <th>SP App RoleAssignments</th>
@@ -2753,7 +2773,15 @@ extensions: [{ name: 'sort' }]
         foreach ($sp in ($servicePrincipalsAppRoleAssignments)) {
 
             $spType = $sp.ObjectType
-
+            $appTags = ''
+            $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
+            if ($sp.APP) {
+                $appTags = $sp.APP.APPTags -join "$CsvDelimiterOpposite "
+                if($sp.SP.SPTags -and $sp.APP.APPTags){
+                    #App tags are automatically propagated to the service principal, removing redundant information.
+                    $spTags = (Compare-Object -ReferenceObject $sp.SP.SPTags -DifferenceObject $sp.APP.APPTags -PassThru) -join "$CsvDelimiterOpposite "
+                }              
+            }
             $SPAppRoleAssignments = $null
             if (($sp.SPAppRoleAssignments)) {
                 $classification = 'unclassified'
@@ -2779,6 +2807,8 @@ extensions: [{ name: 'sort' }]
                                 SPObjectType = $sp.ObjectType
                                 SPObjectId = $sp.ObjectId
                                 SPDisplayName = $sp.SP.SPDisplayName
+                                SPTags = $spTags
+                                AppTags = $appTags
                                 APPObjectId = $sp.APP.APPObjectId
                                 APPAppClientId = $sp.APP.APPAppClientId
                                 APPDisplayName = $sp.APP.APPDisplayName
@@ -2804,6 +2834,8 @@ extensions: [{ name: 'sort' }]
 <td>$($sp.SP.SPappId)</td>
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
+<td class="breakwordall">$spTags</td>
+<td class="breakwordall">$appTags</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
 <td>$(($classificationCollection | Sort-Object -Unique) -join ', ')</td>
 <td class="breakwordall">$($SPAppRoleAssignments)</td>
@@ -2854,11 +2886,13 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['10%', '10%', '10%', '10%', '10%', '5%', '45%'],
+col_widths: ['8%', '8%', '8%', '8%', '8%', '8%', '8%', '4%', '40%'],
             locale: 'en-US',
             col_3: 'multiple',
-            col_4: 'select',
+            col_6: 'select',
             col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -2913,6 +2947,8 @@ extensions: [{ name: 'sort' }]
 <th>SP application Id</th>
 <th>SP displayName</th>
 <th>SP type</th>
+<th>SP Tags</th>
+<th>App Tags</th>
 <th>SP App Owner Organization Id</th>
 <th>SP App RoleAssignedTo</th>
 </tr>
@@ -2923,7 +2959,15 @@ extensions: [{ name: 'sort' }]
         foreach ($sp in ($servicePrincipalsAppRoleAssignedTo)) {
 
             $spType = $sp.ObjectType
-
+            $appTags = ''
+            $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
+            if ($sp.APP) {
+                $appTags = $sp.APP.APPTags -join "$CsvDelimiterOpposite "
+                if($sp.SP.SPTags -and $sp.APP.APPTags){
+                    #App tags are automatically propagated to the service principal, removing redundant information.
+                    $spTags = (Compare-Object -ReferenceObject $sp.SP.SPTags -DifferenceObject $sp.APP.APPTags -PassThru) -join "$CsvDelimiterOpposite "
+                }              
+            }
             $SPAppRoleAssignedTo = $null
             if (($sp.SPAppRoleAssignedTo)) {
                 if (($sp.SPAppRoleAssignedTo.count -gt 0)) {
@@ -2944,6 +2988,8 @@ extensions: [{ name: 'sort' }]
 <td>$($sp.SP.SPappId)</td>
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
+<td class="breakwordall">$spTags</td>
+<td class="breakwordall">$appTags</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
 <td class="breakwordall">$($SPAppRoleAssignedTo)</td>
 </tr>
@@ -2984,11 +3030,13 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],
+col_widths: ['8%', '8%', '8%', '8%', '8%', '8%', '8%', '44%'],
             locale: 'en-US',
             col_3: 'multiple',
-            col_4: 'select',
+            col_6: 'select',
             col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -3052,6 +3100,8 @@ extensions: [{ name: 'sort' }]
 <th>SP application Id</th>
 <th>SP displayName</th>
 <th>SP type</th>
+<th>SP Tags</th>
+<th>App Tags</th>
 <th>SP App Owner Organization Id</th>
 <th>Classification</th>
 <th>SP Oauth Permission grants</th>
@@ -3064,7 +3114,15 @@ extensions: [{ name: 'sort' }]
         foreach ($sp in ($servicePrincipalsOauth2PermissionGrants)) {
 
             $spType = $sp.ObjectType
-
+            $appTags = ''
+            $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
+            if ($sp.APP) {
+                $appTags = $sp.APP.APPTags -join "$CsvDelimiterOpposite "
+                if($sp.SP.SPTags -and $sp.APP.APPTags){
+                    #App tags are automatically propagated to the service principal, removing redundant information.
+                    $spTags = (Compare-Object -ReferenceObject $sp.SP.SPTags -DifferenceObject $sp.APP.APPTags -PassThru) -join "$CsvDelimiterOpposite "
+                }              
+            }
             $SPOauth2PermissionGrants = $null
             if (($sp.SPOauth2PermissionGrants)) {
                 $classification = 'unclassified'
@@ -3090,6 +3148,8 @@ extensions: [{ name: 'sort' }]
                                 SPObjectType = $sp.ObjectType
                                 SPObjectId = $sp.ObjectId
                                 SPDisplayName = $sp.SP.SPDisplayName
+                                SPTags = $spTags
+                                AppTags = $appTags
                                 APPObjectId = $sp.APP.APPObjectId
                                 APPAppClientId = $sp.APP.APPAppClientId
                                 APPDisplayName = $sp.APP.APPDisplayName
@@ -3115,6 +3175,8 @@ extensions: [{ name: 'sort' }]
 <td>$($sp.SP.SPappId)</td>
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
+<td class="breakwordall">$spTags</td>
+<td class="breakwordall">$appTags</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
 <td>$(($classificationCollection | Sort-Object -Unique) -join ', ')</td>
 <td class="breakwordall">$($SPOauth2PermissionGrants)</td>
@@ -3165,11 +3227,13 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['10%', '10%', '10%', '10%', '10%', '5%', '50%'],
+col_widths: ['8%', '8%', '8%', '8%', '8%', '8%', '8%', '4%', '40%'],
             locale: 'en-US',
             col_3: 'multiple',
-            col_4: 'select',
+            col_6: 'select',
             col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -3225,6 +3289,8 @@ extensions: [{ name: 'sort' }]
 <th>SP application Id</th>
 <th>SP displayName</th>
 <th>SP type</th>
+<th>SP Tags</th>
+<th>App Tags</th>
 <th>SP App Owner Organization Id</th>
 <th>Classification</th>
 <th>#</th>
@@ -3237,7 +3303,15 @@ extensions: [{ name: 'sort' }]
             foreach ($sp in ($servicePrincipalsAzureRoleAssignments)) {
 
                 $spType = $sp.ObjectType
-
+                $appTags = ''
+                $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
+                if ($sp.APP) {
+                    $appTags = $sp.APP.APPTags -join "$CsvDelimiterOpposite "
+                    if($sp.SP.SPTags -and $sp.APP.APPTags){
+                        #App tags are automatically propagated to the service principal, removing redundant information.
+                        $spTags = (Compare-Object -ReferenceObject $sp.SP.SPTags -DifferenceObject $sp.APP.APPTags -PassThru) -join "$CsvDelimiterOpposite "
+                    }              
+                }
                 $SPAzureRoleAssignments = $null
                 if (($sp.SPAzureRoleAssignments)) {
                     $RBACClassification = ''
@@ -3291,6 +3365,8 @@ extensions: [{ name: 'sort' }]
 <td>$($sp.SP.SPappId)</td>
 <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
 <td>$spType</td>
+<td class="breakwordall">$spTags</td>
+<td class="breakwordall">$appTags</td>
 <td>$($sp.SP.SPappOwnerOrganizationId)</td>
 <td>$RBACClassification</td>
 <td>$(($sp.SPAzureRoleAssignments).Count)</td>
@@ -3333,12 +3409,14 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
             }
             [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['9%', '9%', '9%', '9%', '9%', '5%', '4%', '41%'],
+col_widths: ['8%', '8%', '8%', '8%', '8%', '8%', '8%', '4%', '4%', '36%'],
             locale: 'en-US',
             col_3: 'multiple',
             col_4: 'select',
             col_5: 'select',
             col_types: [
+                'caseinsensitivestring',
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
