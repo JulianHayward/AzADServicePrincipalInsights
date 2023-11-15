@@ -3031,7 +3031,7 @@ col_widths: ['8%', '8%', '8%', '8%', '8%', '8%', '8%', '4%', '40%'],
                 'caseinsensitivestring',
                 'caseinsensitivestring'
             ],
-            watermark: ['', '', '', '', '', '$($summaryClassifications)', ''],
+            watermark: ['', '', '', '', '', '', '', '$($summaryClassifications)', ''],
 extensions: [{ name: 'sort' }]
         };
         var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
@@ -3387,7 +3387,7 @@ col_widths: ['8%', '8%', '8%', '8%', '8%', '8%', '8%', '4%', '40%'],
                 'caseinsensitivestring',
                 'caseinsensitivestring'
             ],
-            watermark: ['', '', '', '', '', '$($summaryClassifications)', ''],
+            watermark: ['', '', '', '', '', '', '', '$($summaryClassifications)', ''],
 extensions: [{ name: 'sort' }]
         };
         var tf = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
@@ -3580,8 +3580,8 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
 col_widths: ['8%', '8%', '8%', '8%', '8%', '8%', '8%', '4%', '4%', '36%'],
             locale: 'en-US',
             col_3: 'multiple',
-            col_4: 'select',
-            col_5: 'select',
+            col_6: 'select',
+            col_7: 'select',
             col_types: [
                 'caseinsensitivestring',
                 'caseinsensitivestring',
