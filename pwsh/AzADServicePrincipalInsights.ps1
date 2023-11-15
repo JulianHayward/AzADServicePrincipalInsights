@@ -4,7 +4,7 @@ Param
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
     [string]$ProductVersion = 'v1_20231001_1',
-    [string]$azAPICallVersion = '1.1.70',
+    [string]$azAPICallVersion = '1.1.84',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -1371,6 +1371,7 @@ var myChart = new Chart(ctx, {
 <th>AppReg</th>
 <th>App SignIn Audience</th>
 <th>App Tags</th>
+<th>App Notes</th>
 <th>MI Resource type</th>
 <th>MI Resource scope</th>
 <th>MI Relict $abbrMIRelict</th>
@@ -1381,6 +1382,7 @@ var myChart = new Chart(ctx, {
 <tbody>
 "@)
 
+        $servicePrincipals4CSVExport = [System.Collections.ArrayList]@()
         foreach ($sp in ($cu)) {
 
             $spType = $sp.ObjectType
@@ -1395,6 +1397,18 @@ var myChart = new Chart(ctx, {
             }
             else {
                 $spNotes = 'notesN/A'
+            }
+
+            if ($spType -eq 'SP APP INT' -or $spType -eq 'SP APP EXT' -or $spType -eq 'AppOnly') {
+                if ([string]::IsNullOrWhiteSpace($sp.APP.APPNotes)) {
+                    $appNotes = 'notesNotSet'
+                }
+                else {
+                    $appNotes = $sp.APP.APPNotes
+                }
+            }
+            else {
+                $appNotes = 'notesN/A'
             }
 
             $appObjectId = ''
@@ -1495,6 +1509,7 @@ var myChart = new Chart(ctx, {
 <td>$($hasApp)</td>
 <td class="breakwordall">$($appSignInAudience)</td>
 <td class="breakwordall">$($appTags)</td>
+<td class="breakwordall">$($appNotes)</td>
 <td class="breakwordall">$($miResourceType)</td>
 <td class="breakwordall">$($miResourceScope)</td>
 <td>$($miRelict)</td>
@@ -1502,7 +1517,37 @@ var myChart = new Chart(ctx, {
 <td class="breakwordall">$($miAssignedToResources)</td>
 </tr>
 "@)
+            if (-not $NoCsvExport) {
+                $null = $servicePrincipals4CSVExport.Add([PSCustomObject]@{
+                        SPObjectId                  = $sp.SP.SPObjectId
+                        SPAppId                     = $sp.SP.SPAppId
+                        SPDisplayName               = $sp.SP.SPDisplayName
+                        SPNotes                     = $spNotes
+                        SPOwners                    = $spOwners
+                        SPAppOwnerOrganizationId    = $sp.SP.SPAppOwnerOrganizationId
+                        SPType                      = $spType
+                        SPTags                      = $spTags
+                        AppObjectId                 = $appObjectId
+                        AppClientId                 = $appId
+                        AppDisplayName              = $appDisplayName
+                        AppOwners                   = $appOwners
+                        HasAppRegistration          = $hasApp
+                        AppSignInAudience           = $appSignInAudience
+                        AppTags                     = $appTags
+                        AppNotes                    = $appNotes
+                        MIResourceType              = $miResourceType
+                        MIResourceScope             = $miResourceScope
+                        MIRelict                    = $miRelict
+                        MIAssociatedResourceCount   = $miAssignedToResourcesCount
+                        MIAssociatedResources       = $miAssignedToResources
+                    })
+            }
         }
+
+        if(-not $NoCsvExport){
+            $servicePrincipals4CSVExport | Sort-Object -Property SPDisplayName, SPObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ServicePrincipals.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+        }
+        $servicePrincipals4CSVExport = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -1538,14 +1583,15 @@ paging: {results_per_page: ['Records: ', [$spectrum]]},/*state: {types: ['local_
         }
         [void]$htmlTenantSummary.AppendLine(@"
 btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { delay: 1100 }, no_results_message: true, linked_filters: true,
-col_widths: ['5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '4%', '6%'],
+col_widths: ['5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '3%', '5%', '5%', '5%', '5%', '5%', '3%', '5%', '3%', '6%'],
             col_5: 'select',
             col_6: 'multiple',
             col_12: 'select',
             col_13: 'select',
-            col_17: 'select',
+            col_18: 'select',
             locale: 'en-US',
             col_types: [
+                'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
                 'caseinsensitivestring',
@@ -1567,7 +1613,7 @@ col_widths: ['5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '
                 'number',
                 'caseinsensitivestring'
             ],
-            watermark: ['', '', '', 'try: !notesN/A && !notesNotSet', '', '', '', '', '', '', '', '', '', '', '', ''],
+            watermark: ['', '', '', 'try: !notesN/A && !notesNotSet', '', '', '', '', '', '', '', '', '', '', '', 'try: !notesN/A && !notesNotSet', '', '', '', '', ''],
             extensions: [{ name: 'sort' }]
         };
         var $($tf) = new TableFilter('$htmlTableId', tfConfig4$htmlTableId);
@@ -1623,6 +1669,7 @@ col_widths: ['5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '
 <tbody>
 "@)
 
+        $servicePrincipalOwners4CSVExport = [System.Collections.ArrayList]@()
         foreach ($sp in ($cu.where( { $_.SPOwners.Count -gt 0 } ))) {
 
             $spType = $sp.ObjectType
@@ -1679,7 +1726,25 @@ col_widths: ['5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '
 </tr>
 "@)
             }
+            if (-not $NoCsvExport) {
+                $null = $servicePrincipalOwners4CSVExport.Add([PSCustomObject]@{
+                    SPObjectId                  = $sp.SP.SPObjectId
+                    SPAppId                     = $sp.SP.SPAppId
+                    SPDisplayName               = $sp.SP.SPDisplayName
+                    SPAppOwnerOrganizationId    = $sp.SP.SPAppOwnerOrganizationId
+                    SPType                      = $spType
+                    OwnerDisplayName            = $ownerDisplayName
+                    OwnerPrincipalType          = $ownerPrincipalType
+                    OwnerId                     = $ownerId
+                    OwnerApplicability          = $ownerApplicability
+                    OwnerOwnedBy                = $ownerOwnedBy
+                })
+            }
         }
+        if(-not $NoCsvExport){
+            $servicePrincipalOwners4CSVExport | Sort-Object -Property SPDisplayName, SPObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ServicePrincipalOwners.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+        }
+        $servicePrincipalOwners4CSVExport = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -1785,7 +1850,7 @@ extensions: [{ name: 'sort' }]
 </thead>
 <tbody>
 "@)
-
+        $applicationOwners4CSVExport = [System.Collections.ArrayList]@()
         foreach ($sp in ($cu.where( { $_.APPAppOwners.Count -gt 0 } ))) {
 
             $spType = $sp.ObjectType
@@ -1843,7 +1908,26 @@ extensions: [{ name: 'sort' }]
 </tr>
 "@)
             }
+            if (-not $NoCsvExport) {
+                $null = $applicationOwners4CSVExport.Add([PSCustomObject]@{
+                        AppObjectId                 = $sp.APP.APPObjectId
+                        AppClientId                 = $sp.APP.APPAppClientId
+                        AppDisplayName              = $sp.APP.APPDisplayName
+                        SPAppOwnerOrganizationId    = $sp.SP.SPAppOwnerOrganizationId
+                        SPType                      = $spType
+                        OwnerDisplayName            = $ownerDisplayName
+                        OwnerPrincipalType          = $ownerPrincipalType
+                        OwnerId                     = $ownerId
+                        OwnerApplicability          = $ownerApplicability
+                        OwnerOwnedBy                = $ownerOwnedBy
+                    })
+            }
         }
+
+        if(-not $NoCsvExport){
+            $applicationOwners4CSVExport | Sort-Object -Property AppDisplayName, AppObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ApplicationOwners.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+        }
+        $applicationOwners4CSVExport = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -1947,13 +2031,26 @@ extensions: [{ name: 'sort' }]
 </thead>
 <tbody>
 "@)
-
+        $servicePrincipalOwnedObjects4CSVExport = [System.Collections.ArrayList]@()
         foreach ($sp in ($cu.where( { $_.SPOwnedObjects.Count -gt 0 } ))) {
 
             $spType = $sp.ObjectType
             $arrayOwnedObjects = @()
             foreach ($ownedObject in $sp.SPOwnedObjects | Sort-Object -Property type, typeDetailed, displayName) {
                 $arrayOwnedObjects += "$($ownedObject.displayName) <b>$($ownedObject.type)</b> $($ownedObject.objectId)"
+                
+                if (-not $NoCsvExport) {
+                    $null = $servicePrincipalOwnedObjects4CSVExport.Add([PSCustomObject]@{
+                        SPObjectId                  = $sp.SP.SPObjectId
+                        SPAppId                     = $sp.SP.SPAppId
+                        SPDisplayName               = $sp.SP.SPDisplayName
+                        SPAppOwnerOrganizationId    = $sp.SP.SPAppOwnerOrganizationId
+                        SPType                      = $spType
+                        OwnedObjectDisplayName      = $ownedObject.displayName                  
+                        OwnedObjectType             = $ownedObject.type
+                        OwnedObjectId               = $ownedObject.objectId
+                    })
+                }
             }
 
             [void]$htmlTenantSummary.AppendLine(@"
@@ -1968,6 +2065,10 @@ extensions: [{ name: 'sort' }]
 "@)
 
         }
+        if(-not $NoCsvExport){
+            $servicePrincipalOwnedObjects4CSVExport | Sort-Object -Property SPDisplayName, SPObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ServicePrincipalOwnedObjects.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+        }
+        $servicePrincipalOwnedObjects4CSVExport = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -2374,13 +2475,9 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
 "@)
         }
 
-        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
-            $fileName = "$($Product)_$($fileNameMGRef)_AADRoleAssignments_"
+        if(-not $NoCsvExport){
+            $arrayServicePrincipalsAADRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, RoleDefinitionName, ScopeDetail | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AADRoleAssignments.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
-        else {
-            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_AADRoleAssignments_"
-        }
-        $arrayServicePrincipalsAADRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, RoleDefinitionName, ScopeDetail | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayServicePrincipalsAADRoleAssignments4CSV = $null
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -2484,7 +2581,7 @@ extensions: [{ name: 'sort' }]
 </thead>
 <tbody>
 "@)
-
+        $SPAAADRoleAssignedOn4CSVExport = [System.Collections.ArrayList]@()
         foreach ($sp in ($servicePrincipalsAADRoleAssignedOn)) {
 
             $spType = $sp.ObjectType
@@ -2503,6 +2600,20 @@ extensions: [{ name: 'sort' }]
                         }
 
                         $array += "$raRoleDefinitionName ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
+                        if (-not $NoCsvExport) {
+                            $null = $SPAAADRoleAssignedOn4CSVExport4CSVExport.Add([PSCustomObject]@{
+                                SPObjectId                  = $sp.SP.SPObjectId
+                                SPAppId                     = $sp.SP.SPAppId
+                                SPDisplayName               = $sp.SP.SPdisplayName
+                                SPType                      = $spType
+                                SPAppOwnerOrganizationId    = $sp.SP.SPappOwnerOrganizationId
+                                RoleName                    = $rao.roleName
+                                RoleId                      = $rao.roleId
+                                PrincipalDisplayName        = $rao.principalDisplayName
+                                PrincipalType               = $rao.principalType
+                                PrincipalId                 = $rao.principalId                 
+                            })
+                        }
                     }
                     $SPAAADRoleAssignedOn = "$(($sp.SPAAADRoleAssignedOn).Count) ($($array -join "$CsvDelimiterOpposite "))"
 
@@ -2523,6 +2634,10 @@ extensions: [{ name: 'sort' }]
 </tr>
 "@)
         }
+        if(-not $NoCsvExport){
+            $SPAAADRoleAssignedOn4CSVExport | Sort-Object -Property SPDisplayName, SPObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ServicePrincipalsAADRoleAssignedOn.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+        }
+        $SPAAADRoleAssignedOn4CSVExport = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -2620,6 +2735,7 @@ extensions: [{ name: 'sort' }]
 <tbody>
 "@)
 
+        $applicationsAADRoleAssignedOn4CSVExport = [System.Collections.ArrayList]@()
         foreach ($sp in ($applicationsAADRoleAssignedOn)) {
 
             $spType = $sp.ObjectType
@@ -2638,6 +2754,20 @@ extensions: [{ name: 'sort' }]
                         }
 
                         $array += "$raRoleDefinitionName ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
+                        if (-not $NoCsvExport) {
+                            $null = $applicationsAADRoleAssignedOn4CSVExport.Add([PSCustomObject]@{
+                                AppObjectId                 = $sp.APP.APPObjectId
+                                AppClientId                 = $sp.APP.APPAppClientId
+                                AppDisplayName              = $sp.APP.APPDisplayName
+                                SPType                      = $spType
+                                SPAppOwnerOrganizationId    = $sp.SP.SPappOwnerOrganizationId
+                                RoleName                    = $rao.roleName
+                                RoleId                      = $rao.roleId
+                                PrincipalDisplayName        = $rao.principalDisplayName
+                                PrincipalType               = $rao.principalType
+                                PrincipalId                 = $rao.principalId
+                            })
+                        }
                     }
                     $APPAAADRoleAssignedOn = "$(($sp.APPAAADRoleAssignedOn).Count) ($($array -join "$CsvDelimiterOpposite "))"
 
@@ -2658,6 +2788,10 @@ extensions: [{ name: 'sort' }]
 </tr>
 "@)
         }
+        if(-not $NoCsvExport){
+            $applicationsAADRoleAssignedOn4CSVExport | Sort-Object -Property AppDisplayName, AppObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ApplicationsAADRoleAssignedOn.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+        }
+        $applicationsAADRoleAssignedOn4CSVExport = $nul
 
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -2843,13 +2977,9 @@ extensions: [{ name: 'sort' }]
 "@)
         }
 
-        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
-            $fileName = "$($Product)_$($fileNameMGRef)_AppRoleAssignments_"
+        if(-not $NoCsvExport){
+            $arrayServicePrincipalsAppRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, AppRoleAssignmentResourceDisplayName, AppRolePermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppRoleAssignments.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
-        else {
-            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_AppRoleAssignments_"
-        }
-        $arrayServicePrincipalsAppRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, AppRoleAssignmentResourceDisplayName, AppRolePermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayServicePrincipalsAppRoleAssignments4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -2956,6 +3086,7 @@ extensions: [{ name: 'sort' }]
 <tbody>
 "@)
 
+        $servicePrincipalsAppRoleAssignedTo4CSVExport = [System.Collections.ArrayList]@()
         foreach ($sp in ($servicePrincipalsAppRoleAssignedTo)) {
 
             $spType = $sp.ObjectType
@@ -2974,6 +3105,20 @@ extensions: [{ name: 'sort' }]
                     $array = @()
                     foreach ($approleAssTo in $sp.SPAppRoleAssignedTo) {
                         $array += "$($approleAssTo.principalDisplayName) - $($approleAssTo.principalType)"
+                        if (-not $NoCsvExport) {
+                            $null = $servicePrincipalsAppRoleAssignedTo4CSVExport.Add([PSCustomObject]@{
+                                    SPObjectId                              = $sp.SP.SPObjectId
+                                    SPAppId                                 = $sp.SP.SPAppId
+                                    SPDisplayName                           = $sp.SP.SPdisplayName
+                                    SPTags                                  = $spTags
+                                    AppTags                                 = $appTags
+                                    SPAppOwnerOrganizationId                = $sp.SP.SPappOwnerOrganizationId
+                                    AppRoleAssignedToPrincipalDisplayName   = $approleAssTo.principalDisplayName
+                                    AppRoleAssignedToPrincipalType          = $approleAssTo.principalType
+                                    AppRoleAssignedToPrincipalId            = $approleAssTo.principalId
+                                    AppRoleAssignedToRoleId                 = $approleAssTo.roleId
+                                })
+                        }
                     }
                     $SPAppRoleAssignedTo = "$(($sp.SPAppRoleAssignedTo).Count) ($($array -join "$CsvDelimiterOpposite "))"
                 }
@@ -2995,6 +3140,10 @@ extensions: [{ name: 'sort' }]
 </tr>
 "@)
         }
+        if(-not $NoCsvExport){
+            $servicePrincipalsAppRoleAssignedTo4CSVExport | Sort-Object -Property SPDisplayName, SPObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ServicePrincipalsAppRoleAssignedTo.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+        }
+        $servicePrincipalsAppRoleAssignedTo4CSVExport = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -3184,13 +3333,9 @@ extensions: [{ name: 'sort' }]
 "@)
         }
 
-        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
-            $fileName = "$($Product)_$($fileNameMGRef)_Oauth2PermissionGrants_"
+        if(-not $NoCsvExport){
+            $arrayServicePrincipalsOauth2PermissionGrants4CSV | Sort-Object -Property SPDisplayName, SPObjectId, Oauth2PermissionGrantResourceDisplayName, Oauth2PermissionGrantPermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_Oauth2PermissionGrants.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
-        else {
-            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_Oauth2PermissionGrants_"
-        }
-        $arrayServicePrincipalsOauth2PermissionGrants4CSV | Sort-Object -Property SPDisplayName, SPObjectId, Oauth2PermissionGrantResourceDisplayName, Oauth2PermissionGrantPermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayServicePrincipalsOauth2PermissionGrants4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -3300,6 +3445,7 @@ extensions: [{ name: 'sort' }]
 <tbody>
 "@)
 
+            $servicePrincipalsAzureRoleAssignments4CSVExport = [System.Collections.ArrayList]@()
             foreach ($sp in ($servicePrincipalsAzureRoleAssignments)) {
 
                 $spType = $sp.ObjectType
@@ -3351,6 +3497,24 @@ extensions: [{ name: 'sort' }]
                                 $array += "$($roleName) (<b>$($azureroleAss.roleAssignmentAssignmentResourceType)</b> $($azureroleAss.roleAssignmentAssignmentScopeName -replace '<', '&lt;' -replace '>', '&gt;'))$($pimRef)$($indirectRef)"
                             }
 
+                            if (-not $NoCsvExport) {
+                                $null = $servicePrincipalsAzureRoleAssignments4CSVExport.Add([PSCustomObject]@{
+                                    SPObjectId                              = $sp.SP.SPObjectId
+                                    SPAppId                                 = $sp.SP.SPAppId
+                                    SPDisplayName                           = $sp.SP.SPdisplayName
+                                    SPTags                                  = $spTags
+                                    AppTags                                 = $appTags
+                                    SPAppOwnerOrganizationId                = $sp.SP.SPappOwnerOrganizationId
+                                    RBACClassification                      = $RBACClassification
+                                    RoleName                                = $azureroleAss.roleName
+                                    RoleType                                = $azureroleAss.roleType
+                                    RoleAssignmentResourceType              = $azureroleAss.roleAssignmentAssignmentResourceType
+                                    RoleAssignmentScopeName                 = $azureroleAss.roleAssignmentAssignmentScopeName
+                                    PrivilegedIdentityManagementBased       = $azureroleAss.priviledgedIdentityManagementBased
+                                    RoleAssignmentApplicability             = $azureroleAss.roleAssignmentApplicability
+                                    RoleAssignmentAppliesThrough            = $azureroleAss.roleAssignmentAppliesThrough
+                                })
+                            }
                         }
                         $SPAzureRoleAssignments = "$($array -join '<br>')"
                     }
@@ -3374,6 +3538,10 @@ extensions: [{ name: 'sort' }]
 </tr>
 "@)
             }
+            if(-not $NoCsvExport){
+                $servicePrincipalsAzureRoleAssignments4CSVExport | Sort-Object -Property SPDisplayName, SPObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ServicePrincipalsAzureRoleAssignments.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+            }
+            $servicePrincipalsAzureRoleAssignments4CSVExport = $null
 
             [void]$htmlTenantSummary.AppendLine(@"
             </tbody>
@@ -3483,7 +3651,7 @@ extensions: [{ name: 'sort' }]
     </thead>
     <tbody>
 "@)
-
+        $servicePrincipalsGroupMemberships4CSVExport = [System.Collections.ArrayList]@()
         foreach ($sp in ($servicePrincipalsGroupMemberships)) {
 
             $spType = $sp.ObjectType
@@ -3494,6 +3662,20 @@ extensions: [{ name: 'sort' }]
                     $array = @()
                     foreach ($groupMembership in $sp.SPGroupMemberships) {
                         $array += "$($groupMembership.DisplayName) ($($groupMembership.ObjectId))"
+
+                        if (-not $NoCsvExport) {
+                            $null = $servicePrincipalsGroupMemberships4CSVExport.Add([PSCustomObject]@{
+                                SPObjectId                  = $sp.SP.SPObjectId
+                                SPAppId                     = $sp.SP.SPAppId
+                                SPDisplayName               = $sp.SP.SPdisplayName
+                                SPTags                      = $spTags
+                                AppTags                     = $appTags
+                                SPAppOwnerOrganizationId    = $sp.SP.SPappOwnerOrganizationId
+                                GroupMembershipDisplayName  = $groupMembership.DisplayName
+                                GroupmembershipObjectId     = $groupMembership.ObjectId
+
+                            })
+                        }
                     }
                     $SPGroupMemberships = "$(($sp.SPGroupMemberships).Count) ($($array -join "$CsvDelimiterOpposite "))"
                 }
@@ -3513,6 +3695,10 @@ extensions: [{ name: 'sort' }]
     </tr>
 "@)
         }
+        if(-not $NoCsvExport){
+            $servicePrincipalsGroupMemberships4CSVExport | Sort-Object -Property SPDisplayName, SPObjectId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_ServicePrincipalsGroupMemberships.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+        }
+        $servicePrincipalsGroupMemberships4CSVExport = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
                 </tbody>
@@ -3756,13 +3942,9 @@ var chartSecretExpiryNoteWorthy = new Chart(ctx, {
             }
         }
 
-        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
-            $fileName = "$($Product)_$($fileNameMGRef)_AppSecrets_"
+        if(-not $NoCsvExport){
+            $arrayApplicationSecrets4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPSecretDisplayName, APPSecretKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppSecrets.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
-        else {
-            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_AppSecrets_"
-        }
-        $arrayApplicationSecrets4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPSecretDisplayName, APPSecretKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayApplicationSecrets4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -4006,13 +4188,9 @@ type: 'pie',
             }
         }
 
-        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
-            $fileName = "$($Product)_$($fileNameMGRef)_AppCertificates_"
+        if(-not $NoCsvExport){
+            $arrayApplicationCertificates4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPCertificateDisplayName, APPCertificateKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppCertificates.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
-        else {
-            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_AppCertificates_"
-        }
-        $arrayApplicationCertificates4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPCertificateDisplayName, APPCertificateKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayApplicationCertificates4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -4177,13 +4355,9 @@ extensions: [{ name: 'sort' }]
             }
         }
 
-        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
-            $fileName = "$($Product)_$($fileNameMGRef)_FederatedIdentityCredentials_"
+        if(-not $NoCsvExport){
+            $arrayApplicationFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPFederatedIdentityCredentialName, APPFederatedIdentityCredentialId, APPFederatedIdentityCredentialIssuer, APPFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_FederatedIdentityCredentials.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
-        else {
-            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_FederatedIdentityCredentials_"
-        }
-        $arrayApplicationFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPFederatedIdentityCredentialName, APPFederatedIdentityCredentialId, APPFederatedIdentityCredentialIssuer, APPFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         $arrayApplicationFederatedIdentityCredentials4CSV = $null
 
         [void]$htmlTenantSummary.AppendLine(@"
@@ -4324,13 +4498,9 @@ extensions: [{ name: 'sort' }]
 
             }
 
-            if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
-                $fileName = "$($Product)_$($fileNameMGRef)_FederatedIdentityCredentialsManagedIdentity_"
+            if(-not $NoCsvExport){
+                $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, MIFederatedIdentityCredentialName, MIFederatedIdentityCredentialId, MIFederatedIdentityCredentialIssuer, MIFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_FederatedIdentityCredentialsManagedIdentity.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
             }
-            else {
-                $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_FederatedIdentityCredentialsManagedIdentity_"
-            }
-            $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, MIFederatedIdentityCredentialName, MIFederatedIdentityCredentialId, MIFederatedIdentityCredentialIssuer, MIFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
             $arrayManagedIdentityFederatedIdentityCredentials4CSV = $null
 
             [void]$htmlTenantSummary.AppendLine(@"
@@ -4574,14 +4744,10 @@ extensions: [{ name: 'sort' }]
 
         }
 
-        if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions -eq $true) {
-            $fileName = "$($Product)_$($fileNameMGRef)_HiPoUsers_"
+        if(-not $NoCsvExport){
+            $arrayHiposSorted | Select-Object -ExcludeProperty permission4HTML | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_HiPoUsers.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
-        else {
-            $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)_HiPoUsers_"
-        }
-        $arrayHiposSorted | Select-Object -ExcludeProperty permission4HTML | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
-
+        
         [void]$htmlTenantSummary.AppendLine(@"
         </tbody>
     </table>
@@ -7534,23 +7700,26 @@ $endEnrichmentSP = Get-Date
 $duration = New-TimeSpan -Start $startEnrichmentSP -End $endEnrichmentSP
 Write-Host "Service Principals enrichment duration: $($duration.TotalMinutes) minutes ($($duration.TotalSeconds) seconds)"
 
-if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions) {
-    $JSONPath = "JSON_SP_$($fileNameMGRef)"
-    if (Test-Path -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)") {
-        Write-Host ' Cleaning old state (Pipeline only)'
-        Remove-Item -Recurse -Force "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)"
+if(-not $NoJsonExport){
+    if ($azAPICallConf['htParameters'].onAzureDevOpsOrGitHubActions) {
+        $JSONPath = "JSON_SP_$($fileNameMGRef)"
+        if (Test-Path -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)") {
+            Write-Host ' Cleaning old state (Pipeline only)'
+            Remove-Item -Recurse -Force "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)"
+        }
+    }
+    else {
+        $fileTimestamp = (Get-Date -Format $FileTimeStampFormat)
+        $JSONPath = "JSON_SP_$($fileNameMGRef)_$($fileTimestamp)"
+        Write-Host " Creating new state ($($JSONPath)) (local only))"
+    }
+    
+    $null = New-Item -Name $JSONPath -ItemType directory -Path $outputPath
+    foreach ($entry in $cu) {
+        $entry | ConvertTo-Json -Depth 99 | Set-Content -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)$($DirectorySeparatorChar)$($entry.ObjectId)_$($entry.ObjectType -replace ' ', '-').json" -Encoding utf8 -Force
     }
 }
-else {
-    $fileTimestamp = (Get-Date -Format $FileTimeStampFormat)
-    $JSONPath = "JSON_SP_$($fileNameMGRef)_$($fileTimestamp)"
-    Write-Host " Creating new state ($($JSONPath)) (local only))"
-}
 
-$null = New-Item -Name $JSONPath -ItemType directory -Path $outputPath
-foreach ($entry in $cu) {
-    $entry | ConvertTo-Json -Depth 99 | Set-Content -LiteralPath "$($outputPath)$($DirectorySeparatorChar)$($JSONPath)$($DirectorySeparatorChar)$($entry.ObjectId)_$($entry.ObjectType -replace ' ', '-').json" -Encoding utf8 -Force
-}
 #endregion enrichedAADSPData
 
 Write-Host 'Processing totals per capability (in ms)'
@@ -7594,8 +7763,11 @@ else {
     $fileName = "$($Product)_$($ProductVersion)_$($fileTimestamp)_$($fileNameMGRef)"
 }
 
-#Export perf csv
-$arrayPerformanceTracking | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_perf.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+if(-not $NoCsvExport){
+    #Export perf csv
+    $arrayPerformanceTracking | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_perf.csv" -Delimiter "$csvDelimiter" -NoTypeInformation
+}
+
 
 
 Write-Host 'Building HTML'
