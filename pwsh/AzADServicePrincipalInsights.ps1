@@ -3,7 +3,7 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20231001_1',
+    [string]$ProductVersion = 'v1_20231115_1',
     [string]$azAPICallVersion = '1.1.84',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
@@ -2476,7 +2476,7 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
         }
 
         if(-not $NoCsvExport){
-            $arrayServicePrincipalsAADRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, RoleDefinitionName, ScopeDetail | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AADRoleAssignments.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayServicePrincipalsAADRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, RoleDefinitionName, ScopeDetail | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AADRoleAssignments_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
         $arrayServicePrincipalsAADRoleAssignments4CSV = $null
         [void]$htmlTenantSummary.AppendLine(@"
@@ -2978,7 +2978,7 @@ extensions: [{ name: 'sort' }]
         }
 
         if(-not $NoCsvExport){
-            $arrayServicePrincipalsAppRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, AppRoleAssignmentResourceDisplayName, AppRolePermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppRoleAssignments.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayServicePrincipalsAppRoleAssignments4CSV | Sort-Object -Property SPDisplayName, SPObjectId, AppRoleAssignmentResourceDisplayName, AppRolePermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppRoleAssignments_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
         $arrayServicePrincipalsAppRoleAssignments4CSV = $null
 
@@ -3334,7 +3334,7 @@ extensions: [{ name: 'sort' }]
         }
 
         if(-not $NoCsvExport){
-            $arrayServicePrincipalsOauth2PermissionGrants4CSV | Sort-Object -Property SPDisplayName, SPObjectId, Oauth2PermissionGrantResourceDisplayName, Oauth2PermissionGrantPermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_Oauth2PermissionGrants.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayServicePrincipalsOauth2PermissionGrants4CSV | Sort-Object -Property SPDisplayName, SPObjectId, Oauth2PermissionGrantResourceDisplayName, Oauth2PermissionGrantPermission | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_Oauth2PermissionGrants_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
         $arrayServicePrincipalsOauth2PermissionGrants4CSV = $null
 
@@ -3943,7 +3943,7 @@ var chartSecretExpiryNoteWorthy = new Chart(ctx, {
         }
 
         if(-not $NoCsvExport){
-            $arrayApplicationSecrets4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPSecretDisplayName, APPSecretKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppSecrets.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayApplicationSecrets4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPSecretDisplayName, APPSecretKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppSecrets_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
         $arrayApplicationSecrets4CSV = $null
 
@@ -4189,7 +4189,7 @@ type: 'pie',
         }
 
         if(-not $NoCsvExport){
-            $arrayApplicationCertificates4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPCertificateDisplayName, APPCertificateKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppCertificates.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayApplicationCertificates4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPCertificateDisplayName, APPCertificateKeyId | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_AppCertificates_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
         $arrayApplicationCertificates4CSV = $null
 
@@ -4356,7 +4356,7 @@ extensions: [{ name: 'sort' }]
         }
 
         if(-not $NoCsvExport){
-            $arrayApplicationFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPFederatedIdentityCredentialName, APPFederatedIdentityCredentialId, APPFederatedIdentityCredentialIssuer, APPFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_FederatedIdentityCredentials.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayApplicationFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, APPFederatedIdentityCredentialName, APPFederatedIdentityCredentialId, APPFederatedIdentityCredentialIssuer, APPFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_FederatedIdentityCredentials_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
         $arrayApplicationFederatedIdentityCredentials4CSV = $null
 
@@ -4499,7 +4499,7 @@ extensions: [{ name: 'sort' }]
             }
 
             if(-not $NoCsvExport){
-                $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, MIFederatedIdentityCredentialName, MIFederatedIdentityCredentialId, MIFederatedIdentityCredentialIssuer, MIFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_FederatedIdentityCredentialsManagedIdentity.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+                $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, MIFederatedIdentityCredentialName, MIFederatedIdentityCredentialId, MIFederatedIdentityCredentialIssuer, MIFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_FederatedIdentityCredentialsManagedIdentity_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
             }
             $arrayManagedIdentityFederatedIdentityCredentials4CSV = $null
 
@@ -4745,7 +4745,7 @@ extensions: [{ name: 'sort' }]
         }
 
         if(-not $NoCsvExport){
-            $arrayHiposSorted | Select-Object -ExcludeProperty permission4HTML | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_HiPoUsers.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+            $arrayHiposSorted | Select-Object -ExcludeProperty permission4HTML | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_HiPoUsers_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
         }
         
         [void]$htmlTenantSummary.AppendLine(@"
