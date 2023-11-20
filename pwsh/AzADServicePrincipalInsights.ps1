@@ -2601,7 +2601,7 @@ extensions: [{ name: 'sort' }]
 
                         $array += "$raRoleDefinitionName ($($rao.roleId)) on $($rao.principalDisplayName) - $($rao.principalType) ($($rao.principalId))"
                         if (-not $NoCsvExport) {
-                            $null = $SPAAADRoleAssignedOn4CSVExport4CSVExport.Add([PSCustomObject]@{
+                            $null = $SPAAADRoleAssignedOn4CSVExport.Add([PSCustomObject]@{
                                 SPObjectId                  = $sp.SP.SPObjectId
                                 SPAppId                     = $sp.SP.SPAppId
                                 SPDisplayName               = $sp.SP.SPdisplayName
