@@ -30,6 +30,30 @@ aka links:
 Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecycle Management and Operational Monitoring](https://www.cloud-architekt.net/entra-workload-id-lifecycle-management-monitoring/). In the article Thomas walks you through the different lifecycle phases and other aspects for workload identities in your Microsoft Entra environment. Also referencing AzADServicePrincipalInsights as part of the toolset for comprehensive reporting on application and service principal objects in your Entra ID environment.
 
 # Updates
+* 20231121
+    * HTML updates
+        * Added `SPTags` & `AppTags` to the following tables:
+            * Service Principals
+            * Service Principal AAD RoleAssignments
+            * Service Principal App RoleAssignments
+            * Service Principal App RoleAssignedTo
+            * Service Principal Oauth Permission grants
+            * Service Principal Azure RoleAssignments
+        * Added `AppNotes` to the Service Principals table
+    * Added the following CSV file exports
+        * Service Principals
+        * Service Principal Owners
+        * Application Owners
+        * Service Principal Owned Objects
+        * Service Principal AAD RoleAssignments
+        * Service Principal AAD RoleAssignedOn
+        * Service Principal App RoleAssignedTo
+        * Service Principal App RoleAssignments
+        * Service Principal Azure RoleAssignments
+        * Service Principal Group memberships
+    * Fix: `NoCsvExport` is now working and preventing CSV files from being generated if true.
+    * Fix: `NoJsonExport` is now working and preventing JSON files from being generated if true.
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.84
 * 20231001
     * fix hardcoded delimiter for export-csv - thanks @cjtous1
 * 20230316
