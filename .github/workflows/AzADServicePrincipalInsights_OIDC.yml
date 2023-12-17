@@ -9,6 +9,12 @@ env:
   ScriptDir: pwsh #example: 'my folder\pwsh' or 'my folder/pwsh'
   ScriptPrereqFile: prerequisites.ps1
   ScriptFile: AzADServicePrincipalInsights.ps1
+  #optional
+  WebAppPublish: false #set to true and define the Web App details in the next 4 lines
+  #WebAppSubscriptionId: ''
+  #WebAppResourceGroup: ''
+  #WebAppName: ''
+  #ManagementGroupId: '' #used for finding the correct name to publish to website
 
 on:
   #schedule:
@@ -61,3 +67,56 @@ jobs:
           git add --all
           git commit -m "$GITHUB_WORKFLOW $GITHUB_JOB"
           git push
+
+      #log again to avoid timeout before web publishing
+      - name: Connect Azure OIDC
+        if: env.WebAppPublish == 'true'
+        uses: azure/login@v1
+        with:
+          client-id: ${{secrets.CLIENT_ID}} #create this secret (GitHub/Setting/Secrets)
+          tenant-id: ${{secrets.TENANT_ID}} #create this secret
+          subscription-id: ${{secrets.SUBSCRIPTION_ID}} #create this secret
+          enable-AzPSSession: true
+
+      - name: Publish HTML to WebApp
+        if: env.WebAppPublish == 'true'
+        uses: azure/powershell@v1
+        with:
+          inlineScript: |
+            $azAPICallConf = initAzAPICall -DebugAzAPICall $true
+            $currentTask = "AzAPICall - Check if WebApp ($($env:WebAppName)) has Authentication enabled"
+            $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$($env:WebAppSubscriptionId)/resourceGroups/$($env:WebAppResourceGroup)/providers/Microsoft.Web/sites/$($env:WebAppName)/config/authsettings/list?api-version=2021-02-01"
+            $method = 'POST'
+            $request = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn 'Content'
+
+            $authStatus = $request.properties.enabled
+            Write-Host "WebApp ($($env:WebAppName)) has Authentication enabled: $authStatus"
+            if ($authStatus) {
+              try {
+                if (Test-Path -Path "$($env:OutputPath)/AzADServicePrincipalInsights_$($env:ManagementGroupId).html") {
+                  try {
+                    Compress-Archive -Path "$($env:OutputPath)/AzADServicePrincipalInsights_$($env:ManagementGroupId).html" -DestinationPath "$($env:OutputPath)/AzADServicePrincipalInsights_$($env:ManagementGroupId).zip" -Force -ErrorAction Stop
+                  }
+                  catch {
+                    throw 'Make sure that the ManagementGroupId variable in the AzADServicePrincipalInsights*.yml has correct casing (Linux!=linuX)'
+                  }
+                }
+
+                $null = Select-AzSubscription -SubscriptionId $($env:WebAppSubscriptionId)
+                if (Publish-AzWebApp -ResourceGroupName $($env:WebAppResourceGroup) -Name $($env:WebAppName) -ArchivePath "$($env:OutputPath)/AzADServicePrincipalInsights_$($env:ManagementGroupId).zip" -Force) {
+                  Write-Host 'HTML published'
+                }
+              }
+              catch {
+                $_
+                Write-Host 'HTML NOT published'
+                Write-Host "RBAC Role 'Website Contributor' is required"
+                exit 1
+              }
+            }
+            else {
+              Write-Host 'Assuming and insisting that you do not want to publish your tenant insights to the public'
+              Write-Host "HTML NOT published. Please configure authentication on the webApp ($($env:WebAppName))"
+              exit 1
+            }
+          azPSVersion: "latest"
