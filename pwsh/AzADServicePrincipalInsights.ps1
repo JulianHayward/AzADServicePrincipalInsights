@@ -5153,7 +5153,7 @@ if (-not $NoAzureResourceSideRelations) {
             }
         }
         else {
-            Write-Host "The subscription '$($childrenSubscription.name)' doesn't exists in the response of the subscriptions API call, but in the response of the entity API call. Skipping this subscription, because it doesn't exists!"
+            Write-Host "The subscription '$($childrenSubscription.name)' doesn't exists in the response of the subscriptions API call, but in the response of the entity API call. Skipping this subscription, because it doesn't exist in the tenant!"
         }
     }
     $subsToProcessInCustomDataCollectionCount = ($subsToProcessInCustomDataCollection | Measure-Object).Count
