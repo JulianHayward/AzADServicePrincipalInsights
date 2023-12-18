@@ -32,6 +32,7 @@ Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecyc
 # Updates
 * 20231218 - thanks @kaiaschulz
     * Fix scope of subscriptions to process. The ARM entities API may still return subscriptions that are meanwhile delted and therefore should not be processed in the data collection
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.86
 * 20231217
     * Fix for SP names that contain escapable characters
     * Update GitHub workflows to support webApp publishing thanks @RS-MPersson
