@@ -30,6 +30,8 @@ aka links:
 Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecycle Management and Operational Monitoring](https://www.cloud-architekt.net/entra-workload-id-lifecycle-management-monitoring/). In the article Thomas walks you through the different lifecycle phases and other aspects for workload identities in your Microsoft Entra environment. Also referencing AzADServicePrincipalInsights as part of the toolset for comprehensive reporting on application and service principal objects in your Entra ID environment.
 
 # Updates
+* 20231218 - thanks @kaiaschulz
+    * Fix scope of subscriptions to process. The ARM entities API may still return subscriptions that are meanwhile delted and therefore should not be processed in the data collection
 * 20231217
     * Fix for SP names that contain escapable characters
     * Update GitHub workflows to support webApp publishing thanks @RS-MPersson
