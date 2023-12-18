@@ -9,12 +9,18 @@ env:
   ScriptDir: pwsh #example: 'my folder\pwsh' or 'my folder/pwsh'
   ScriptPrereqFile: prerequisites.ps1
   ScriptFile: AzADServicePrincipalInsights.ps1
+  SkipAzADSPIUpdate: false
   #optional
   WebAppPublish: false #set to true and define the Web App details in the next 4 lines
   #WebAppSubscriptionId: ''
   #WebAppResourceGroup: ''
   #WebAppName: ''
   #ManagementGroupId: '' #used for finding the correct name to publish to website
+  IngestToLogAnalytics: false #set to true and define the Log Analytics Workspace details in the next 3 lines
+  #IngestScriptFile: AzADSPIDataCollectionIngest.ps1
+  #DataCollectionEndpointName: dataCollectionName #Resource Name of Data Collection Endpoint
+  #DataCollectionResourceGroup: resourceGroupName #Resource Group Name of Data Collection Endpoint and Rule
+  #DataCollectionSubscriptionId: subscriptionId #Subscription Id of Data Collection Endpoint and Rule
 
 on:
   #schedule:
@@ -77,6 +83,14 @@ jobs:
           tenant-id: ${{secrets.TENANT_ID}} #create this secret
           subscription-id: ${{secrets.SUBSCRIPTION_ID}} #create this secret
           enable-AzPSSession: true
+
+      - name: Upload Data to Log Analytics via Logs ingestion API
+        if: env.IngestToLogAnalytics == 'true'
+        uses: azure/powershell@v1
+        with:
+          inlineScript: |
+            . .\$($env:ScriptDir)\$($env:IngestScriptFile) -ImportPath ${env:OutputPath} -DataCollectionResourceGroup ${env:DataCollectionResourceGroup} -DataCollectionEndpointName ${env:DataCollectionEndpointName} -DataCollectionSubscriptionId ${env:DataCollectionSubscriptionId}
+          azPSVersion: "latest"
 
       - name: Publish HTML to WebApp
         if: env.WebAppPublish == 'true'
