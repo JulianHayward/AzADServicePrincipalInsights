@@ -1,6 +1,6 @@
-#change parameter managementGroupIds from line 9 accordingly / single or multiple managementGroupIds
+#change parameter managementGroupIds from line 13 accordingly / single or multiple managementGroupIds
 #check line 35 branch match master/main
-#if you want to leverage parameters, add them in line 58
+#if you want to leverage parameters, add them in line 68
 
 trigger: none
 
@@ -25,6 +25,13 @@ variables:
   CsvDelimiter: ;
   ScriptDir: pwsh #e.g. myFolder/pwsh
   Script: AzADServicePrincipalInsights.ps1
+  IngestToLogAnalytics: false #set to true and define the details in the next lines
+  # IngestScriptFile: AzADSPIDataCollectionIngest.ps1
+  # DataCollectionRuleSubscriptionId: ''
+  # DataCollectionRuleResourceGroup: ''
+  # DataCollectionRuleName: ''
+  # LogAnalyticsCustomLogTableName: ''
+  # ThrottleLimitMonitor: 10
 
 schedules:
 - cron: "0 6,16 * * *"
@@ -42,6 +49,8 @@ jobs:
     vmImage: 'ubuntu-22.04'
 
   steps:
+  - checkout: self
+    fetchDepth: 1
   - task: PowerShell@2
     inputs:
       targetType: 'filePath'
@@ -49,7 +58,8 @@ jobs:
     displayName: 'Prerequisites check'
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-  - task: AzurePowerShell@4
+
+  - task: AzurePowerShell@5
     inputs:
       azureSubscription: '$(ServiceConnection)'
       scriptType: filePath
@@ -58,6 +68,20 @@ jobs:
       scriptArguments: '-OutputPath $(WikiDir) -ScriptPath $(ScriptDir) -ManagementGroupId $(ManagementGroupId)'
       azurePowerShellVersion: latestVersion
     displayName: 'Run AzADServicePrincipalInsights v1'
+
+  - task: AzurePowerShell@5
+    condition: and(succeeded(), eq(variables['IngestToLogAnalytics'], 'true'))
+    inputs:
+      azureSubscription: '$(ServiceConnection)'
+      scriptType: filePath
+      pwsh: true
+      scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(IngestScriptFile)'
+      scriptArguments: '-ImportPath "$(WikiDir)/JSON_SP_$(ManagementGroupId)" -DataCollectionRuleSubscriptionId $(DataCollectionRuleSubscriptionId) -DataCollectionRuleResourceGroup $(DataCollectionRuleResourceGroup) -DataCollectionRuleName $(DataCollectionRuleName) -LogAnalyticsCustomLogTableName $(LogAnalyticsCustomLogTableName) -ThrottleLimitMonitor $(ThrottleLimitMonitor)'
+      azurePowerShellVersion: latestVersion
+    displayName: 'Upload Data to Log Analytics via Logs ingestion API'
+
+  #webAppPublish missing
+
   - powershell: |
       write-host "#################################"
       write-host "Push AzADServicePrincipalInsights output to repository"

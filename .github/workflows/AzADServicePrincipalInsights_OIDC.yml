@@ -1,5 +1,5 @@
 #change line 8 accordingly
-#if you want to leverage parameters, add them in line 53
+#if you want to leverage parameters, add them in line 66
 
 name: AzADServicePrincipalInsights_OIDC
 
@@ -9,18 +9,19 @@ env:
   ScriptDir: pwsh #example: 'my folder\pwsh' or 'my folder/pwsh'
   ScriptPrereqFile: prerequisites.ps1
   ScriptFile: AzADServicePrincipalInsights.ps1
-  SkipAzADSPIUpdate: false
   #optional
   WebAppPublish: false #set to true and define the Web App details in the next 4 lines
   #WebAppSubscriptionId: ''
   #WebAppResourceGroup: ''
   #WebAppName: ''
   #ManagementGroupId: '' #used for finding the correct name to publish to website
-  IngestToLogAnalytics: false #set to true and define the Log Analytics Workspace details in the next 3 lines
-  #IngestScriptFile: AzADSPIDataCollectionIngest.ps1
-  #DataCollectionEndpointName: dataCollectionName #Resource Name of Data Collection Endpoint
-  #DataCollectionResourceGroup: resourceGroupName #Resource Group Name of Data Collection Endpoint and Rule
-  #DataCollectionSubscriptionId: subscriptionId #Subscription Id of Data Collection Endpoint and Rule
+  IngestToLogAnalytics: false #set to true and define the details in the next lines
+  # IngestScriptFile: AzADSPIDataCollectionIngest.ps1
+  # DataCollectionRuleSubscriptionId: ''
+  # DataCollectionRuleResourceGroup: ''
+  # DataCollectionRuleName: ''
+  # LogAnalyticsCustomLogTableName: ''
+  # ThrottleLimitMonitor: 10
 
 on:
   #schedule:
@@ -74,22 +75,23 @@ jobs:
           git commit -m "$GITHUB_WORKFLOW $GITHUB_JOB"
           git push
 
-      #log again to avoid timeout before web publishing
-      - name: Connect Azure OIDC
-        if: env.WebAppPublish == 'true'
-        uses: azure/login@v1
-        with:
-          client-id: ${{secrets.CLIENT_ID}} #create this secret (GitHub/Setting/Secrets)
-          tenant-id: ${{secrets.TENANT_ID}} #create this secret
-          subscription-id: ${{secrets.SUBSCRIPTION_ID}} #create this secret
-          enable-AzPSSession: true
+      # #log again to avoid timeout before web publishing / AzAPICall should handle refereshing the OIDC token
+      # - name: Connect Azure OIDC
+      #   if: env.WebAppPublish == 'true'
+      #   uses: azure/login@v1
+      #   with:
+      #     client-id: ${{secrets.CLIENT_ID}} #create this secret (GitHub/Setting/Secrets)
+      #     tenant-id: ${{secrets.TENANT_ID}} #create this secret
+      #     subscription-id: ${{secrets.SUBSCRIPTION_ID}} #create this secret
+      #     enable-AzPSSession: true
 
       - name: Upload Data to Log Analytics via Logs ingestion API
         if: env.IngestToLogAnalytics == 'true'
         uses: azure/powershell@v1
         with:
           inlineScript: |
-            . .\$($env:ScriptDir)\$($env:IngestScriptFile) -ImportPath ${env:OutputPath} -DataCollectionResourceGroup ${env:DataCollectionResourceGroup} -DataCollectionEndpointName ${env:DataCollectionEndpointName} -DataCollectionSubscriptionId ${env:DataCollectionSubscriptionId}
+            $ManagementGroupId = (${env:ManagementGroups_s}).replace(',','_')
+            . .\$($env:ScriptDir)\$($env:IngestScriptFile) -ImportPath "${env:OutputPath}/JSON_SP_$ManagementGroupId" -DataCollectionRuleSubscriptionId ${env:DataCollectionRuleSubscriptionId} -DataCollectionRuleResourceGroup ${env:DataCollectionRuleResourceGroup} -DataCollectionRuleName ${env:DataCollectionRuleName} -LogAnalyticsCustomLogTableName ${env:LogAnalyticsCustomLogTableName} -ThrottleLimitMonitor ${env:ThrottleLimitMonitor}
           azPSVersion: "latest"
 
       - name: Publish HTML to WebApp

@@ -1,123 +1,106 @@
+#version 2.0.0
 [CmdletBinding()]
 param (
     [Parameter(Mandatory = $true)]
-    [string]$ImportPath
-    ,
+    [string]$ImportPath,
+
     [Parameter(Mandatory = $true)]
-    [System.String]$DataCollectionSubscriptionId
-    ,
+    [string]$DataCollectionRuleSubscriptionId,
+
     [Parameter(Mandatory = $true)]
-    [System.String]$DataCollectionResourceGroup
-    ,
+    [string]$DataCollectionRuleResourceGroup,
+
     [Parameter(Mandatory = $true)]
-    [System.String]$DataCollectionEndpointName
-    ,
+    [string]$DataCollectionRuleName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$LogAnalyticsCustomLogTableName,
+
     [Parameter(Mandatory = $false)]
-    [System.String]$TenantId = (Get-AzContext).Tenant.Id
-    ,
-    [Parameter(Mandatory = $False)]
-    [System.String]$TableName = 'AzADServicePrincipalInsights_CL'
-    ,
-    [Parameter(Mandatory = $false)]
-    [System.Boolean]$SampleDataOnly = $false
+    [int]$ThrottleLimitMonitor = 5
 )
 
-# Getting all content from AzADServicePrincipalInsights
-$AzADSPInsights = (Get-ChildItem -Path $ImportPath -Recurse -Filter '*.json').FullName
+Write-Host "Ingesting to Log Analytics Custom Log Table '$($LogAnalyticsCustomLogTableName)'"
+Write-Host " DataCollectionRuleSubscriptionId '$($DataCollectionRuleSubscriptionId)'"
+Write-Host " DataCollectionRuleResourceGroup '$($DataCollectionRuleResourceGroup)'"
+Write-Host " DataCollectionRuleName: '$($DataCollectionRuleName)'"
+Write-Host " LogAnalyticsCustomLogTableName: '$($LogAnalyticsCustomLogTableName)'"
+Write-Host " ThrottleLimitMonitor: '$($ThrottleLimitMonitor)'"
 
-Write-Output $($DataCollectionEndpointName)
-Write-Output $($DataCollectionResourceGroup)
+# Get AzADServicePrincipalInsights JSON files
+$AzADSPInsightsJsonFiles = (Get-ChildItem -Path $ImportPath -Recurse -Filter '*.json').FullName
+$AzADSPInsightsJsonFilesCount = $AzADSPInsightsJsonFiles.Count
+Write-Host "Found $($AzADSPInsightsJsonFilesCount) JSON files in directory '$($ImportPath)'"
 
-$AzADSPInsights | ForEach-Object -Parallel {
+if ($AzADSPInsightsJsonFilesCount -eq 0) {
+    #may also be handled as an error
+    Write-Host 'Nothing to do!?'
+}
+else {
+    $azAPICallConf = initAzAPICall
 
-    #region Define function to Call Ingestion API (outsourced from EntraOps PowerShell Module)
-    function Push-AzADSPILogsIngestionAPI {
+    $UTC = (Get-Date).ToUniversalTime()
+    $logTimeGenerated = $UTC.ToString('o')
+    $runId = $UTC.ToString('yyyyMMddHHmmss')
+    Write-Host "RunId: $($runId)"
 
-        [CmdletBinding()]
-        param (
-            [Parameter(Mandatory = $True)]
-            [object]$JsonContent
-            ,
-            [Parameter(Mandatory = $True)]
-            [System.String]$DataCollectionSubscriptionId
-            ,
-            [Parameter(Mandatory = $True)]
-            [System.String]$DataCollectionResourceGroup
-            ,
-            [Parameter(Mandatory = $True)]
-            [System.String]$DataCollectionEndpointName
-            ,
-            [Parameter(Mandatory = $true)]
-            [System.String]$TableName
-            ,
-            [Parameter(Mandatory = $false)]
-            [System.Boolean]$SampleDataOnly = $false
-        )
+    $currentTask = "Get Data Collection Rule $($DataCollectionRuleName)"
+    $uriDCR = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$($DataCollectionRuleSubscriptionId)/resourceGroups/$($DataCollectionRuleResourceGroup)/providers/Microsoft.Insights/dataCollectionRules/$($DataCollectionRuleName)?api-version=2022-06-01"
+    $DCR = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uriDCR -method 'Get' -listenOn Content -currentTask $currentTask
 
-        # Azure Connection
-        Set-AzContext -SubscriptionId $DataCollectionSubscriptionId | Out-Null
+    $dataCollectionEndpointId = $DCR.properties.dataCollectionEndpointId
+    $currentTask = "Get Data Collection Endpoint $($dataCollectionEndpointId)"
+    $uriDCE = "$($azAPICallConf['azAPIEndpointUrls'].ARMnortheurope)$($dataCollectionEndpointId)?api-version=2022-06-01"
+    $dceResourceJson = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uriDCE -method 'Get' -listenOn Content -currentTask $currentTask
+    $dceIngestEndpointUrl = $dceResourceJson.properties.logsIngestion.endpoint
 
-        # Authentication
-        $AccessToken = (Get-AzAccessToken -ResourceUrl 'https://monitor.azure.com/').Token
-        $headers = @{'Authorization' = "Bearer $AccessToken"; 'Content-Type' = 'application/json' }
+    $postUri = "$dceIngestEndpointUrl/dataCollectionRules/$($DCR.properties.immutableId)/streams/Custom-$($LogAnalyticsCustomLogTableName)?api-version=2023-01-01"
 
-        # Add Timestamp to JSON data
-        try {
-            $json = $JsonContent | ConvertFrom-Json -Depth 10
-            Write-Output "$($json.SP.SPDisplayName)"
-            $json | ForEach-Object {
-                $_ | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue (Get-Date).ToUniversalTime().ToString('o') -Force
+    createBearerToken -targetEndPoint 'MonitorIngest' -AzAPICallConfiguration $azAPICallConf
+
+    $batchSize = [math]::ceiling($AzADSPInsightsJsonFilesCount / $ThrottleLimitMonitor)
+    Write-Host "Optimal batch size: $($batchSize)"
+    $counterBatch = [PSCustomObject] @{ Value = 0 }
+    $filesBatch = ($AzADSPInsightsJsonFiles) | Group-Object -Property { [math]::Floor($counterBatch.Value++ / $batchSize) }
+    Write-Host "Ingesting data in $($filesBatch.Count) batches"
+
+    $filesBatch | ForEach-Object -Parallel {
+        $logTimeGenerated = $using:logTimeGenerated
+        $runId = $using:runId
+        $postUri = $using:postUri
+        $azAPICallConf = $using:azAPICallConf
+
+        $filesProcessCounter = 0
+        foreach ($jsonFilePath in $_.Group) {
+            $filesProcessCounter++
+            $jsonRaw = Get-Content -Path $jsonFilePath -Raw
+            try {
+                $jsonObject = $jsonRaw | ConvertFrom-Json
+                $spInfoObj = [ordered]@{
+                    ObjectType = $jsonObject.ObjectType
+                    SPDisplayName = $jsonObject.SP.SPDisplayName
+                    SPObjectId = $jsonObject.SP.SPObjectId
+                    SPAppId = $jsonObject.SP.SPAppId
+                }
+                if ($jsonObject.APP) {
+                    $spInfoObj.APPDisplayName = $jsonObject.APP.APPDisplayName
+                    $spInfoObj.APPObjectId = $jsonObject.APP.APPObjectId
+                    $spInfoObj.APPAppId = $jsonObject.APP.APPAppClientId
+                }
+                $spInfo = ($spInfoObj.Keys | ForEach-Object { "$($_)=$($spInfoObj.($_))" }) -join ', '
+                # Add TimeGenerated to JSON data
+                $jsonObject | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue $logTimeGenerated -Force
+                $jsonObject | Add-Member -NotePropertyName RunId -NotePropertyValue $runId -Force
+                $jsonRawAsArray = $jsonObject | ConvertTo-Json -AsArray -Depth 10
             }
-            $json = $json | ConvertTo-Json -AsArray -Depth 10
-        }
-        catch {
-            Write-Error 'Cannot convert JSON content to JSON object'
-            throw $_
-        }
-
-        if ($SampleDataOnly -eq $false) {
-            # Data Collection Endpoint
-            $DceArmEndpoint = 'https://management.azure.com' + '/subscriptions/' + $DataCollectionSubscriptionId + '/resourceGroups/' + $DataCollectionResourceGroup + '/providers/Microsoft.Insights/dataCollectionEndpoints/' + $DataCollectionEndpointName + '?api-version=2022-06-01'
-            $DceResourceJson = ((Invoke-AzRestMethod -Method 'Get' -Uri $DceArmEndpoint).Content | ConvertFrom-Json).properties
-            $DceIngestEndpointUrl = $DceResourceJson.logsIngestion.endpoint
-
-            if ($DceIngestEndpointUrl -eq $null) {
-                Write-Error 'No DCE endpoint found!'
+            catch {
+                Write-Error 'Cannot convert jsonRaw content to jsonObject'
+                throw $_
             }
 
-            # Table information
-            $DataFlows = 'Custom-' + $TableName
-
-            # Data Collection Rule
-            $Dcr = Get-AzDataCollectionRule | Where-Object { $_.DataFlows.Streams -eq $DataFlows }
-
-            if ($Dcr -eq $Null) {
-                Write-Error 'No data collection rule found!'
-            }
-            $DcrArmEndpoint = 'https://management.azure.com' + $Dcr.Id + '?api-version=2022-06-01'
-            $DcrResourceJson = ((Invoke-AzRestMethod -Method Get -Uri $($DcrArmEndpoint)).Content | ConvertFrom-Json).properties
-
-            # Post Information
-            $PostUri = "$DceIngestEndpointUrl/dataCollectionRules/$($DcrResourceJson.immutableId)/streams/$($DataFlows)?api-version=2021-11-01-preview"
-
-            $uploadResponse = Invoke-RestMethod -Uri $PostUri -Method 'Post' -Body $json -Headers $headers -Verbose
-
-            # Let's see how the response looks
-            Write-Output $uploadResponse
-            Write-Output '---------------------'
+            $currentTask = "Batch#$($_.Name); Process file $($filesProcessCounter)/$($_.Count); Ingesting data for $($spInfo)"
+            Write-Host $currentTask
+            AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $postUri -method 'Post' -body $jsonRawAsArray -currentTask $currentTask
         }
-        else {
-            return $json
-        }
-    }
-    #endregion
-
-    $Json = Get-Content -Path $_
-    Push-AzADSPILogsIngestionAPI `
-        -TableName $using:TableName `
-        -JsonContent $json `
-        -DataCollectionSubscriptionId $using:DataCollectionSubscriptionId `
-        -DataCollectionResourceGroup $using:DataCollectionResourceGroup `
-        -DataCollectionEndpointName $using:DataCollectionEndpointName `
-        -SampleDataOnly $using:SampleDataOnly
+    } -ThrottleLimit $ThrottleLimitMonitor
 }

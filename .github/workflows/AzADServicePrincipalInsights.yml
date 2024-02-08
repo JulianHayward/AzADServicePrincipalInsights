@@ -1,5 +1,5 @@
 #change line 8 accordingly
-#if you want to leverage parameters, add them in line 53
+#if you want to leverage parameters, add them in line 66
 
 name: AzADServicePrincipalInsights
 
@@ -15,6 +15,13 @@ env:
   #WebAppResourceGroup: ''
   #WebAppName: ''
   #ManagementGroupId: '' #used for finding the correct name to publish to website
+  IngestToLogAnalytics: false #set to true and define the details in the next lines
+  # IngestScriptFile: AzADSPIDataCollectionIngest.ps1
+  # DataCollectionRuleSubscriptionId: ''
+  # DataCollectionRuleResourceGroup: ''
+  # DataCollectionRuleName: ''
+  # LogAnalyticsCustomLogTableName: ''
+  # ThrottleLimitMonitor: 10
 
 on:
   #schedule:
@@ -67,6 +74,15 @@ jobs:
           git add --all
           git commit -m "$GITHUB_WORKFLOW $GITHUB_JOB"
           git push
+
+      - name: Upload Data to Log Analytics via Logs ingestion API
+        if: env.IngestToLogAnalytics == 'true'
+        uses: azure/powershell@v1
+        with:
+          inlineScript: |
+            $ManagementGroupId = (${env:ManagementGroups_s}).replace(',','_')
+            . .\$($env:ScriptDir)\$($env:IngestScriptFile) -ImportPath "${env:OutputPath}/JSON_SP_$ManagementGroupId" -DataCollectionRuleSubscriptionId ${env:DataCollectionRuleSubscriptionId} -DataCollectionRuleResourceGroup ${env:DataCollectionRuleResourceGroup} -DataCollectionRuleName ${env:DataCollectionRuleName} -LogAnalyticsCustomLogTableName ${env:LogAnalyticsCustomLogTableName} -ThrottleLimitMonitor ${env:ThrottleLimitMonitor}
+          azPSVersion: "latest"
 
       - name: Publish HTML to WebApp
         if: env.WebAppPublish == 'true'

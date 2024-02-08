@@ -30,6 +30,13 @@ aka links:
 Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecycle Management and Operational Monitoring](https://www.cloud-architekt.net/entra-workload-id-lifecycle-management-monitoring/). In the article Thomas walks you through the different lifecycle phases and other aspects for workload identities in your Microsoft Entra environment. Also referencing AzADServicePrincipalInsights as part of the toolset for comprehensive reporting on application and service principal objects in your Entra ID environment.
 
 # Updates
+
+* 20240208
+    * Contribution from @Cloud-Architekt to ingest data from the JSON files to an Azure Log Analytics workspace custom table using data collection rule / data collection endpoint. [Microsoft Entra Workload ID - Advanced Detections and Enrichment in Microsoft Sentinel](https://www.cloud-architekt.net/entra-workload-id-advanced-detection-enrichment/)
+      * Ready for Azure DevOps and GitHub; configure in the pipeline/workflow YAML files
+    * Change PowerShell parallel handling / batches
+    * Optimize array handling / best practices
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.2.0 (support endpoint *.ingest.monitor.azure.com)
 * 20231218 - thanks @kaiaschulz
     * Fix scope of subscriptions to process. The ARM entities API may still return subscriptions that are meanwhile delted and therefore should not be processed in the data collection
     * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.86
@@ -121,6 +128,7 @@ Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecyc
 
 * HTML export
 * JSON export
+  * Ingest data from the JSON files to an Azure Log Analytics workspace custom table using data collection rule / data collection endpoint. [Microsoft Entra Workload ID - Advanced Detections and Enrichment in Microsoft Sentinel](https://www.cloud-architekt.net/entra-workload-id-advanced-detection-enrichment/)
 * CSV export (wip)
   * AADRoleAssignments
   * AppRoleAssignments
