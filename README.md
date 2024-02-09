@@ -8,7 +8,6 @@ aka links:
 
 # Content
 - [Content](#content)
-- [References](#references)
 - [Updates](#updates)
 - [Features](#features)
 - [Parameters](#parameters)
@@ -24,10 +23,6 @@ aka links:
 - [AzAdvertizer](#azadvertizer)
 - [Azure Governance Visualizer aka AzGovViz](#azure-governance-visualizer-aka-azgovviz)
 - [Closing Note](#closing-note)
-
-# References
-
-Checkout the Blog post by Thomas Naunheim [Microsoft Entra Workload ID - Lifecycle Management and Operational Monitoring](https://www.cloud-architekt.net/entra-workload-id-lifecycle-management-monitoring/). In the article Thomas walks you through the different lifecycle phases and other aspects for workload identities in your Microsoft Entra environment. Also referencing AzADServicePrincipalInsights as part of the toolset for comprehensive reporting on application and service principal objects in your Entra ID environment.
 
 # Updates
 
