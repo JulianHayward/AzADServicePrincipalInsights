@@ -3,7 +3,7 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20240208_1',
+    [string]$ProductVersion = 'v1_20240209_1',
     [string]$azAPICallVersion = '1.2.0',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
@@ -2417,7 +2417,8 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
                         $raRoleDefinitionName = $ra.roleDefinitionName
 
                         if ($ra.roleType -eq 'BuiltIn') {
-                            $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($ra.roleDefinitionName -replace ' ', '-')`" target=`"_blank`">$($ra.roleDefinitionName)</a>"
+                            #$raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($ra.roleDefinitionName -replace ' ', '-')`" target=`"_blank`">$($ra.roleDefinitionName)</a>"
+                            $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azentraidroles/$($ra.roleDefinitionId)`" target=`"_blank`">$($ra.roleDefinitionName)</a>"
                         }
 
                         $faIcon = ''
@@ -2599,7 +2600,8 @@ extensions: [{ name: 'sort' }]
                         $raRoleDefinitionName = $rao.roleName
                         if ($htAadRoleDefinitions.($rao.roleId)) {
                             if ($htAadRoleDefinitions.($rao.roleId).isBuiltIn -eq $true) {
-                                $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($rao.roleName -replace ' ', '-')`" target=`"_blank`">$($rao.roleName)</a>"
+                                #$raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($rao.roleName -replace ' ', '-')`" target=`"_blank`">$($rao.roleName)</a>"
+                                $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azentraidroles/$($rao.roleId)`" target=`"_blank`">$($rao.roleName)</a>"
                             }
                         }
 
@@ -2753,7 +2755,8 @@ extensions: [{ name: 'sort' }]
                         $raRoleDefinitionName = $rao.roleName
                         if ($htAadRoleDefinitions.($rao.roleId)) {
                             if ($htAadRoleDefinitions.($rao.roleId).isBuiltIn -eq $true) {
-                                $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($rao.roleName -replace ' ', '-')`" target=`"_blank`">$($rao.roleName)</a>"
+                                #$raRoleDefinitionName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($rao.roleName -replace ' ', '-')`" target=`"_blank`">$($rao.roleName)</a>"
+                                $raRoleDefinitionName = "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azentraidroles/$($rao.roleId)`" target=`"_blank`">$($rao.roleName)</a>"
                             }
                         }
 
@@ -2934,10 +2937,10 @@ extensions: [{ name: 'sort' }]
                             $null = $classificationCollection.Add($approleAss.AppRolePermissionSensitivity)
                             $classification = $approleAss.AppRolePermissionSensitivity
                             $classification4CSV = $approleAss.AppRolePermissionSensitivity
-                            $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($approleAss.AppRolePermissionSensitivity))`">$($approleAss.AppRolePermission)</span>)")
+                            $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($approleAss.AppRolePermissionSensitivity))`">!</span><a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($htServicePrincipalsAppRoleIdsToAppId.($approleAss.AppRoleId))&targetPermissionId=$($approleAss.AppRoleId)`" target=`"_blank`">$($approleAss.AppRolePermission)</a>)")
                         }
                         else {
-                            $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) ($($approleAss.AppRolePermission))")
+                            $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) (<a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($htServicePrincipalsAppRoleIdsToAppId.($approleAss.AppRoleId))&targetPermissionId=$($approleAss.AppRoleId)`" target=`"_blank`">$($approleAss.AppRolePermission)</a>)")
 
                         }
 
@@ -3290,10 +3293,10 @@ extensions: [{ name: 'sort' }]
                             $null = $classificationCollection.Add($oauthGrant.permissionSensitivity)
                             $classification = $oauthGrant.permissionSensitivity
                             $classification4CSV = $oauthGrant.permissionSensitivity
-                            $null = $array.Add("$($oauthGrant.SPDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($oauthGrant.permissionSensitivity))`">$($oauthGrant.permission)</span> - $($oauthGrant.type))")
+                            $null = $array.Add("$($oauthGrant.SPDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($oauthGrant.permissionSensitivity))`">!</span> <a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($htServicePrincipalsPublishedPermissionScopesIdsToAppId.($oauthGrant.id))&targetPermissionId=$($oauthGrant.id)`" target=`"_blank`">$($($oauthGrant.permission))</a> - $($oauthGrant.type))")
                         }
                         else {
-                            $null = $array.Add("$($oauthGrant.SPDisplayName) ($($oauthGrant.permission) - $($oauthGrant.type))")
+                            $null = $array.Add("$($oauthGrant.SPDisplayName) (<a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($htServicePrincipalsPublishedPermissionScopesIdsToAppId.($oauthGrant.id))&targetPermissionId=$($oauthGrant.id)`" target=`"_blank`">$($($oauthGrant.permission))</a> - $($oauthGrant.type))")
                         }
 
                         $null = $arrayServicePrincipalsOauth2PermissionGrants4CSV.Add([PSCustomObject]@{
@@ -3648,6 +3651,8 @@ extensions: [{ name: 'sort' }]
     <th>SP application Id</th>
     <th>SP displayName</th>
     <th>SP type</th>
+    <th>SP Tags</th>
+    <th>App Tags</th>
     <th>SP App Owner Organization Id</th>
     <th>SP Group memberships</th>
     </tr>
@@ -3658,7 +3663,15 @@ extensions: [{ name: 'sort' }]
         foreach ($sp in ($servicePrincipalsGroupMemberships)) {
 
             $spType = $sp.ObjectType
-
+            $appTags = ''
+            $spTags = $sp.SP.SPTags -join "$CsvDelimiterOpposite "
+            if ($sp.APP) {
+                $appTags = $sp.APP.APPTags -join "$CsvDelimiterOpposite "
+                if ($sp.SP.SPTags -and $sp.APP.APPTags) {
+                    #App tags are automatically propagated to the service principal, removing redundant information.
+                    $spTags = (Compare-Object -ReferenceObject $sp.SP.SPTags -DifferenceObject $sp.APP.APPTags -PassThru) -join "$CsvDelimiterOpposite "
+                }
+            }
             $SPGroupMemberships = $null
             if (($sp.SPGroupMemberships)) {
                 if (($sp.SPGroupMemberships.count -gt 0)) {
@@ -3693,6 +3706,8 @@ extensions: [{ name: 'sort' }]
     <td>$($sp.SP.SPappId)</td>
     <td class="breakwordall">$($sp.SP.SPdisplayName)</td>
     <td>$($spType)</td>
+    <td>$($spTags)</td>
+    <td>$($appTags)</td>
     <td>$($sp.SP.SPappOwnerOrganizationId)</td>
     <td class="breakwordall">$($SPGroupMemberships)</td>
     </tr>
@@ -3740,8 +3755,10 @@ extensions: [{ name: 'sort' }]
     col_widths: ['10%', '10%', '10%', '10%', '10%', '50%'],
                 locale: 'en-US',
                 col_3: 'multiple',
-                col_4: 'select',
+                col_6: 'select',
                 col_types: [
+                    'caseinsensitivestring',
+                    'caseinsensitivestring',
                     'caseinsensitivestring',
                     'caseinsensitivestring',
                     'caseinsensitivestring',
@@ -4664,7 +4681,8 @@ extensions: [{ name: 'sort' }]
                     foreach ($SPAADRoleAssignment in $object.SPAADRoleAssignments) {
                         if ($SPAADRoleAssignment.roleIsCritical -eq $true) {
                             if ($SPAADRoleAssignment.roleType -eq 'BuiltIn') {
-                                $roleName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($SPAADRoleAssignment.roleDefinitionName -replace ' ', '-')`" target=`"_blank`">$($SPAADRoleAssignment.roleDefinitionName)</a>"
+                                #$roleName = "<a class=`"externallink`" href=`"https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/active-directory/roles/permissions-reference.md#$($SPAADRoleAssignment.roleDefinitionName -replace ' ', '-')`" target=`"_blank`">$($SPAADRoleAssignment.roleDefinitionName)</a>"
+                                $roleName = "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azentraidroles/$($SPAADRoleAssignment.roleDefinitionId)`" target=`"_blank`">$($SPAADRoleAssignment.roleDefinitionName)</a>"
                             }
                             else {
                                 $roleName = $SPAADRoleAssignment.roleDefinitionName
@@ -5300,6 +5318,8 @@ else {
     $htServicePrincipalsPublishedPermissionScopes = @{}
     $htAppRoles = @{}
     $htPublishedPermissionScopes = @{}
+    $htServicePrincipalsAppRoleIdsToAppId = @{}
+    $htServicePrincipalsPublishedPermissionScopesIdsToAppId = @{}
     $htAadGroupsToResolve = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htAppRoleAssignments = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
     $htSPOauth2PermissionGrantedTo = [System.Collections.Hashtable]::Synchronized((New-Object System.Collections.Hashtable)) #@{}
@@ -5326,6 +5346,7 @@ else {
                 if (-not $htAppRoles.($spAppRole.id)) {
                     $htAppRoles.($spAppRole.id) = $spAppRole
                 }
+                $htServicePrincipalsAppRoleIdsToAppId.($spAppRole.id) = $sp.appId
             }
         }
         #publishedPermissionScopes
@@ -5341,6 +5362,7 @@ else {
                 if (-not $htPublishedPermissionScopes.($sp.id).($spPublishedPermissionScope.value)) {
                     $htPublishedPermissionScopes.($sp.id).($spPublishedPermissionScope.value) = $spPublishedPermissionScope
                 }
+                $htServicePrincipalsPublishedPermissionScopesIdsToAppId.($spPublishedPermissionScope.id) = $sp.appId
             }
         }
     }
