@@ -3,7 +3,7 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20240209_1',
+    [string]$ProductVersion = 'v1_20240212_1',
     [string]$azAPICallVersion = '1.2.0',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
@@ -2933,15 +2933,32 @@ extensions: [{ name: 'sort' }]
 
                         $classification4CSV = 'unclassified'
 
+                        if ($htServicePrincipalsAppRoleIdsToAppId.("$($approleAss.AppRoleAssignmentResourceId)_$($approleAss.AppRoleId)")) {
+                            $appIdRefAppRoleAssignment = $htServicePrincipalsAppRoleIdsToAppId.("$($approleAss.AppRoleAssignmentResourceId)_$($approleAss.AppRoleId)")
+                        }
+                        else {
+                            $appIdRefAppRoleAssignment = $null
+                        }
+
                         if ($approleAss.AppRolePermissionSensitivity -ne 'unclassified') {
                             $null = $classificationCollection.Add($approleAss.AppRolePermissionSensitivity)
                             $classification = $approleAss.AppRolePermissionSensitivity
                             $classification4CSV = $approleAss.AppRolePermissionSensitivity
-                            $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($approleAss.AppRolePermissionSensitivity))`">!</span><a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($htServicePrincipalsAppRoleIdsToAppId.($approleAss.AppRoleId))&targetPermissionId=$($approleAss.AppRoleId)`" target=`"_blank`">$($approleAss.AppRolePermission)</a>)")
+                            if ($appIdRefAppRoleAssignment) {
+                                $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($approleAss.AppRolePermissionSensitivity))`">!</span><a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($appIdRefAppRoleAssignment)&targetPermissionId=$($approleAss.AppRoleId)`" target=`"_blank`">$($approleAss.AppRolePermission)</a>)")
+                            }
+                            else {
+                                $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($approleAss.AppRolePermissionSensitivity))`">!</span>$($approleAss.AppRolePermission))")
+                            }
+
                         }
                         else {
-                            $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) (<a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($htServicePrincipalsAppRoleIdsToAppId.($approleAss.AppRoleId))&targetPermissionId=$($approleAss.AppRoleId)`" target=`"_blank`">$($approleAss.AppRolePermission)</a>)")
-
+                            if ($appIdRefAppRoleAssignment) {
+                                $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) (<a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($appIdRefAppRoleAssignment)&targetPermissionId=$($approleAss.AppRoleId)`" target=`"_blank`">$($approleAss.AppRolePermission)</a>)")
+                            }
+                            else {
+                                $null = $array.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) ($($approleAss.AppRolePermission))")
+                            }
                         }
 
                         $null = $arrayServicePrincipalsAppRoleAssignments4CSV.Add([PSCustomObject]@{
@@ -3289,14 +3306,33 @@ extensions: [{ name: 'sort' }]
 
                         $classification4CSV = 'unclassified'
 
+                        if ($htServicePrincipalsPublishedPermissionScopesIdsToAppId.("$($oauthGrant.SPId)_$($oauthGrant.id)")) {
+                            $appIdRefOauth2PermissionGrant = $htServicePrincipalsPublishedPermissionScopesIdsToAppId.("$($oauthGrant.SPId)_$($oauthGrant.id)")
+                        }
+                        else {
+                            $appIdRefOauth2PermissionGrant = $null
+                        }
+
                         if ($oauthGrant.permissionSensitivity -ne 'unclassified') {
                             $null = $classificationCollection.Add($oauthGrant.permissionSensitivity)
                             $classification = $oauthGrant.permissionSensitivity
                             $classification4CSV = $oauthGrant.permissionSensitivity
-                            $null = $array.Add("$($oauthGrant.SPDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($oauthGrant.permissionSensitivity))`">!</span> <a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($htServicePrincipalsPublishedPermissionScopesIdsToAppId.($oauthGrant.id))&targetPermissionId=$($oauthGrant.id)`" target=`"_blank`">$($($oauthGrant.permission))</a> - $($oauthGrant.type))")
+                            if ($appIdRefOauth2PermissionGrant) {
+                                $null = $array.Add("$($oauthGrant.SPDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($oauthGrant.permissionSensitivity))`">!</span><a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($appIdRefOauth2PermissionGrant)&targetPermissionId=$($oauthGrant.id)`" target=`"_blank`">$($($oauthGrant.permission))</a> - $($oauthGrant.type))")
+                            }
+                            else {
+                                $null = $array.Add("$($oauthGrant.SPDisplayName) (<span style=`"color: $($getClassifications.permissionColors.($oauthGrant.permissionSensitivity))`">!</span>$($($oauthGrant.permission)) - $($oauthGrant.type))")
+                            }
+
                         }
                         else {
-                            $null = $array.Add("$($oauthGrant.SPDisplayName) (<a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($htServicePrincipalsPublishedPermissionScopesIdsToAppId.($oauthGrant.id))&targetPermissionId=$($oauthGrant.id)`" target=`"_blank`">$($($oauthGrant.permission))</a> - $($oauthGrant.type))")
+                            if ($appIdRefOauth2PermissionGrant) {
+                                $null = $array.Add("$($oauthGrant.SPDisplayName) (<a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$($appIdRefOauth2PermissionGrant)&targetPermissionId=$($oauthGrant.id)`" target=`"_blank`">$($($oauthGrant.permission))</a> - $($oauthGrant.type))")
+                            }
+                            else {
+                                $null = $array.Add("$($oauthGrant.SPDisplayName) ($($($oauthGrant.permission)) - $($oauthGrant.type))")
+                            }
+
                         }
 
                         $null = $arrayServicePrincipalsOauth2PermissionGrants4CSV.Add([PSCustomObject]@{
@@ -4519,7 +4555,7 @@ extensions: [{ name: 'sort' }]
             }
 
             if (-not $NoCsvExport) {
-                $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property SPDisplayName, SPObjectId, MIFederatedIdentityCredentialName, MIFederatedIdentityCredentialId, MIFederatedIdentityCredentialIssuer, MIFederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_FederatedIdentityCredentialsManagedIdentity_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
+                $arrayManagedIdentityFederatedIdentityCredentials4CSV | Sort-Object -Property DisplayName, ObjectId, FederatedIdentityCredentialName, FederatedIdentityCredentialId, FederatedIdentityCredentialIssuer, FederatedIdentityCredentialSubject | Export-Csv -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName)_FederatedIdentityCredentialsManagedIdentity_.csv" -Delimiter "$csvDelimiter" -Encoding utf8 -NoTypeInformation -UseQuotes AsNeeded
             }
             $arrayManagedIdentityFederatedIdentityCredentials4CSV = $null
 
@@ -5346,7 +5382,7 @@ else {
                 if (-not $htAppRoles.($spAppRole.id)) {
                     $htAppRoles.($spAppRole.id) = $spAppRole
                 }
-                $htServicePrincipalsAppRoleIdsToAppId.($spAppRole.id) = $sp.appId
+                $htServicePrincipalsAppRoleIdsToAppId.("$($sp.id)_$($spAppRole.id)") = $sp.appId
             }
         }
         #publishedPermissionScopes
@@ -5362,7 +5398,7 @@ else {
                 if (-not $htPublishedPermissionScopes.($sp.id).($spPublishedPermissionScope.value)) {
                     $htPublishedPermissionScopes.($sp.id).($spPublishedPermissionScope.value) = $spPublishedPermissionScope
                 }
-                $htServicePrincipalsPublishedPermissionScopesIdsToAppId.($spPublishedPermissionScope.id) = $sp.appId
+                $htServicePrincipalsPublishedPermissionScopesIdsToAppId.("$($sp.id)_$($spPublishedPermissionScope.id)") = $sp.appId
             }
         }
     }

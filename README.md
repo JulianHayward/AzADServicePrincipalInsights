@@ -25,7 +25,8 @@ aka links:
 - [Closing Note](#closing-note)
 
 # Updates
-
+* 20240212
+    * fix issue 27
 * 20240208
     * Contribution from @Cloud-Architekt to ingest data from the JSON files to an Azure Log Analytics workspace custom table using data collection rule / data collection endpoint. [Microsoft Entra Workload ID - Advanced Detections and Enrichment in Microsoft Sentinel](https://www.cloud-architekt.net/entra-workload-id-advanced-detection-enrichment/)
       * Ready for Azure DevOps and GitHub; configure in the pipeline/workflow YAML files
