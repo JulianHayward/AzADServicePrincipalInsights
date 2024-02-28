@@ -50,7 +50,7 @@ else {
 
     $dataCollectionEndpointId = $DCR.properties.dataCollectionEndpointId
     $currentTask = "Get Data Collection Endpoint $($dataCollectionEndpointId)"
-    $uriDCE = "$($azAPICallConf['azAPIEndpointUrls'].ARMnortheurope)$($dataCollectionEndpointId)?api-version=2022-06-01"
+    $uriDCE = "$($azAPICallConf['azAPIEndpointUrls'].ARM)$($dataCollectionEndpointId)?api-version=2022-06-01"
     $dceResourceJson = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uriDCE -method 'Get' -listenOn Content -currentTask $currentTask
     $dceIngestEndpointUrl = $dceResourceJson.properties.logsIngestion.endpoint
 
