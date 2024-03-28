@@ -91,7 +91,7 @@ else {
                 # Add TimeGenerated to JSON data
                 $jsonObject | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue $logTimeGenerated -Force
                 $jsonObject | Add-Member -NotePropertyName RunId -NotePropertyValue $runId -Force
-                $jsonRawAsArray = $jsonObject | ConvertTo-Json -AsArray -Depth 10
+                $jsonRawAsArray = $jsonObject | ConvertTo-Json -AsArray -Compress -Depth 10
             }
             catch {
                 Write-Error 'Cannot convert jsonRaw content to jsonObject'
