@@ -5832,26 +5832,28 @@ else {
                         if ($getSPOauth2PermissionGrants.Count -gt 0) {
                             $script:htServicePrincipalsAndAppsOnlyEnriched.($object.id).ServicePrincipalOauth2PermissionGrants = $getSPOauth2PermissionGrants
                             foreach ($permissionGrant in $getSPOauth2PermissionGrants) {
-                                $splitPermissionGrant = ($permissionGrant.scope).split(' ')
-                                foreach ($permissionscope in $splitPermissionGrant) {
-                                    if (-not [string]::IsNullOrEmpty($permissionscope) -and -not [string]::IsNullOrWhiteSpace($permissionscope)) {
-                                        $permissionGrantArray = [System.Collections.ArrayList]@()
-                                        $null = $permissionGrantArray.Add([PSCustomObject]@{
-                                                '@odata.id' = $permissionGrant
-                                                clientId = $permissionGrant.clientId
-                                                consentType = $permissionGrant.consentType
-                                                expiryTime = $permissionGrant.expiryTime
-                                                id = $permissionGrant.id
-                                                principalId = $permissionGrant.principalId
-                                                resourceId = $permissionGrant.resourceId
-                                                scope = $permissionscope
-                                                startTime = $permissionGrant.startTime
-                                            })
+                                if($permissionGrant.scope) {
+                                    $splitPermissionGrant = ($permissionGrant.scope).split(' ')
+                                    foreach ($permissionscope in $splitPermissionGrant) {
+                                        if (-not [string]::IsNullOrEmpty($permissionscope) -and -not [string]::IsNullOrWhiteSpace($permissionscope)) {
+                                            $permissionGrantArray = [System.Collections.ArrayList]@()
+                                            $null = $permissionGrantArray.Add([PSCustomObject]@{
+                                                    '@odata.id' = $permissionGrant
+                                                    clientId = $permissionGrant.clientId
+                                                    consentType = $permissionGrant.consentType
+                                                    expiryTime = $permissionGrant.expiryTime
+                                                    id = $permissionGrant.id
+                                                    principalId = $permissionGrant.principalId
+                                                    resourceId = $permissionGrant.resourceId
+                                                    scope = $permissionscope
+                                                    startTime = $permissionGrant.startTime
+                                                })
 
-                                        if (-not $htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId)) {
-                                            $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId) = [System.Collections.ArrayList]@()
+                                            if (-not $htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId)) {
+                                                $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId) = [System.Collections.ArrayList]@()
+                                            }
+                                            $null = $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId).Add($permissionGrantArray)
                                         }
-                                        $null = $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId).Add($permissionGrantArray)
                                     }
                                 }
                             }
