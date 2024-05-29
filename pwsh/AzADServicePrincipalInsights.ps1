@@ -5832,7 +5832,7 @@ else {
                         if ($getSPOauth2PermissionGrants.Count -gt 0) {
                             $script:htServicePrincipalsAndAppsOnlyEnriched.($object.id).ServicePrincipalOauth2PermissionGrants = $getSPOauth2PermissionGrants
                             foreach ($permissionGrant in $getSPOauth2PermissionGrants) {
-                                if($permissionGrant.scope) {
+                                if(-not [string]::IsNullOrEmpty($permissionGrant.scope)) {
                                     $splitPermissionGrant = ($permissionGrant.scope).split(' ')
                                     foreach ($permissionscope in $splitPermissionGrant) {
                                         if (-not [string]::IsNullOrEmpty($permissionscope) -and -not [string]::IsNullOrWhiteSpace($permissionscope)) {
