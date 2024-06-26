@@ -3,7 +3,7 @@ Param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20240419_1',
+    [string]$ProductVersion = 'v1_20240529_1',
     [string]$azAPICallVersion = '1.2.0',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
@@ -5832,26 +5832,28 @@ else {
                         if ($getSPOauth2PermissionGrants.Count -gt 0) {
                             $script:htServicePrincipalsAndAppsOnlyEnriched.($object.id).ServicePrincipalOauth2PermissionGrants = $getSPOauth2PermissionGrants
                             foreach ($permissionGrant in $getSPOauth2PermissionGrants) {
-                                $splitPermissionGrant = ($permissionGrant.scope).split(' ')
-                                foreach ($permissionscope in $splitPermissionGrant) {
-                                    if (-not [string]::IsNullOrEmpty($permissionscope) -and -not [string]::IsNullOrWhiteSpace($permissionscope)) {
-                                        $permissionGrantArray = [System.Collections.ArrayList]@()
-                                        $null = $permissionGrantArray.Add([PSCustomObject]@{
-                                                '@odata.id' = $permissionGrant
-                                                clientId = $permissionGrant.clientId
-                                                consentType = $permissionGrant.consentType
-                                                expiryTime = $permissionGrant.expiryTime
-                                                id = $permissionGrant.id
-                                                principalId = $permissionGrant.principalId
-                                                resourceId = $permissionGrant.resourceId
-                                                scope = $permissionscope
-                                                startTime = $permissionGrant.startTime
-                                            })
+                                if(-not [string]::IsNullOrEmpty($permissionGrant.scope)) {
+                                    $splitPermissionGrant = ($permissionGrant.scope).split(' ')
+                                    foreach ($permissionscope in $splitPermissionGrant) {
+                                        if (-not [string]::IsNullOrEmpty($permissionscope) -and -not [string]::IsNullOrWhiteSpace($permissionscope)) {
+                                            $permissionGrantArray = [System.Collections.ArrayList]@()
+                                            $null = $permissionGrantArray.Add([PSCustomObject]@{
+                                                    '@odata.id' = $permissionGrant
+                                                    clientId = $permissionGrant.clientId
+                                                    consentType = $permissionGrant.consentType
+                                                    expiryTime = $permissionGrant.expiryTime
+                                                    id = $permissionGrant.id
+                                                    principalId = $permissionGrant.principalId
+                                                    resourceId = $permissionGrant.resourceId
+                                                    scope = $permissionscope
+                                                    startTime = $permissionGrant.startTime
+                                                })
 
-                                        if (-not $htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId)) {
-                                            $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId) = [System.Collections.ArrayList]@()
+                                            if (-not $htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId)) {
+                                                $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId) = [System.Collections.ArrayList]@()
+                                            }
+                                            $null = $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId).Add($permissionGrantArray)
                                         }
-                                        $null = $script:htSPOauth2PermissionGrantedTo.($permissionGrant.resourceId).Add($permissionGrantArray)
                                     }
                                 }
                             }
@@ -6981,29 +6983,31 @@ $servicePrincipalsAndAppsOnlyEnrichedSPBatch | ForEach-Object -Parallel {
             $arrayServicePrincipalOauth2PermissionGrantsOpt = [System.Collections.ArrayList]@()
             if ($object.ServicePrincipalOauth2PermissionGrants) {
                 foreach ($servicePrincipalOauth2PermissionGrant in $object.ServicePrincipalOauth2PermissionGrants | Sort-Object -Property resourceId) {
-                    $multipleScopes = $servicePrincipalOauth2PermissionGrant.scope.split(' ')
-                    foreach ($scope in $multipleScopes | Sort-Object) {
-                        if (-not [string]::IsNullOrEmpty($scope) -and -not [string]::IsNullOrWhiteSpace($scope)) {
-                            $hlperServicePrincipalsPublishedPermissionScope = $htServicePrincipalsPublishedPermissionScopes.($servicePrincipalOauth2PermissionGrant.resourceId).spdetails
-                            $hlperPublishedPermissionScope = $htPublishedPermissionScopes.($servicePrincipalOauth2PermissionGrant.resourceId).($scope)
+                    if(-not [string]::IsNullOrEmpty($servicePrincipalOauth2PermissionGrant.scope)) {
+                        $multipleScopes = ($servicePrincipalOauth2PermissionGrant.scope).split(' ')
+                        foreach ($scope in $multipleScopes | Sort-Object) {
+                            if (-not [string]::IsNullOrEmpty($scope) -and -not [string]::IsNullOrWhiteSpace($scope)) {
+                                $hlperServicePrincipalsPublishedPermissionScope = $htServicePrincipalsPublishedPermissionScopes.($servicePrincipalOauth2PermissionGrant.resourceId).spdetails
+                                $hlperPublishedPermissionScope = $htPublishedPermissionScopes.($servicePrincipalOauth2PermissionGrant.resourceId).($scope)
 
-                            $htOptInfo = [ordered] @{}
-                            $htOptInfo.SPId = $hlperServicePrincipalsPublishedPermissionScope.id
-                            $htOptInfo.SPAppId = $hlperServicePrincipalsPublishedPermissionScope.appId
-                            $htOptInfo.SPDisplayName = $hlperServicePrincipalsPublishedPermissionScope.displayName
-                            $htOptInfo.scope = $scope
-                            $htOptInfo.permission = $hlperPublishedPermissionScope.value
-                            $oauth2PermissionSensitivity = 'unclassified'
-                            $oauth2PermissionSensitivity = getClassification -permission $hlperPublishedPermissionScope.value -permissionType 'oauth2Permissions'
+                                $htOptInfo = [ordered] @{}
+                                $htOptInfo.SPId = $hlperServicePrincipalsPublishedPermissionScope.id
+                                $htOptInfo.SPAppId = $hlperServicePrincipalsPublishedPermissionScope.appId
+                                $htOptInfo.SPDisplayName = $hlperServicePrincipalsPublishedPermissionScope.displayName
+                                $htOptInfo.scope = $scope
+                                $htOptInfo.permission = $hlperPublishedPermissionScope.value
+                                $oauth2PermissionSensitivity = 'unclassified'
+                                $oauth2PermissionSensitivity = getClassification -permission $hlperPublishedPermissionScope.value -permissionType 'oauth2Permissions'
 
-                            $htOptInfo.permissionSensitivity = $oauth2PermissionSensitivity
-                            $htOptInfo.id = $hlperPublishedPermissionScope.id
-                            $htOptInfo.type = $hlperPublishedPermissionScope.type
-                            $htOptInfo.adminConsentDisplayName = $hlperPublishedPermissionScope.adminConsentDisplayName
-                            $htOptInfo.adminConsentDescription = $hlperPublishedPermissionScope.adminConsentDescription
-                            $htOptInfo.userConsentDisplayName = $hlperPublishedPermissionScope.userConsentDisplayName
-                            $htOptInfo.userConsentDescription = $hlperPublishedPermissionScope.userConsentDescription
-                            $null = $arrayServicePrincipalOauth2PermissionGrantsOpt.Add($htOptInfo)
+                                $htOptInfo.permissionSensitivity = $oauth2PermissionSensitivity
+                                $htOptInfo.id = $hlperPublishedPermissionScope.id
+                                $htOptInfo.type = $hlperPublishedPermissionScope.type
+                                $htOptInfo.adminConsentDisplayName = $hlperPublishedPermissionScope.adminConsentDisplayName
+                                $htOptInfo.adminConsentDescription = $hlperPublishedPermissionScope.adminConsentDescription
+                                $htOptInfo.userConsentDisplayName = $hlperPublishedPermissionScope.userConsentDisplayName
+                                $htOptInfo.userConsentDescription = $hlperPublishedPermissionScope.userConsentDescription
+                                $null = $arrayServicePrincipalOauth2PermissionGrantsOpt.Add($htOptInfo)
+                            }
                         }
                     }
                 }
