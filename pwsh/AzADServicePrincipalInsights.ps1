@@ -254,11 +254,20 @@ verifyModules3rd -modules $modules
 
 #Region initAZAPICall
 Write-Host "Initialize 'AzAPICall'"
-$parameters4AzAPICallModule = @{
-    DebugAzAPICall = $DebugAzAPICall
-    SubscriptionId4AzContext = $SubscriptionId4AzContext
-    GitHubRepository = $GitHubRepository
+if ($NoAzureResourceSideRelations) {
+    $parameters4AzAPICallModule = @{
+        DebugAzAPICall = $DebugAzAPICall
+        SkipAzContextSubscriptionValidation = $true
+        GitHubRepository = $GitHubRepository
+    }
+} else {
+    $parameters4AzAPICallModule = @{
+        DebugAzAPICall = $DebugAzAPICall
+        SubscriptionId4AzContext = $SubscriptionId4AzContext
+        GitHubRepository = $GitHubRepository
+    }
 }
+
 $azAPICallConf = initAzAPICall @parameters4AzAPICallModule
 Write-Host " Initialize 'AzAPICall' succeeded" -ForegroundColor Green
 #EndRegion initAZAPICall

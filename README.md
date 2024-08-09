@@ -25,6 +25,8 @@ aka links:
 - [Closing Note](#closing-note)
 
 # Updates
+* 20240730
+    * Fix SkipAzContextSubscriptionValidation check by using NoAzureResourceSideRelations (PR 38)
 * 20240419
     * Fix hardcoded ARM API Url using north europe (PR 31)
     * Fix ContentLengthLimitExceeded error when using log ingestion API (PR 32)
