@@ -1,6 +1,6 @@
 __AzADServicePrincipalInsights aka AzADSPI__
 
-Insights and change tracking on Microsoft Entra ID Service Principals (Enterprise Applications and Applications)  
+Insights and change tracking on Microsoft Entra ID Service Principals (Enterprise Applications, Applications / Managed Identities)
 
 aka links:
 * aka.ms/AzADSPI  
@@ -8,7 +8,6 @@ aka links:
 
 # Content
 - [Content](#content)
-- [Updates](#updates)
 - [Features](#features)
 - [Parameters](#parameters)
 - [Data](#data)
@@ -20,110 +19,12 @@ aka links:
   - [PowerShell](#powershell)
 - [Execute as Service Principal / Application](#execute-as-service-principal--application)
 - [Preview](#preview)
+- [Updates](#updates)
 - [AzAdvertizer](#azadvertizer)
 - [Azure Governance Visualizer aka AzGovViz](#azure-governance-visualizer-aka-azgovviz)
 - [Closing Note](#closing-note)
 
-# Updates
-* 20240730
-    * Fix SkipAzContextSubscriptionValidation check by using NoAzureResourceSideRelations (PR 38)
-* 20240419
-    * Fix hardcoded ARM API Url using north europe (PR 31)
-    * Fix ContentLengthLimitExceeded error when using log ingestion API (PR 32)
-* 20240212
-    * fix issue 27
-* 20240208
-    * Contribution from @Cloud-Architekt to ingest data from the JSON files to an Azure Log Analytics workspace custom table using data collection rule / data collection endpoint. [Microsoft Entra Workload ID - Advanced Detections and Enrichment in Microsoft Sentinel](https://www.cloud-architekt.net/entra-workload-id-advanced-detection-enrichment/)
-      * Ready for Azure DevOps and GitHub; configure in the pipeline/workflow YAML files
-    * Change PowerShell parallel handling / batches
-    * Optimize array handling / best practices
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.2.0 (support endpoint *.ingest.monitor.azure.com)
-* 20231218 - thanks @kaiaschulz
-    * Fix scope of subscriptions to process. The ARM entities API may still return subscriptions that are meanwhile delted and therefore should not be processed in the data collection
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.86
-* 20231217
-    * Fix for SP names that contain escapable characters
-    * Update GitHub workflows to support webApp publishing thanks @RS-MPersson
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.85
-* 20231121 - thanks @cjtous1
-    * HTML updates
-        * Added `SPTags` & `AppTags` to the following tables:
-            * Service Principals
-            * Service Principal AAD RoleAssignments
-            * Service Principal App RoleAssignments
-            * Service Principal App RoleAssignedTo
-            * Service Principal Oauth Permission grants
-            * Service Principal Azure RoleAssignments
-        * Added `AppNotes` to the Service Principals table
-    * Added the following CSV file exports
-        * Service Principals
-        * Service Principal Owners
-        * Application Owners
-        * Service Principal Owned Objects
-        * Service Principal AAD RoleAssignments
-        * Service Principal AAD RoleAssignedOn
-        * Service Principal App RoleAssignedTo
-        * Service Principal App RoleAssignments
-        * Service Principal Azure RoleAssignments
-        * Service Principal Group memberships
-    * Fix: `NoCsvExport` is now working and preventing CSV files from being generated if true.
-    * Fix: `NoJsonExport` is now working and preventing JSON files from being generated if true.
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.84
-* 20231001
-    * fix hardcoded delimiter for export-csv - thanks @cjtous1
-* 20230316
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.70
-* 20221017
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.40
-        * Issue #10 - Handle error `404` User Assigned Managed Identity / ResourceGroup not found  
-* 20221014
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.38 
-        * Handle error `405` [Support for federated identity credentials not enabled](https://learn.microsoft.com/en-us/azure/active-directory/develop/workload-identity-federation-considerations#errors)
-* 20221008
-    * New feature - Managed Identity User Assigned Federated Identity Credentials
-    * Rearrange JSON output for Managed Identity associated Azure Resources
-* 20221007
-    * New feature - Managed Identity User Assigned associated Azure Resources
-    * Changed parameter name `NoAzureRoleAssignments` to `NoAzureResourceSideRelations`
-        * Using `NoAzureResourceSideRelations`:
-            * No (Azure Resource side) RBAC Role assignments collection
-            * No (Azure Resource side) Policy assignments collection
-            * No (Azure Resource side) Resources collection ('Managed Identity User Assigned associated Azure Resources' feature annul)
-    * Azure DevOps pipeline yml - update vmImage ~~ubuntu-20.04~~ ubuntu-22.04
-    * Minor fixes and optimizations
-    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.33 
-* 20220717
-    * Removed identity governance state validation
-    * Use AzAPICall PowerShell module version 1.1.18  
-* 20220630
-    * __Breaking Change__ on the Azure side: Instead of __RoleManagement.Read.All__ we require __RoleManagement.Read.Directory__
-* 20220622_1
-    * Fix `/providers/Microsoft.Authorization/roleAssignmentScheduleInstances` AzAPICall errorhandling (error 400, 500)
-    * Optimize procedure to update the AzAPICall module
-    * Use AzAPICall PowerShell module version 1.1.17
-* 20220613_1
-    * use AzAPICall module version 1.1.16
-    * enhance HiPo Users HTML output
-    * minor fixes
-* 20220609_1
-    * add parameter `-CriticalAADRoles` (defaults: Global Administrator, Privileged Role Administrator, Privileged Authentication Administrator)
-    * add HiPo Users - A HiPo User has direct or indirect ownership on a ServicePrincipal(s) with classified permissions (AppRole, AAD Role, Azure Role, OAuthPermissionGrant)
-    * use AzAPICall module version 1.1.13
-    * minor fixes
-* 20220505_1
-    * fix: `using:scriptPath` variable in foreach parallel (this is only relevant for Azure DevOps and GitHub if you have a non default folder structure in your repository) - thanks Matt :)
-* 20220501_1
-    * parameter `-ManagementGroupId` accepts multiple Management Groups in form of an array e.g. `.\pwsh\AzADServicePrincipalInsights.ps1 -ManagementGroupId @('mgId0', 'mgId1')`
-    * new parameter `-OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes`. You may want to only report on Service Principals that have RBAC permissions on Azure resources at and below that Management Group scope(s) (Management Groups, Subscriptions, Resource Groups and Resources)
-    * Role assignments on Azure resources - mark those RBAC Role assignments which leverage a RBAC Role definition that can create role assignments as critical
-    * updated YAML workflow/pipeline files
-    * minor bug fixes
-    * performance optimization
-* 20220425_2
-    * add parameter `-ManagementGroupId` (if undefined, then Tenant Root Management Group will be used)
-    * use AzAPICall module version 1.1.11
-* 20220404_1 
-    * add FederatedIdentityCredentials
+
 
 # Features
 
@@ -241,6 +142,107 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 ![previewHTML](img/azadserviceprincipalinsights_preview_entra-id.png)  
 ![previewHTML2](img/preview2.png)  
 ![previewJSON](img/previewJSON.png)
+
+# Updates
+* 20240730
+    * Fix SkipAzContextSubscriptionValidation check by using NoAzureResourceSideRelations (PR 38)
+* 20240419
+    * Fix hardcoded ARM API Url using north europe (PR 31)
+    * Fix ContentLengthLimitExceeded error when using log ingestion API (PR 32)
+* 20240212
+    * fix issue 27
+* 20240208
+    * Contribution from @Cloud-Architekt to ingest data from the JSON files to an Azure Log Analytics workspace custom table using data collection rule / data collection endpoint. [Microsoft Entra Workload ID - Advanced Detections and Enrichment in Microsoft Sentinel](https://www.cloud-architekt.net/entra-workload-id-advanced-detection-enrichment/)
+      * Ready for Azure DevOps and GitHub; configure in the pipeline/workflow YAML files
+    * Change PowerShell parallel handling / batches
+    * Optimize array handling / best practices
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.2.0 (support endpoint *.ingest.monitor.azure.com)
+* 20231218 - thanks @kaiaschulz
+    * Fix scope of subscriptions to process. The ARM entities API may still return subscriptions that are meanwhile delted and therefore should not be processed in the data collection
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.86
+* 20231217
+    * Fix for SP names that contain escapable characters
+    * Update GitHub workflows to support webApp publishing thanks @RS-MPersson
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.85
+* 20231121 - thanks @cjtous1
+    * HTML updates
+        * Added `SPTags` & `AppTags` to the following tables:
+            * Service Principals
+            * Service Principal AAD RoleAssignments
+            * Service Principal App RoleAssignments
+            * Service Principal App RoleAssignedTo
+            * Service Principal Oauth Permission grants
+            * Service Principal Azure RoleAssignments
+        * Added `AppNotes` to the Service Principals table
+    * Added the following CSV file exports
+        * Service Principals
+        * Service Principal Owners
+        * Application Owners
+        * Service Principal Owned Objects
+        * Service Principal AAD RoleAssignments
+        * Service Principal AAD RoleAssignedOn
+        * Service Principal App RoleAssignedTo
+        * Service Principal App RoleAssignments
+        * Service Principal Azure RoleAssignments
+        * Service Principal Group memberships
+    * Fix: `NoCsvExport` is now working and preventing CSV files from being generated if true.
+    * Fix: `NoJsonExport` is now working and preventing JSON files from being generated if true.
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.84
+* 20231001
+    * fix hardcoded delimiter for export-csv - thanks @cjtous1
+* 20230316
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.70
+* 20221017
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.40
+        * Issue #10 - Handle error `404` User Assigned Managed Identity / ResourceGroup not found  
+* 20221014
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.38 
+        * Handle error `405` [Support for federated identity credentials not enabled](https://learn.microsoft.com/en-us/azure/active-directory/develop/workload-identity-federation-considerations#errors)
+* 20221008
+    * New feature - Managed Identity User Assigned Federated Identity Credentials
+    * Rearrange JSON output for Managed Identity associated Azure Resources
+* 20221007
+    * New feature - Managed Identity User Assigned associated Azure Resources
+    * Changed parameter name `NoAzureRoleAssignments` to `NoAzureResourceSideRelations`
+        * Using `NoAzureResourceSideRelations`:
+            * No (Azure Resource side) RBAC Role assignments collection
+            * No (Azure Resource side) Policy assignments collection
+            * No (Azure Resource side) Resources collection ('Managed Identity User Assigned associated Azure Resources' feature annul)
+    * Azure DevOps pipeline yml - update vmImage ~~ubuntu-20.04~~ ubuntu-22.04
+    * Minor fixes and optimizations
+    * Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.1.33 
+* 20220717
+    * Removed identity governance state validation
+    * Use AzAPICall PowerShell module version 1.1.18  
+* 20220630
+    * __Breaking Change__ on the Azure side: Instead of __RoleManagement.Read.All__ we require __RoleManagement.Read.Directory__
+* 20220622_1
+    * Fix `/providers/Microsoft.Authorization/roleAssignmentScheduleInstances` AzAPICall errorhandling (error 400, 500)
+    * Optimize procedure to update the AzAPICall module
+    * Use AzAPICall PowerShell module version 1.1.17
+* 20220613_1
+    * use AzAPICall module version 1.1.16
+    * enhance HiPo Users HTML output
+    * minor fixes
+* 20220609_1
+    * add parameter `-CriticalAADRoles` (defaults: Global Administrator, Privileged Role Administrator, Privileged Authentication Administrator)
+    * add HiPo Users - A HiPo User has direct or indirect ownership on a ServicePrincipal(s) with classified permissions (AppRole, AAD Role, Azure Role, OAuthPermissionGrant)
+    * use AzAPICall module version 1.1.13
+    * minor fixes
+* 20220505_1
+    * fix: `using:scriptPath` variable in foreach parallel (this is only relevant for Azure DevOps and GitHub if you have a non default folder structure in your repository) - thanks Matt :)
+* 20220501_1
+    * parameter `-ManagementGroupId` accepts multiple Management Groups in form of an array e.g. `.\pwsh\AzADServicePrincipalInsights.ps1 -ManagementGroupId @('mgId0', 'mgId1')`
+    * new parameter `-OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes`. You may want to only report on Service Principals that have RBAC permissions on Azure resources at and below that Management Group scope(s) (Management Groups, Subscriptions, Resource Groups and Resources)
+    * Role assignments on Azure resources - mark those RBAC Role assignments which leverage a RBAC Role definition that can create role assignments as critical
+    * updated YAML workflow/pipeline files
+    * minor bug fixes
+    * performance optimization
+* 20220425_2
+    * add parameter `-ManagementGroupId` (if undefined, then Tenant Root Management Group will be used)
+    * use AzAPICall module version 1.1.11
+* 20220404_1 
+    * add FederatedIdentityCredentials
 
 # AzAdvertizer
 
