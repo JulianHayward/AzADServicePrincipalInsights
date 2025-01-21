@@ -144,6 +144,10 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 ![previewJSON](img/previewJSON.png)
 
 # Updates
+* 20250121
+    * Fix issue #40 - Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.2.5
+    * Try to fix issue #41 - optimize hashtable processing
+    * Update ARM REST API versions to latest
 * 20240730
     * Fix SkipAzContextSubscriptionValidation check by using NoAzureResourceSideRelations (PR 38)
 * 20240419
