@@ -1,11 +1,11 @@
 [CmdletBinding()]
-Param
+param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20250430_0',
+    [string]$ProductVersion = 'v1_20260803_0',
     [string][ValidateSet('AzAPICall', 'AzAPICallBeta')]$AzAPICallModuleName = 'AzAPICall',
-    [string]$azAPICallVersion = '1.2.5',
+    [string]$azAPICallVersion = '1.4.1',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
     [switch]$AzureDevOpsWikiAsCode, #deprecated - Based on environment variables the script will detect the code run platform
     [switch]$DebugAzAPICall,
@@ -18,8 +18,9 @@ Param
     [switch]$DoTranscript,
     [int]$HtmlTableRowsLimit = 20000, #HTML -> becomes unresponsive depending on client device performance. A recommendation will be shown to download the CSV instead of opening the TF table
     [int]$ThrottleLimitARM = 10,
-    [int]$ThrottleLimitGraph = 20,
+    [int]$ThrottleLimitGraph = 30,
     [int]$ThrottleLimitLocal = 100,
+    [switch]$PerfTracking,
     [string]$SubscriptionId4AzContext = 'undefined',
     [string]$FileTimeStampFormat = 'yyyyMMdd_HHmmss',
     [switch]$NoJsonExport,
@@ -92,7 +93,7 @@ function testPowerShellVersion {
         Write-Host "  PS check $psVersionCheckResult : $($psVersionCheck)"
         Write-Host "  PS Edition: $($PSVersionTable.PSEdition); PS Version: $($PSVersionTable.PSVersion)"
         Write-Host "  Parallelization requires Powershell 'Core' version '$($requiredPSVersion)' or higher"
-        Throw 'Error - check the last console output for details'
+        throw 'Error - check the last console output for details'
     }
 }
 testPowerShellVersion
@@ -108,7 +109,7 @@ function setOutput {
     $script:outputPath = [IO.Path]::GetFullPath($outputPath)
     if (-not (Test-Path $outputPath)) {
         Write-Host "path $outputPath does not exist - please create it!" -ForegroundColor Red
-        Throw 'Error - check the last console output for details'
+        throw 'Error - check the last console output for details'
     }
     else {
         Write-Host "Output/Files will be created in path '$outputPath'"
@@ -131,7 +132,7 @@ setOutput
 #endregion filedir
 
 function verifyModules3rd {
-    [CmdletBinding()]Param(
+    [CmdletBinding()]param(
         [object]$modules
     )
 
@@ -939,7 +940,7 @@ function dataCollection($mgId) {
                 }
 
                 function dataCollectionResources {
-                    [CmdletBinding()]Param(
+                    [CmdletBinding()]param(
                         [string]$scopeId,
                         [string]$scopeDisplayName,
                         $ChildMgMgPath,
@@ -5090,7 +5091,7 @@ if (-not $NoAzureResourceSideRelations) {
             Write-Error 'Error'
         }
         else {
-            Throw 'Error - check the last console output for details'
+            throw 'Error - check the last console output for details'
         }
     }
     #endregion permissionsCheck
@@ -5375,7 +5376,7 @@ else {
             Write-Error 'Error'
         }
         else {
-            Throw 'Error - check the last console output for details'
+            throw 'Error - check the last console output for details'
         }
     }
     Write-Host "Paramter -NoAzureResourceSideRelations = '$NoAzureResourceSideRelations'" -ForegroundColor Yellow
@@ -6435,7 +6436,7 @@ $arrayObjectIdsToProcess = [System.Collections.ArrayList]@()
 $objectIdsUnique = ($htCacheAssignmentsRole).values.assignment.properties.principalId | Sort-Object -Unique
 Write-Host " Unique objectIds that have Azure Role assignments: $($objectIdsUnique.Count)"
 foreach ($objectId in $objectIdsUnique) {
-    if ($htAadGroups.Keys -notcontains $objectId) {
+    if (-not $htAadGroups.ContainsKey($objectId)) {
         $null = $arrayObjectIdsToProcess.Add($objectId)
     }
 }
@@ -6447,6 +6448,9 @@ $objectIdsBatchCount = ($objectIdsBatch | Measure-Object).Count
 $batchCnt = 0
 
 Write-Host "Processing $objectIdsCount objectIds"
+
+<#
+#region original sequential nested group resolution (replaced by parallel block below)
 foreach ($batch in $objectIdsBatch) {
 
     $batchCnt++
@@ -6488,6 +6492,83 @@ foreach ($batch in $objectIdsBatch) {
     }
     Write-Host "Groups resolved: $($htAadGroups.Keys.Count)"
 }
+#endregion original sequential nested group resolution
+#>
+
+#region parallel nested group resolution
+#step 1: resolve which objectIds are groups (getByIds is batched to 1000, few calls, kept sequential) and collect the group ids
+$arrayGroupsToProcessNested = [System.Collections.ArrayList]@()
+foreach ($batch in $objectIdsBatch) {
+
+    $batchCnt++
+    Write-Host " processing Batch #$batchCnt/$($objectIdsBatchCount) ($(($batch.Group).Count) objectIds)"
+    $objectIdsToCheckIfGroup = '"{0}"' -f ($batch.Group -join '","')
+
+    $currentTask = " Resolving identity type Group - Batch #$batchCnt/$($objectIdsBatchCount) ($(($batch.Group).Count)"
+    $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/v1.0/directoryObjects/getByIds"
+    $method = 'POST'
+    $body = @"
+        {
+            "ids":[$($objectIdsToCheckIfGroup)],
+            "types":["group"]
+        }
+"@
+    $resolveObjectIdsTypeGroup = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -body $body -currentTask $currentTask
+
+    foreach ($group in $resolveObjectIdsTypeGroup) {
+        $script:htAadGroups.($group.id) = @{
+            groupDetails = $group
+        }
+        $null = $arrayGroupsToProcessNested.Add($group.id)
+    }
+    Write-Host "Groups resolved: $($htAadGroups.Keys.Count)"
+}
+
+#step 2: resolve transitive (nested) groups in parallel
+$arrayGroupsToProcessNestedCount = $arrayGroupsToProcessNested.Count
+if ($arrayGroupsToProcessNestedCount -gt 0) {
+    Write-Host "Getting nested groups for $arrayGroupsToProcessNestedCount groups"
+    $batchSizeNested = [math]::ceiling($arrayGroupsToProcessNestedCount / $ThrottleLimitGraph)
+    Write-Host "Optimal batch size: $($batchSizeNested)"
+    $counterBatchNested = [PSCustomObject] @{ Value = 0 }
+    $groupsToProcessNestedBatch = $arrayGroupsToProcessNested | Group-Object -Property { [math]::Floor($counterBatchNested.Value++ / $batchSizeNested) }
+    Write-Host "Processing data in $($groupsToProcessNestedBatch.Count) batches"
+
+    $groupsToProcessNestedBatch | ForEach-Object -Parallel {
+
+        #AzAPICall
+        $azAPICallConf = $using:azAPICallConf
+        $scriptPath = $using:ScriptPath
+        #array&ht
+        $htAadGroups = $using:htAadGroups
+
+        foreach ($groupId in $_.Group) {
+            #v1 does not return ServicePrincipals
+            $currentTask = "get transitive members for AAD Group $($groupId)"
+            $uri = "$($azAPICallConf['azAPIEndpointUrls'].MicrosoftGraph)/beta/groups/$($groupId)/transitivemembers/microsoft.graph.group?`$count=true"
+            $method = 'GET'
+            $getNestedGroups = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual'
+
+            if ($getNestedGroups) {
+                if ($getNestedGroups -eq 'Request_UnsupportedQuery') {
+                    Write-Host "skipping transitive members for Group $($groupId)"
+                }
+                else {
+                    Write-Host " $groupId -> has nested Groups $($getNestedGroups.Count)"
+                    $script:htAadGroups.($groupId).nestedGroups = $getNestedGroups
+                    foreach ($nestedGroup in $getNestedGroups) {
+                        if (-not $htAadGroups.($nestedGroup.id)) {
+                            $script:htAadGroups.($nestedGroup.id) = @{
+                                groupDetails = $nestedGroup
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } -ThrottleLimit $ThrottleLimitGraph
+}
+#endregion parallel nested group resolution
 
 $end = Get-Date
 $duration = New-TimeSpan -Start $startGroupsFromAzureRoleAssignments -End $end
@@ -6748,13 +6829,16 @@ if (-not $NoAzureResourceSideRelations) {
     #region AzureRoleAssignmentMapping
     $startAzureRoleAssignmentMapping = Get-Date
 
+    #build O(1) lookup set of Service Principal ids (avoids O(n) '-contains' array scans in the loops below)
+    $htServicePrincipalsIdsLookup = [System.Collections.Generic.HashSet[string]]::new([string[]]$getServicePrincipals.id)
+
     #resolving createdby/updatedby
     $htCreatedByUpdatedByObjectIdsToBeResolved = @{}
     foreach ($createdByItem in ($htCacheAssignmentsRole).values.assignment.properties.createdBy | Sort-Object -Unique) {
 
         if ([guid]::TryParse(($createdByItem), $([ref][guid]::Empty))) {
             if (-not $htPrincipalsResolved.($createdByItem)) {
-                if ($getServicePrincipals.id -contains $createdByItem) {
+                if ($htServicePrincipalsIdsLookup.Contains($createdByItem)) {
                     #
                 }
                 else {
@@ -6782,29 +6866,34 @@ if (-not $NoAzureResourceSideRelations) {
 
     if (($htCacheAssignmentsRole).Keys.Count -gt 0) {
         foreach ($assignment in ($htCacheAssignmentsRole).values) {
+            #hoist repeated deep member access (otherwise traversed up to ~6x per iteration)
+            $assignmentProperties = $assignment.assignment.properties
+            $assignmentCreatedBy = $assignmentProperties.createdBy
+            $assignmentPrincipalId = $assignmentProperties.principalId
+
             #todo: sp created ra in azure
-            if (-not [string]::IsNullOrEmpty($assignment.assignment.properties.createdBy)) {
-                if ($htPrincipalsResolved.($assignment.assignment.properties.createdBy)) {
-                    $assignment.assignment.properties.createdBy = $htPrincipalsResolved.($assignment.assignment.properties.createdBy).full
+            if (-not [string]::IsNullOrEmpty($assignmentCreatedBy)) {
+                if ($htPrincipalsResolved.($assignmentCreatedBy)) {
+                    $assignmentProperties.createdBy = $htPrincipalsResolved.($assignmentCreatedBy).full
                 }
                 else {
-                    if ($htServicePrincipalsAndAppsOnlyEnriched.($assignment.assignment.properties.createdBy)) {
-                        $hlper = $htServicePrincipalsAndAppsOnlyEnriched.($assignment.assignment.properties.createdBy)
-                        $assignment.assignment.properties.createdBy = "$($hlper.objectTypeConcatinated), DisplayName: $($hlper.ServicePrincipalDetails.displayName), Id: $($assignment.assignment.properties.createdBy)"
+                    if ($htServicePrincipalsAndAppsOnlyEnriched.($assignmentCreatedBy)) {
+                        $hlper = $htServicePrincipalsAndAppsOnlyEnriched.($assignmentCreatedBy)
+                        $assignmentProperties.createdBy = "$($hlper.objectTypeConcatinated), DisplayName: $($hlper.ServicePrincipalDetails.displayName), Id: $($assignmentCreatedBy)"
                     }
                 }
             }
-            if ($getServicePrincipals.id -contains $assignment.assignment.properties.principalId) {
-                if (-not $htAssignmentsByPrincipalIdServicePrincipals.($assignment.assignment.properties.principalId)) {
-                    $htAssignmentsByPrincipalIdServicePrincipals.($assignment.assignment.properties.principalId) = [System.Collections.ArrayList]@()
+            if ($htServicePrincipalsIdsLookup.Contains($assignmentPrincipalId)) {
+                if (-not $htAssignmentsByPrincipalIdServicePrincipals.ContainsKey($assignmentPrincipalId)) {
+                    $htAssignmentsByPrincipalIdServicePrincipals.($assignmentPrincipalId) = [System.Collections.ArrayList]@()
                 }
-                $null = $htAssignmentsByPrincipalIdServicePrincipals.($assignment.assignment.properties.principalId).Add($assignment)
+                $null = $htAssignmentsByPrincipalIdServicePrincipals.($assignmentPrincipalId).Add($assignment)
             }
-            if ($htAadGroups.Keys -contains $assignment.assignment.properties.principalId) {
-                if (-not $htAssignmentsByPrincipalIdGroups.($assignment.assignment.properties.principalId)) {
-                    $htAssignmentsByPrincipalIdGroups.($assignment.assignment.properties.principalId) = [System.Collections.ArrayList]@()
+            if ($htAadGroups.ContainsKey($assignmentPrincipalId)) {
+                if (-not $htAssignmentsByPrincipalIdGroups.ContainsKey($assignmentPrincipalId)) {
+                    $htAssignmentsByPrincipalIdGroups.($assignmentPrincipalId) = [System.Collections.ArrayList]@()
                 }
-                $null = $htAssignmentsByPrincipalIdGroups.($assignment.assignment.properties.principalId).Add($assignment)
+                $null = $htAssignmentsByPrincipalIdGroups.($assignmentPrincipalId).Add($assignment)
 
             }
         }
@@ -6877,6 +6966,7 @@ $servicePrincipalsAndAppsOnlyEnrichedSPBatch | ForEach-Object -Parallel {
     $enrichmentProcessCounter = $using:enrichmentProcessCounter
     $enrichmentProcessindicator = $using:enrichmentProcessindicator
     $arrayPerformanceTracking = $using:arrayPerformanceTracking
+    $PerfTracking = $using:PerfTracking
     $htSPandAPPHelper4AADRoleAssignmentsWithScope = $using:htSPandAPPHelper4AADRoleAssignmentsWithScope
     $htSPOwnersFinal = $using:htSPOwnersFinal
     #vars
@@ -7256,6 +7346,9 @@ $servicePrincipalsAndAppsOnlyEnrichedSPBatch | ForEach-Object -Parallel {
                         }
                     }
                     $null = $arrayServicePrincipalAppRoleAssignedToOpt.Add($htOptInfo)
+                }
+                if ($arrayServicePrincipalAppRoleAssignedToOpt.Count -gt 0) {
+                    $arrayServicePrincipalAppRoleAssignedToOpt = ($arrayServicePrincipalAppRoleAssignedToOpt | Sort-Object -Property { $_.id })
                 }
                 $durationPerfTrackServicePrincipalAppRoleAssignedTo = [math]::Round((New-TimeSpan -Start $start -End (Get-Date)).TotalMilliseconds)
             }
@@ -7913,54 +8006,56 @@ $servicePrincipalsAndAppsOnlyEnrichedSPBatch | ForEach-Object -Parallel {
         #endregion finalArray
 
         $processedServicePrincipalsCount++
-        $null = $script:arrayPerformanceTracking.Add([PSCustomObject]@{
-                Type = $spOrAppWithoutSP.SPOrAppOnly
-                ServicePrincipalId = $spId
-                ServicePrincipalDisplayName = $object.ServicePrincipalDetails.displayName
-                ApplicationId = $object.Application.ApplicationDetails.id
-                ApplicationDisplayName = $object.Application.ApplicationDetails.displayName
-                ProcessedSequenceCount = $processedServicePrincipalsCount
-                ServicePrincipalOwnedObjects = $durationPerfTrackServicePrincipalOwnedObjects
-                ServicePrincipalOwners = $durationPerfTrackServicePrincipalOwners
-                ServicePrincipalAADRoleAssignments = $durationPerfTrackServicePrincipalAADRoleAssignments
-                ServicePrincipalAADRoleAssignedOn = $durationPerfTrackServicePrincipalAADRoleAssignedOn
-                ServicePrincipalOauth2PermissionGrants = $durationPerfTrackServicePrincipalOauth2PermissionGrants
-                SPOauth2PermissionGrantedTo = $durationPerfTrackSPOauth2PermissionGrantedTo
-                ServicePrincipalAppRoleAssignments = $durationPerfTrackServicePrincipalAppRoleAssignments
-                ServicePrincipalAppRoleAssignedTo = $durationPerfTrackServicePrincipalAppRoleAssignedTo
-                AzureRoleAssignmentsPrep = $durationPerfTrackAzureRoleAssignmentsPrep
-                AzureRoleAssignmentsOpt1 = $durationPerfTrackAzureRoleAssignmentsOpt1
-                AzureRoleAssignmentsOpt2 = $durationPerfTrackAzureRoleAssignmentsOpt2
-                ApplicationAADRoleAssignedOn = $durationPerfTrackApplicationAADRoleAssignedOn
-                ApplicationOwner = $durationPerfTrackApplicationOwner
-                ApplicationFederatedIdentityCredentials = $durationPerfTrackFederatedIdentityCredentials
-                ApplicationSecrets = $durationPerfTrackApplicationSecrets
-                ApplicationCertificates = $durationPerfTrackApplicationCertificates
-                ManagedIdentity = $durationPerfTrackManagedIdentity
-                FinalArray = $durationPerfTrackFinalArray
-            })
+        if ($PerfTracking) {
+            $null = $script:arrayPerformanceTracking.Add([PSCustomObject]@{
+                    Type = $spOrAppWithoutSP.SPOrAppOnly
+                    ServicePrincipalId = $spId
+                    ServicePrincipalDisplayName = $object.ServicePrincipalDetails.displayName
+                    ApplicationId = $object.Application.ApplicationDetails.id
+                    ApplicationDisplayName = $object.Application.ApplicationDetails.displayName
+                    ProcessedSequenceCount = $processedServicePrincipalsCount
+                    ServicePrincipalOwnedObjects = $durationPerfTrackServicePrincipalOwnedObjects
+                    ServicePrincipalOwners = $durationPerfTrackServicePrincipalOwners
+                    ServicePrincipalAADRoleAssignments = $durationPerfTrackServicePrincipalAADRoleAssignments
+                    ServicePrincipalAADRoleAssignedOn = $durationPerfTrackServicePrincipalAADRoleAssignedOn
+                    ServicePrincipalOauth2PermissionGrants = $durationPerfTrackServicePrincipalOauth2PermissionGrants
+                    SPOauth2PermissionGrantedTo = $durationPerfTrackSPOauth2PermissionGrantedTo
+                    ServicePrincipalAppRoleAssignments = $durationPerfTrackServicePrincipalAppRoleAssignments
+                    ServicePrincipalAppRoleAssignedTo = $durationPerfTrackServicePrincipalAppRoleAssignedTo
+                    AzureRoleAssignmentsPrep = $durationPerfTrackAzureRoleAssignmentsPrep
+                    AzureRoleAssignmentsOpt1 = $durationPerfTrackAzureRoleAssignmentsOpt1
+                    AzureRoleAssignmentsOpt2 = $durationPerfTrackAzureRoleAssignmentsOpt2
+                    ApplicationAADRoleAssignedOn = $durationPerfTrackApplicationAADRoleAssignedOn
+                    ApplicationOwner = $durationPerfTrackApplicationOwner
+                    ApplicationFederatedIdentityCredentials = $durationPerfTrackFederatedIdentityCredentials
+                    ApplicationSecrets = $durationPerfTrackApplicationSecrets
+                    ApplicationCertificates = $durationPerfTrackApplicationCertificates
+                    ManagedIdentity = $durationPerfTrackManagedIdentity
+                    FinalArray = $durationPerfTrackFinalArray
+                })
 
 
-        $durationPerfTrackServicePrincipalOwnedObjects = $null
-        $durationPerfTrackServicePrincipalOwners = $null
-        $durationPerfTrackServicePrincipalAADRoleAssignments = $null
-        $durationPerfTrackServicePrincipalAADRoleAssignedOn = $null
-        $durationPerfTrackServicePrincipalOauth2PermissionGrants = $null
-        $durationPerfTrackSPOauth2PermissionGrantedTo = $null
-        $durationPerfTrackServicePrincipalAppRoleAssignments = $null
-        $durationPerfTrackServicePrincipalAppRoleAssignedTo = $null
-        $durationPerfTrackAzureRoleAssignmentsPrep = $null
-        $durationPerfTrackAzureRoleAssignmentsOpt1 = $null
-        $durationPerfTrackAzureRoleAssignmentsOpt2 = $null
-        $durationPerfTrackApplicationAADRoleAssignedOn = $null
-        $durationPerfTrackApplicationOwner = $null
-        $durationPerfTrackFederatedIdentityCredentials = $null
-        $durationPerfTrackApplicationSecrets = $null
-        $durationPerfTrackApplicationCertificates = $null
-        $durationPerfTrackManagedIdentity = $null
-        $durationPerfTrackFinalArray = $null
+            $durationPerfTrackServicePrincipalOwnedObjects = $null
+            $durationPerfTrackServicePrincipalOwners = $null
+            $durationPerfTrackServicePrincipalAADRoleAssignments = $null
+            $durationPerfTrackServicePrincipalAADRoleAssignedOn = $null
+            $durationPerfTrackServicePrincipalOauth2PermissionGrants = $null
+            $durationPerfTrackSPOauth2PermissionGrantedTo = $null
+            $durationPerfTrackServicePrincipalAppRoleAssignments = $null
+            $durationPerfTrackServicePrincipalAppRoleAssignedTo = $null
+            $durationPerfTrackAzureRoleAssignmentsPrep = $null
+            $durationPerfTrackAzureRoleAssignmentsOpt1 = $null
+            $durationPerfTrackAzureRoleAssignmentsOpt2 = $null
+            $durationPerfTrackApplicationAADRoleAssignedOn = $null
+            $durationPerfTrackApplicationOwner = $null
+            $durationPerfTrackFederatedIdentityCredentials = $null
+            $durationPerfTrackApplicationSecrets = $null
+            $durationPerfTrackApplicationCertificates = $null
+            $durationPerfTrackManagedIdentity = $null
+            $durationPerfTrackFinalArray = $null
+        }
 
-    ($enrichmentProcessCounter).counter++
+        ($enrichmentProcessCounter).counter++
         if (($enrichmentProcessCounter).counter % $enrichmentProcessindicator -eq 0) {
             Write-Host "processed: $(($enrichmentProcessCounter).counter)"
         }
@@ -7997,25 +8092,27 @@ if (-not $NoJsonExport) {
 
 #endregion enrichedAADSPData
 
-Write-Host 'Processing totals per capability (in ms)'
-Write-Host ' ServicePrincipalOwnedObjects:' ($arrayPerformanceTracking.ServicePrincipalOwnedObjects | Measure-Object -Sum).Sum
-Write-Host ' ServicePrincipalOwners:' ($arrayPerformanceTracking.ServicePrincipalOwners | Measure-Object -Sum).Sum
-Write-Host ' ServicePrincipalAADRoleAssignments:' ($arrayPerformanceTracking.ServicePrincipalAADRoleAssignments | Measure-Object -Sum).Sum
-Write-Host ' ServicePrincipalAADRoleAssignedOn:' ($arrayPerformanceTracking.ServicePrincipalAADRoleAssignedOn | Measure-Object -Sum).Sum
-Write-Host ' ServicePrincipalOauth2PermissionGrants:' ($arrayPerformanceTracking.ServicePrincipalOauth2PermissionGrants | Measure-Object -Sum).Sum
-Write-Host ' SPOauth2PermissionGrantedTo:' ($arrayPerformanceTracking.SPOauth2PermissionGrantedTo | Measure-Object -Sum).Sum
-Write-Host ' ServicePrincipalAppRoleAssignments:' ($arrayPerformanceTracking.ServicePrincipalAppRoleAssignments | Measure-Object -Sum).Sum
-Write-Host ' ServicePrincipalAppRoleAssignedTo:' ($arrayPerformanceTracking.ServicePrincipalAppRoleAssignedTo | Measure-Object -Sum).Sum
-Write-Host ' AzureRoleAssignmentsPrep:' ($arrayPerformanceTracking.AzureRoleAssignmentsPrep | Measure-Object -Sum).Sum
-Write-Host ' AzureRoleAssignmentsOpt1:' ($arrayPerformanceTracking.AzureRoleAssignmentsOpt1 | Measure-Object -Sum).Sum
-Write-Host ' AzureRoleAssignmentsOpt2:' ($arrayPerformanceTracking.AzureRoleAssignmentsOpt2 | Measure-Object -Sum).Sum
-Write-Host ' ApplicationAADRoleAssignedOn:' ($arrayPerformanceTracking.ApplicationAADRoleAssignedOn | Measure-Object -Sum).Sum
-Write-Host ' ApplicationOwner:' ($arrayPerformanceTracking.ApplicationOwner | Measure-Object -Sum).Sum
-Write-Host ' ApplicationFederatedIdentityCredentials:' ($arrayPerformanceTracking.ApplicationFederatedIdentityCredentials | Measure-Object -Sum).Sum
-Write-Host ' ApplicationSecrets:' ($arrayPerformanceTracking.ApplicationSecrets | Measure-Object -Sum).Sum
-Write-Host ' ApplicationCertificates:' ($arrayPerformanceTracking.ApplicationCertificates | Measure-Object -Sum).Sum
-Write-Host ' ManagedIdentity:' ($arrayPerformanceTracking.ManagedIdentity | Measure-Object -Sum).Sum
-Write-Host ' FinalArray:' ($arrayPerformanceTracking.FinalArray | Measure-Object -Sum).Sum
+if ($PerfTracking) {
+    Write-Host 'Processing totals per capability (in ms)'
+    Write-Host ' ServicePrincipalOwnedObjects:' ($arrayPerformanceTracking.ServicePrincipalOwnedObjects | Measure-Object -Sum).Sum
+    Write-Host ' ServicePrincipalOwners:' ($arrayPerformanceTracking.ServicePrincipalOwners | Measure-Object -Sum).Sum
+    Write-Host ' ServicePrincipalAADRoleAssignments:' ($arrayPerformanceTracking.ServicePrincipalAADRoleAssignments | Measure-Object -Sum).Sum
+    Write-Host ' ServicePrincipalAADRoleAssignedOn:' ($arrayPerformanceTracking.ServicePrincipalAADRoleAssignedOn | Measure-Object -Sum).Sum
+    Write-Host ' ServicePrincipalOauth2PermissionGrants:' ($arrayPerformanceTracking.ServicePrincipalOauth2PermissionGrants | Measure-Object -Sum).Sum
+    Write-Host ' SPOauth2PermissionGrantedTo:' ($arrayPerformanceTracking.SPOauth2PermissionGrantedTo | Measure-Object -Sum).Sum
+    Write-Host ' ServicePrincipalAppRoleAssignments:' ($arrayPerformanceTracking.ServicePrincipalAppRoleAssignments | Measure-Object -Sum).Sum
+    Write-Host ' ServicePrincipalAppRoleAssignedTo:' ($arrayPerformanceTracking.ServicePrincipalAppRoleAssignedTo | Measure-Object -Sum).Sum
+    Write-Host ' AzureRoleAssignmentsPrep:' ($arrayPerformanceTracking.AzureRoleAssignmentsPrep | Measure-Object -Sum).Sum
+    Write-Host ' AzureRoleAssignmentsOpt1:' ($arrayPerformanceTracking.AzureRoleAssignmentsOpt1 | Measure-Object -Sum).Sum
+    Write-Host ' AzureRoleAssignmentsOpt2:' ($arrayPerformanceTracking.AzureRoleAssignmentsOpt2 | Measure-Object -Sum).Sum
+    Write-Host ' ApplicationAADRoleAssignedOn:' ($arrayPerformanceTracking.ApplicationAADRoleAssignedOn | Measure-Object -Sum).Sum
+    Write-Host ' ApplicationOwner:' ($arrayPerformanceTracking.ApplicationOwner | Measure-Object -Sum).Sum
+    Write-Host ' ApplicationFederatedIdentityCredentials:' ($arrayPerformanceTracking.ApplicationFederatedIdentityCredentials | Measure-Object -Sum).Sum
+    Write-Host ' ApplicationSecrets:' ($arrayPerformanceTracking.ApplicationSecrets | Measure-Object -Sum).Sum
+    Write-Host ' ApplicationCertificates:' ($arrayPerformanceTracking.ApplicationCertificates | Measure-Object -Sum).Sum
+    Write-Host ' ManagedIdentity:' ($arrayPerformanceTracking.ManagedIdentity | Measure-Object -Sum).Sum
+    Write-Host ' FinalArray:' ($arrayPerformanceTracking.FinalArray | Measure-Object -Sum).Sum
+}
 
 
 #endregion AADSP

@@ -74,6 +74,7 @@ aka links:
 * `DirectorySeparatorChar` - Set the character for directory seperation (default : [IO.Path]::DirectorySeparatorChar)
 * `OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes` - Switch to only report on Service Principals that have a role assigment within the scope of the data  collection contaxt
 * `CriticalAADRoles` - Microsoft Entra ID roles that should be considered as highly privileged/critical (default :@('62e90394-69f5-4237-9190-012177145e10', 'e8611ab8-c189-46e8-94e1-60213ab1f814', '7be44c8a-adaf-4e2a-84d6-ab2649e08a13') which are Global Administrator, Privileged Role Administrator, Privileged Authentication Administrator)
+* `PerfTracking` use switch (default off)
 
 # Data
 
@@ -144,6 +145,14 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 ![previewJSON](img/previewJSON.png)
 
 # Updates
+* 20260803
+    * AzureRoleAssignmentMapping: using SP-id HashSet
+    * AAD Groups nested resolution: ForEach-Object -Parallel
+    * ServicePrincipalAppRoleAssignedTo: Sort-Object -Property { $_.id }.
+    * Added parameter `-PerfTracking` switch (default off)
+    * azAPICallVersion 1.2.5 → 1.4.1
+    * ThrottleLimitGraph 20 → 30.
+    * Casing normalizations: Param→param, Throw→throw.
 * 20250121
     * Fix issue #40 - Use [AzAPICall](https://aka.ms/AzAPICall) PowerShell module version 1.2.5
     * Try to fix issue #41 - optimize hashtable processing
