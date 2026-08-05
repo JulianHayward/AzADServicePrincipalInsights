@@ -3,7 +3,7 @@ param
 (
     [string]$Product = 'AzADServicePrincipalInsights',
     [string]$ScriptPath = 'pwsh',
-    [string]$ProductVersion = 'v1_20260803_0',
+    [string]$ProductVersion = 'v1_20260805_0',
     [string][ValidateSet('AzAPICall', 'AzAPICallBeta')]$AzAPICallModuleName = 'AzAPICall',
     [string]$azAPICallVersion = '1.4.1',
     [string]$GitHubRepository = 'aka.ms/AzADServicePrincipalInsights',
@@ -18,7 +18,7 @@ param
     [switch]$DoTranscript,
     [int]$HtmlTableRowsLimit = 20000, #HTML -> becomes unresponsive depending on client device performance. A recommendation will be shown to download the CSV instead of opening the TF table
     [int]$ThrottleLimitARM = 10,
-    [int]$ThrottleLimitGraph = 30,
+    [int]$ThrottleLimitGraph = 25,
     [int]$ThrottleLimitLocal = 100,
     [switch]$PerfTracking,
     [string]$SubscriptionId4AzContext = 'undefined',
@@ -1694,6 +1694,9 @@ col_widths: ['5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '5%', '
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipals
 
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
+
     #region SUMMARYServicePrincipalOwners
 
     $startCustPolLoop = Get-Date
@@ -1876,6 +1879,9 @@ extensions: [{ name: 'sort' }]
     $endCustPolLoop = Get-Date
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalOwners
+
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
 
     #region SUMMARYApplicationOwners
     $startCustPolLoop = Get-Date
@@ -2060,6 +2066,9 @@ extensions: [{ name: 'sort' }]
     $endCustPolLoop = Get-Date
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYApplicationOwners
+
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
 
     #region SUMMARYServicePrincipalOwnedObjects
     $startCustPolLoop = Get-Date
@@ -2393,6 +2402,9 @@ btn_reset: true, highlight_keywords: true, alternate_rows: true, auto_filter: { 
 "@)
     }
 
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
+
     #region SUMMARYServicePrincipalsAADRoleAssignments
     $startCustPolLoop = Get-Date
     Write-Host '  processing Summary ServicePrincipalsAADRoleAssignments'
@@ -2610,6 +2622,9 @@ extensions: [{ name: 'sort' }]
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAADRoleAssignments
 
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
+
     #region SUMMARYServicePrincipalsAADRoleAssignedOn
     $startCustPolLoop = Get-Date
     Write-Host '  processing Summary ServicePrincipalsAADRoleAssignedOn'
@@ -2766,6 +2781,9 @@ extensions: [{ name: 'sort' }]
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAADRoleAssignedOn
 
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
+
     #region SUMMARYApplicationsAADRoleAssignedOn
     $startCustPolLoop = Get-Date
     Write-Host '  processing Summary ApplicationsAADRoleAssignedOn'
@@ -2920,6 +2938,9 @@ extensions: [{ name: 'sort' }]
     $endCustPolLoop = Get-Date
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYApplicationsAADRoleAssignedOn
+
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
 
     #region SUMMARYServicePrincipalsAppRoleAssignments
     $startCustPolLoop = Get-Date
@@ -3131,6 +3152,9 @@ extensions: [{ name: 'sort' }]
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAppRoleAssignments
 
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
+
     #region SUMMARYServicePrincipalsAppRoleAssignedTo
     $startCustPolLoop = Get-Date
     Write-Host '  processing Summary ServicePrincipalsAppRoleAssignedTo'
@@ -3291,6 +3315,9 @@ extensions: [{ name: 'sort' }]
     $endCustPolLoop = Get-Date
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsAppRoleAssignedTo
+
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
 
     #region SUMMARYServicePrincipalsOauth2PermissionGrants
     $startCustPolLoop = Get-Date
@@ -3717,6 +3744,9 @@ extensions: [{ name: 'sort' }]
 "@)
     }
 
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
+
     #region SUMMARYServicePrincipalsGroupMemberships
     $startCustPolLoop = Get-Date
     Write-Host '  processing Summary ServicePrincipalsGroupMemberships'
@@ -3876,6 +3906,9 @@ extensions: [{ name: 'sort' }]
     $endCustPolLoop = Get-Date
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYServicePrincipalsGroupMemberships
+
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
 
     #region SUMMARYApplicationSecrets
     $startCustPolLoop = Get-Date
@@ -4124,6 +4157,9 @@ extensions: [{ name: 'sort' }]
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYApplicationSecrets
 
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
+
     #region SUMMARYApplicationCertificates
     $startCustPolLoop = Get-Date
     Write-Host '  processing Summary ApplicationCertificates'
@@ -4369,6 +4405,9 @@ extensions: [{ name: 'sort' }]
     $endCustPolLoop = Get-Date
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYApplicationCertificates
+
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
 
     #region SUMMARYApplicationFederatedIdentityCredentials
     $startCustPolLoop = Get-Date
@@ -4682,6 +4721,9 @@ extensions: [{ name: 'sort' }]
 "@)
     }
 
+    #flush completed section(s) to disk and release memory (streaming)
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString()); [void]$htmlTenantSummary.Clear()
+
     #region SUMMARYHipos
     $startCustPolLoop = Get-Date
     Write-Host '  processing Summary HiPo Users'
@@ -4934,7 +4976,8 @@ extensions: [{ name: 'sort' }]
     Write-Host "   processing duration: $((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalMinutes) minutes ($((New-TimeSpan -Start $startCustPolLoop -End $endCustPolLoop).TotalSeconds) seconds)"
     #endregion SUMMARYHipos
 
-    $script:html += $htmlTenantSummary
+    $script:htmlStreamWriter.Write($htmlTenantSummary.ToString())
+    $htmlTenantSummary = $null
 
 }
 #endregion TenantSummary
@@ -5482,11 +5525,18 @@ else {
 
     $arraySPsAndAppsWithoutSP = [System.Collections.ArrayList]@()
     if ($OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes) {
-        $spsWithAzureResourceRoleAssignmentUnique = ($htCacheAssignmentsRole).values.assignment.properties.principalId | Sort-Object -Unique
+        #single O(n) pass into a HashSet (replaces the expensive '.values.assignment.properties.principalId | Sort-Object -Unique' flatten+sort; enables O(1) membership below)
+        $spsWithAzureResourceRoleAssignmentUnique = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($assignmentValue in ($htCacheAssignmentsRole).Values) {
+            $principalId = $assignmentValue.assignment.properties.principalId
+            if (-not [string]::IsNullOrEmpty($principalId)) {
+                [void]$spsWithAzureResourceRoleAssignmentUnique.Add($principalId)
+            }
+        }
     }
     foreach ($sp in $getServicePrincipals) {
         if ($OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes) {
-            if ($spsWithAzureResourceRoleAssignmentUnique -contains $sp.id) {
+            if ($spsWithAzureResourceRoleAssignmentUnique.Contains($sp.id)) {
                 $null = $arraySPsAndAppsWithoutSP.Add([PSCustomObject]@{
                         SPOrAppWithoutSP = 'SP'
                         Details = $sp
@@ -6433,7 +6483,14 @@ $startGroupsFromAzureRoleAssignments = Get-Date
 $counterBatch = [PSCustomObject] @{ Value = 0 }
 $batchSize = 1000
 $arrayObjectIdsToProcess = [System.Collections.ArrayList]@()
-$objectIdsUnique = ($htCacheAssignmentsRole).values.assignment.properties.principalId | Sort-Object -Unique
+#single O(n) pass into a HashSet (replaces the expensive '.values.assignment.properties.principalId | Sort-Object -Unique' flatten+sort)
+$objectIdsUnique = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($assignmentValue in ($htCacheAssignmentsRole).Values) {
+    $principalId = $assignmentValue.assignment.properties.principalId
+    if (-not [string]::IsNullOrEmpty($principalId)) {
+        [void]$objectIdsUnique.Add($principalId)
+    }
+}
 Write-Host " Unique objectIds that have Azure Role assignments: $($objectIdsUnique.Count)"
 foreach ($objectId in $objectIdsUnique) {
     if (-not $htAadGroups.ContainsKey($objectId)) {
@@ -6832,10 +6889,21 @@ if (-not $NoAzureResourceSideRelations) {
     #build O(1) lookup set of Service Principal ids (avoids O(n) '-contains' array scans in the loops below)
     $htServicePrincipalsIdsLookup = [System.Collections.Generic.HashSet[string]]::new([string[]]$getServicePrincipals.id)
 
+    #sub-timing: collect unique createdBy identities
+    $startARAMCollectCreatedBy = Get-Date
+    #collect unique createdBy identities via a single O(n) pass into a HashSet
+    #(replaces the expensive '($htCacheAssignmentsRole).values.assignment.properties.createdBy | Sort-Object -Unique' member-enumeration + sort)
+    $createdBySet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($assignmentValue in ($htCacheAssignmentsRole).Values) {
+        $createdByValue = $assignmentValue.assignment.properties.createdBy
+        if (-not [string]::IsNullOrEmpty($createdByValue)) {
+            [void]$createdBySet.Add($createdByValue)
+        }
+    }
+
     #resolving createdby/updatedby
     $htCreatedByUpdatedByObjectIdsToBeResolved = @{}
-    foreach ($createdByItem in ($htCacheAssignmentsRole).values.assignment.properties.createdBy | Sort-Object -Unique) {
-
+    foreach ($createdByItem in $createdBySet) {
         if ([guid]::TryParse(($createdByItem), $([ref][guid]::Empty))) {
             if (-not $htPrincipalsResolved.($createdByItem)) {
                 if ($htServicePrincipalsIdsLookup.Contains($createdByItem)) {
@@ -6849,9 +6917,11 @@ if (-not $NoAzureResourceSideRelations) {
             }
         }
     }
+    Write-Host "  ARAM collect createdBy duration: $((New-TimeSpan -Start $startARAMCollectCreatedBy -End (Get-Date)).TotalSeconds) seconds ($($createdBySet.Count) unique createdBy)"
 
     $createdByUpdatedByObjectIdsToBeResolvedCount = ($htCreatedByUpdatedByObjectIdsToBeResolved.Keys).Count
     if ($createdByUpdatedByObjectIdsToBeResolvedCount -gt 0) {
+        $startARAMResolve = Get-Date
         Write-Host "$createdByUpdatedByObjectIdsToBeResolvedCount unresolved createdBy identities"
         $arrayUnresolvedIdentities = @()
         $arrayUnresolvedIdentities = foreach ($unresolvedIdentity in $htCreatedByUpdatedByObjectIdsToBeResolved.keys) {
@@ -6862,9 +6932,25 @@ if (-not $NoAzureResourceSideRelations) {
         $arrayUnresolvedIdentitiesCount = $arrayUnresolvedIdentities.Count
         Write-Host "    $arrayUnresolvedIdentitiesCount unresolved identities that have a value"
         resolveObectsById -objects $arrayUnresolvedIdentities -targetHt 'htPrincipalsResolved'
+        Write-Host "  ARAM resolve createdBy (AzAPICall) duration: $((New-TimeSpan -Start $startARAMResolve -End (Get-Date)).TotalSeconds) seconds"
+    }
+
+    #precompute the final createdBy display string once per UNIQUE createdBy value (reusing $createdBySet)
+    #(avoids rebuilding the same formatted string for every assignment in the mapping loop below - on large tenants a handful
+    # of identities create the bulk of assignments, so this turns millions of redundant string builds into a few lookups)
+    $htResolvedCreatedByFull = @{}
+    foreach ($createdByItem in $createdBySet) {
+        if ($htPrincipalsResolved.($createdByItem)) {
+            $htResolvedCreatedByFull[$createdByItem] = $htPrincipalsResolved.($createdByItem).full
+        }
+        elseif ($htServicePrincipalsAndAppsOnlyEnriched.($createdByItem)) {
+            $hlper = $htServicePrincipalsAndAppsOnlyEnriched.($createdByItem)
+            $htResolvedCreatedByFull[$createdByItem] = "$($hlper.objectTypeConcatinated), DisplayName: $($hlper.ServicePrincipalDetails.displayName), Id: $($createdByItem)"
+        }
     }
 
     if (($htCacheAssignmentsRole).Keys.Count -gt 0) {
+        $startARAMMapLoop = Get-Date
         foreach ($assignment in ($htCacheAssignmentsRole).values) {
             #hoist repeated deep member access (otherwise traversed up to ~6x per iteration)
             $assignmentProperties = $assignment.assignment.properties
@@ -6873,14 +6959,9 @@ if (-not $NoAzureResourceSideRelations) {
 
             #todo: sp created ra in azure
             if (-not [string]::IsNullOrEmpty($assignmentCreatedBy)) {
-                if ($htPrincipalsResolved.($assignmentCreatedBy)) {
-                    $assignmentProperties.createdBy = $htPrincipalsResolved.($assignmentCreatedBy).full
-                }
-                else {
-                    if ($htServicePrincipalsAndAppsOnlyEnriched.($assignmentCreatedBy)) {
-                        $hlper = $htServicePrincipalsAndAppsOnlyEnriched.($assignmentCreatedBy)
-                        $assignmentProperties.createdBy = "$($hlper.objectTypeConcatinated), DisplayName: $($hlper.ServicePrincipalDetails.displayName), Id: $($assignmentCreatedBy)"
-                    }
+                $resolvedCreatedBy = $htResolvedCreatedByFull[$assignmentCreatedBy]
+                if ($null -ne $resolvedCreatedBy) {
+                    $assignmentProperties.createdBy = $resolvedCreatedBy
                 }
             }
             if ($htServicePrincipalsIdsLookup.Contains($assignmentPrincipalId)) {
@@ -6897,6 +6978,7 @@ if (-not $NoAzureResourceSideRelations) {
 
             }
         }
+        Write-Host "  ARAM mapping loop duration: $((New-TimeSpan -Start $startARAMMapLoop -End (Get-Date)).TotalSeconds) seconds"
     }
     else {
         Write-Host ' No RoleAssignments?!'
@@ -6910,6 +6992,7 @@ if (-not $NoAzureResourceSideRelations) {
 
 #region enrichedAADSPData
 Write-Host 'Enrichment starting prep'
+$startEnrichmentPrep = Get-Date
 $cu = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
 $appPasswordCredentialsExpiredCount = 0
 $appPasswordCredentialsGracePeriodExpiryCount = 0
@@ -6921,28 +7004,32 @@ $appKeyCredentialsExpiryOKCount = 0
 $appKeyCredentialsExpiryOKMoreThanMaxCount = 0
 
 $htSPandAPPHelper4AADRoleAssignmentsWithScope = @{}
-foreach ($aadRoleAssignment in $htServicePrincipalsAndAppsOnlyEnriched.values.ServicePrincipalAADRoleAssignments) {
-    if ($aadRoleAssignment.resourceScope -ne '/') {
-
-        if ($htApplications.($aadRoleAssignment.resourceScope -replace '/')) {
-            if (-not $htSPandAPPHelper4AADRoleAssignmentsWithScope.($aadRoleAssignment.resourceScope -replace '/')) {
-                $hlp = $htApplications.($aadRoleAssignment.resourceScope -replace '/')
-                $htSPandAPPHelper4AADRoleAssignmentsWithScope.($aadRoleAssignment.resourceScope -replace '/') = "Application: $($hlp.displayname) ($($hlp.id))"
-            }
-
-        }
-        else {
-            if ($htServicePrincipalsAndAppsOnlyEnriched.($aadRoleAssignment.resourceScope -replace '/')) {
-                if (-not $htSPandAPPHelper4AADRoleAssignmentsWithScope.($aadRoleAssignment.resourceScope -replace '/')) {
-                    $hlp = $htServicePrincipalsAndAppsOnlyEnriched.($aadRoleAssignment.resourceScope -replace '/').ServicePrincipalDetails
-                    $htSPandAPPHelper4AADRoleAssignmentsWithScope.($aadRoleAssignment.resourceScope -replace '/') = "ServicePrincipal: $($hlp.displayname) ($($hlp.id))"
+foreach ($spAppEnriched in $htServicePrincipalsAndAppsOnlyEnriched.Values) {
+    #nested foreach avoids materializing one giant flattened array via '.values.ServicePrincipalAADRoleAssignments' member-enumeration (memory)
+    foreach ($aadRoleAssignment in $spAppEnriched.ServicePrincipalAADRoleAssignments) {
+        $resourceScope = $aadRoleAssignment.resourceScope
+        if ($resourceScope -ne '/') {
+            #compute the slash-stripped scope id once (was recomputed up to 6x per iteration)
+            $scopeId = $resourceScope -replace '/'
+            if (-not $htSPandAPPHelper4AADRoleAssignmentsWithScope.ContainsKey($scopeId)) {
+                $hlpApp = $htApplications.($scopeId)
+                if ($hlpApp) {
+                    $htSPandAPPHelper4AADRoleAssignmentsWithScope.($scopeId) = "Application: $($hlpApp.displayname) ($($hlpApp.id))"
+                }
+                else {
+                    $hlpSp = $htServicePrincipalsAndAppsOnlyEnriched.($scopeId)
+                    if ($hlpSp) {
+                        $hlp = $hlpSp.ServicePrincipalDetails
+                        $htSPandAPPHelper4AADRoleAssignmentsWithScope.($scopeId) = "ServicePrincipal: $($hlp.displayname) ($($hlp.id))"
+                    }
                 }
             }
         }
     }
 }
-Write-Host 'Enrichment completed prep'
+Write-Host "Enrichment completed prep (SPandAPPHelper4AADRoleAssignmentsWithScope build) duration: $((New-TimeSpan -Start $startEnrichmentPrep -End (Get-Date)).TotalSeconds) seconds"
 
+$startEnrichmentBatchPrep = Get-Date
 $arrayUserAssignedIdentities4ResourcesGroupedByMI = $arrayUserAssignedIdentities4Resources | Group-Object -Property miPrincipalId
 
 Write-Host 'Enrichment starting'
@@ -6959,7 +7046,9 @@ Write-Host "Optimal batch size: $($batchSize)"
 $counterBatch = [PSCustomObject] @{ Value = 0 }
 $servicePrincipalsAndAppsOnlyEnrichedSPBatch = ($servicePrincipalsAndAppsOnlyEnriched) | Group-Object -Property { [math]::Floor($counterBatch.Value++ / $batchSize) }
 Write-Host "Processing data in $($servicePrincipalsAndAppsOnlyEnrichedSPBatch.Count) batches"
+Write-Host "  Enrichment batch/setup prep duration: $((New-TimeSpan -Start $startEnrichmentBatchPrep -End (Get-Date)).TotalSeconds) seconds"
 
+$startEnrichmentParallelLoop = Get-Date
 $servicePrincipalsAndAppsOnlyEnrichedSPBatch | ForEach-Object -Parallel {
 
     $cu = $using:cu
@@ -8065,6 +8154,7 @@ $servicePrincipalsAndAppsOnlyEnrichedSPBatch | ForEach-Object -Parallel {
 
 
 } -ThrottleLimit $ThrottleLimitLocal
+Write-Host "  Enrichment parallel loop duration: $((New-TimeSpan -Start $startEnrichmentParallelLoop -End (Get-Date)).TotalSeconds) seconds"
 Write-Host "Enrichment completed: $($servicePrincipalsAndAppsOnlyEnriched.Count) ServicePrincipals processed"
 $endEnrichmentSP = Get-Date
 $duration = New-TimeSpan -Start $startEnrichmentSP -End $endEnrichmentSP
@@ -8144,8 +8234,10 @@ if (-not $NoCsvExport) {
 
 Write-Host 'Building HTML'
 
-$html = $null
-$html += @"
+#stream the report directly to disk (avoids building one huge in-memory string and the ~2GB System.String ceiling)
+$htmlFilePath = "$($outputPath)$($DirectorySeparatorChar)$($fileName).html"
+$htmlStreamWriter = [System.IO.StreamWriter]::new($htmlFilePath, $false, [System.Text.UTF8Encoding]::new($false))
+$htmlStreamWriter.Write(@"
 <!doctype html>
 <html lang="en" style="height: 100%">
 <head>
@@ -8268,12 +8360,9 @@ $html += @"
 </head>
 <body>
     <div class="se-pre-con"></div>
-"@
-
-$html += @"
     <div class="summprnt" id="summprnt">
     <div class="summary" id="summary"><p class="pbordered">Microsoft Entra ID Service Principal Insights ($($ProductVersion))</p>
-"@
+"@)
 
 $startSummary = Get-Date
 
@@ -8284,35 +8373,25 @@ $endSummary = Get-Date
 Write-Host " Building Summary duration: $((New-TimeSpan -Start $startSummary -End $endSummary).TotalMinutes) minutes ($((New-TimeSpan -Start $startSummary -End $endSummary).TotalSeconds) seconds)"
 
 
-$html += @'
+$htmlStreamWriter.Write(@"
     </div><!--summary-->
     </div><!--summprnt-->
-'@
-
-
-$html += @'
     <div class="footer">
     <div class="VersionDiv VersionLatest"></div>
     <div class="VersionDiv VersionThis"></div>
     <div class="VersionAlert"></div>
-'@
-
-
-$html += @"
         <abbr style="text-decoration:none" title="$($paramsUsed)"><i class="fa fa-question-circle" aria-hidden="true"></i></abbr> $newerVersionAvailableHTML
         <hr>
-"@
-
-$html += @'
     </div>
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/toggle_v004_004.js"></script>
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/collapsetable_v004_002.js"></script>
     <script src="https://www.azadvertizer.net/azadserviceprincipalinsights/js/version_v001_003.js"></script>
 </body>
 </html>
-'@
+"@)
 
-$html | Set-Content -Path "$($outputPath)$($DirectorySeparatorChar)$($fileName).html" -Encoding utf8 -Force
+$htmlStreamWriter.Flush()
+$htmlStreamWriter.Dispose()
 
 $endBuildHTML = Get-Date
 Write-Host "Building HTML total duration: $((New-TimeSpan -Start $startBuildHTML -End $endBuildHTML).TotalMinutes) minutes ($((New-TimeSpan -Start $startBuildHTML -End $endBuildHTML).TotalSeconds) seconds)"

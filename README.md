@@ -145,6 +145,8 @@ Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $pscredenti
 ![previewJSON](img/previewJSON.png)
 
 # Updates
+* 20260805
+    * Memory and performance optimizations
 * 20260803
     * AzureRoleAssignmentMapping: using SP-id HashSet
     * AAD Groups nested resolution: ForEach-Object -Parallel
