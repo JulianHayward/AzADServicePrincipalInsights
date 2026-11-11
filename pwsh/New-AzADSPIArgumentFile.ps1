@@ -36,6 +36,15 @@ GitHub Actions: path of the variables file. Without it the values are read from 
 Other scripts whose parameters are also set in the variables file (e.g. a second script of the same workflow); their
 variables are not reported as unknown.
 
+.PARAMETER KnownVariable
+Names in the variables file that are no parameter of a script (e.g. the switches of the workflow); not reported as unknown.
+ScriptDir (the folder of the scripts) is always known; with -VariablesFile its value must equal $env:ScriptDir when that is set.
+
+.PARAMETER WorkflowSwitch
+Switches of the workflow in the variables file (e.g. WebAppPublish, IngestToLogAnalytics): no script parameters, but on/off for
+later steps. Each must be true, false or empty (= false); GitHub Actions gets them as step outputs ('<name>=true|false' in
+$env:GITHUB_OUTPUT) for the 'if:' of later steps - values never reach a script text or the environment of later steps.
+
 .PARAMETER SettingsFile
 Path of the settings file. Default: <ScriptFile without .ps1>.arguments.psd1, if it exists.
 
@@ -65,6 +74,12 @@ param(
 
     [string[]]
     $KnownScriptFile,
+
+    [string[]]
+    $KnownVariable,
+
+    [string[]]
+    $WorkflowSwitch,
 
     [string]
     $SettingsFile,
@@ -276,6 +291,11 @@ foreach ($knownScript in $KnownScriptFile) {
         $null = $knownVariableNames.Add($parameterAst.Name.VariablePath.UserPath)
     }
 }
+foreach ($knownName in @($KnownVariable) + @($WorkflowSwitch)) {
+    if ($knownName) { $null = $knownVariableNames.Add($knownName) }
+}
+#the folder of the scripts (both platforms) - no script parameter
+$null = $knownVariableNames.Add('ScriptDir')
 
 #settings: data only (Import-PowerShellDataFile does not run code)
 $settings = @{}
@@ -322,6 +342,11 @@ if ($VariablesFile) {
     }
     $fileVariables = readVariablesFile -Path $VariablesFile
     $source = "variables file '$($VariablesFile)'"
+    #GitHub: the step 'Script directory' read ScriptDir with a small parser to find this script - the full parser must agree,
+    #else the steps would run the scripts of another folder
+    if ($env:ScriptDir -and $fileVariables.ContainsKey('ScriptDir') -and $fileVariables['ScriptDir'] -cne $env:ScriptDir) {
+        stopWithError "Variable 'ScriptDir' = '$($fileVariables['ScriptDir'])' in the $($source) differs from the script directory of the workflow ('$($env:ScriptDir)', step 'Script directory') - write the value without quotes, e.g. value: pwsh"
+    }
 }
 else {
     $source = 'environment (pipeline variables)'
@@ -473,6 +498,28 @@ if ($VariablesFile) {
 }
 #endregion parameters
 
+#region workflow switches
+#on/off of later steps (not script parameters): true, false or empty - the same rule as a switch parameter
+$workflowSwitchValues = [ordered]@{}
+foreach ($switchName in ($WorkflowSwitch | Where-Object { $_ })) {
+    $value = $null
+    if ($VariablesFile) {
+        $null = $fileVariables.TryGetValue($switchName, [ref]$value)
+    }
+    else {
+        $value = getEnvironmentValue -Name $switchName
+    }
+    $value = "$value".Trim()
+    if ($value -eq '') {
+        $value = 'false'
+    }
+    if ($value -notin 'true', 'false') {
+        stopWithError "Variable '$($switchName)' = '$($value)' - switch: true or false (or empty)"
+    }
+    $workflowSwitchValues[$switchName] = $value.ToLowerInvariant()
+}
+#endregion workflow switches
+
 #region checks
 #Mandatory parameters of the script (except the ones the pipeline/workflow sets) and the Required ones of the settings
 $mandatoryParameters = foreach ($parameterAst in $ast.ParamBlock.Parameters) {
@@ -528,4 +575,10 @@ if ($outputDirectory -and -not (Test-Path -LiteralPath $outputDirectory)) {
 }
 ConvertTo-Json -InputObject $sortedParams -Depth 10 | Set-Content -LiteralPath $OutputFile -Encoding utf8NoBOM -ErrorAction Stop
 Write-Host "Arguments file: '$($OutputFile)'"
+foreach ($entry in $workflowSwitchValues.GetEnumerator()) {
+    Write-Host "Workflow switch: $($entry.Key) = $($entry.Value)"
+    if ($env:GITHUB_OUTPUT) {
+        Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "$($entry.Key)=$($entry.Value)" -Encoding utf8NoBOM
+    }
+}
 #endregion write

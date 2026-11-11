@@ -23,6 +23,8 @@ flowchart LR
 
 ## Before you start
 
+The Microsoft Entra steps are described in the [Azure portal](https://portal.azure.com) (**Microsoft Entra ID**). The [Microsoft Entra admin center](https://entra.microsoft.com/) has the same pages, if you prefer it.
+
 ### Who you need
 
 | Steps | Role |
@@ -57,7 +59,7 @@ Then follow your option.
 
 **1. Create the app registration**
 
-1. [Microsoft Entra admin center](https://entra.microsoft.com/) > **App registrations** > **New registration**
+1. [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > **New registration**
 1. Name, e.g. `AzADServicePrincipalInsights_SC`; keep **Accounts in this organizational directory only** (other account types don't work) > **Register**
 1. Note the **Application (client) ID** and the **Directory (tenant) ID**
 
@@ -76,7 +78,7 @@ Then follow your option.
 
 **4. Connect the app registration to Azure DevOps**
 
-1. Microsoft Entra admin center > your app registration > **Certificates & secrets** > **Federated credentials** > **Add credential**
+1. Azure portal > **Microsoft Entra ID** > your app registration > **Certificates & secrets** > **Federated credentials** > **Add credential**
 1. Scenario **Other issuer**; paste the **Issuer** and the **Subject identifier** (if a type is offered: **Explicit subject identifier**); a name, e.g. `AzADServicePrincipalInsights_AzDO`; keep the audience `api://AzureADTokenExchange` > **Add**
 
 **5. Finish the service connection**
@@ -110,9 +112,9 @@ If Azure DevOps added a role assignment of its own, remove it as in option B - '
 
 The pipeline identity needs four Microsoft Graph permissions: `Application.Read.All`, `Group.Read.All`, `RoleManagement.Read.Directory`, `User.Read.All`. A '**Privileged Role Administrator**' or '**Global Administrator**' grants them.
 
-**In the Microsoft Entra admin center** (options A and B)
+**In the Azure portal** (options A and B)
 
-1. [Microsoft Entra admin center](https://entra.microsoft.com/) > **App registrations** > **All applications** > your app registration (option B: search for the **Application (client) ID** shown on the service connection)
+1. [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > **All applications** > your app registration (option B: search for the **Application (client) ID** shown on the service connection)
 1. **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions**
 1. Select `Application.Read.All`, `Group.Read.All`, `RoleManagement.Read.Directory` and `User.Read.All` > **Add permissions**
 1. **Grant admin consent for _&lt;tenant&gt;_** > **Yes**
@@ -121,7 +123,7 @@ The pipeline identity needs four Microsoft Graph permissions: `Application.Read.
 
 More data with [optional permissions](README.md#microsoft-graph) - grant them the same way. `DelegatedPermissionGrant.Read.All` makes the run faster.
 
-> **Checkpoint 3:** Microsoft Entra admin center > **Enterprise applications** > your pipeline identity (option C: filter **Application type** = **Managed Identities**) > **Permissions** lists the permissions.
+> **Checkpoint 3:** Azure portal > **Microsoft Entra ID** > **Enterprise applications** > your pipeline identity (option C: filter **Application type** = **Managed Identities**) > **Permissions** lists the permissions.
 
 ## Step 4 - Allow the pipeline to save the output in the repository
 
@@ -165,9 +167,9 @@ Runs must not overlap: they change the same files. Keep the schedule and manual 
 |---|---|---|
 | The run doesn't start: the service connection (or service endpoint) `<YourServiceConnection>` `could not be found` | The variables file still holds the placeholder, or a different name. | Step 5, part 1. |
 | Step **Create arguments**: `Variable 'ManagementGroupId' = '<YourManagementGroupId>' - provide the value ...` | The variables file still holds the placeholder. | Step 5, part 1. |
-| Step **Prerequisites check**: `Repository permission test failed` | The pipeline may not save the output. | Step 4 - the message names the account. |
+| Step **Check prerequisites**: `Repository permission test failed` | The pipeline may not save the output. | Step 4 - the message names the account. |
 | `MG '<ID>' Reader permission check FAILED` | The pipeline identity has no '**Reader**' on the management group, or `ManagementGroupId` holds the display name. | Step 2 ('**Reader**'), step 5 (ID). |
-| `AAD ... Read permission check FAILED` | The Microsoft Graph permissions are missing. | Step 3. |
+| `AAD ... Read permission check FAILED - the Microsoft Graph application permission ... is missing` | The message names the Microsoft Graph permission that is missing - not added, added as **Delegated** instead of **Application**, or without admin consent. | Step 3: the pipeline identity's **Permissions** must list it (type **Application**). |
 | The run waits: `This pipeline needs permission to access a resource` | First run of the pipeline. | **View** > **Permit** (step 5). |
 | `AADSTS70052` | The app registration allows accounts of other tenants. | Use an app registration with **Accounts in this organizational directory only**. |
 | `AADSTS700213: No matching federated identity record found` | The federated credential doesn't match the service connection. | Option A, part 4: copy **Issuer** and **Subject identifier** again from the service connection. |

@@ -1,8 +1,8 @@
 # AzADServicePrincipalInsights
 # First things first:
-# 1. Mandatory: in AzADServicePrincipalInsights.variables.yml set 'ServiceConnection' and 'ManagementGroupId' (all script
-#    parameters are set in that file)
-# 2. Mandatory: check the branch of the schedule (line 21)
+# 1. Mandatory: in AzADServicePrincipalInsights.variables.yml set 'ServiceConnection' and 'ManagementGroupId' (the script folder,
+#    all script parameters and the optional features are set in that file)
+# 2. Mandatory: check the branch of the schedule ('schedules' below)
 # Documentation: https://github.com/JulianHayward/AzADServicePrincipalInsights/blob/main/setup/azure-devops.md
 
 trigger: none
@@ -25,15 +25,13 @@ jobs:
   timeoutInMinutes: 0
 
   pool:
-    vmImage: 'ubuntu-22.04'
+    vmImage: 'ubuntu-latest'
 
   steps:
   - checkout: self
     fetchDepth: 1
 
-  # review F-11: 'checkout: self' takes the commit the run was queued with; a run that waited for another one (exclusive lock,
-  # overlapping schedule) would work on the change-history state before that run's push and fail on 'git pull --rebase'.
-  # The current head of the branch is fetched and checked out before the run.
+  # the head of the branch, not the commit the run was queued with: a run that waited continues on the output of the previous run
   - pwsh: |
       $branch = $env:BUILD_SOURCEBRANCH
       if ($branch -like 'refs/heads/*') {
@@ -46,26 +44,23 @@ jobs:
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
-  # The pipeline variables (AzADServicePrincipalInsights.variables.yml, variable groups, pipeline UI variables) become the
-  # script parameters: New-AzADSPIArgumentFile.ps1 reads them from the environment, converts them to the parameter types,
-  # checks them and writes the arguments file (agent temp directory - not part of the pushed output); the next steps read
-  # it with Read-AzADSPIArgumentFile.ps1 and pass the parameters by splatting - a value is never part of a script text
+  # The pipeline variables (variables file, variable groups, pipeline UI) become checked arguments files (agent temp); the later
+  # steps splat them, so a value is never part of a script text. WebAppPublish / IngestToLogAnalytics: true or false (checked).
   - pwsh: |
-      & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/New-AzADSPIArgumentFile.ps1" `
-        -ScriptFile "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/$($env:SCRIPT)" `
-        -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" `
-        -ScriptPath $env:SCRIPTDIR
-      if ($env:INGESTTOLOGANALYTICS -eq 'True') {
-        & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/New-AzADSPIArgumentFile.ps1" `
-          -ScriptFile "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/$($env:INGESTSCRIPT)" `
-          -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIIngestArguments.json"
+      $dir = "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)"
+      & "$dir/New-AzADSPIArgumentFile.ps1" -ScriptFile "$dir/AzADServicePrincipalInsights.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" -ScriptPath $env:SCRIPTDIR -WorkflowSwitch WebAppPublish, IngestToLogAnalytics
+      if ($env:INGESTTOLOGANALYTICS -eq 'true') {
+        & "$dir/New-AzADSPIArgumentFile.ps1" -ScriptFile "$dir/Send-AzADSPILogAnalyticsData.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIIngestArguments.json"
+      }
+      if ($env:WEBAPPPUBLISH -eq 'true') {
+        & "$dir/New-AzADSPIArgumentFile.ps1" -ScriptFile "$dir/Publish-AzADSPIWebApp.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIPublishArguments.json"
       }
     displayName: 'Create arguments'
 
   - pwsh: |
       $params = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json"
-      & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/$($env:SCRIPTPREREQUISITES)" -OutputPath $params['OutputPath']
-    displayName: 'Prerequisites check'
+      & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Test-AzADSPIPrerequisite.ps1" -OutputPath $params['OutputPath']
+    displayName: 'Check prerequisites'
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
@@ -76,53 +71,21 @@ jobs:
       pwsh: true
       Inline: |
         $params = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json"
-        . "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/$($env:SCRIPT)" @params
+        . "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/AzADServicePrincipalInsights.ps1" @params
       azurePowerShellVersion: latestVersion
     displayName: 'Run AzADServicePrincipalInsights'
     env:
-      # review F-12: AzAPICall renews an expired federated (workload identity) login on Azure DevOps with this token (runs longer
-      # than the token lifetime of about an hour)
+      # AzAPICall renews an expired workload identity federation login with it (runs longer than about an hour)
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
-  # The build values and the token are read from the environment, never substituted into the script text with $(...):
-  # a branch or pipeline name containing quotes or $( ) would otherwise become code in the step that holds the token
+  # the build values and the token are read from the environment, never substituted into a script text with $(...)
   - pwsh: |
-      Write-Host '#################################'
-      Write-Host 'Push AzADServicePrincipalInsights output to repository'
-      Write-Host '#################################'
-      $executionDateTimeInternationalReadable = Get-Date -Format 'dd-MMM-yyyy HH:mm:ss'
-      $currentTimeZone = (Get-TimeZone).Id
-      $branch = $env:BUILD_SOURCEBRANCH #refs/heads/<branch> - also for branch names with '/'
-      $authHeader = "AUTHORIZATION: bearer $($env:SYSTEM_ACCESSTOKEN)"
-      # review F-64: the identity of this repository only (--global changed it for every later job of a self-hosted agent)
-      git config user.email 'AzADServicePrincipalInsightsPipeline@azdo.com'
-      $pipelineInfo = "Pipeline: '$($env:BUILD_DEFINITIONNAME)' 'rev $($env:BUILD_BUILDNUMBER)' (Project: $([uri]::EscapeDataString($env:SYSTEM_TEAMPROJECT)); Repository: $($env:BUILD_REPOSITORY_NAME); Branch: $($env:BUILD_SOURCEBRANCHNAME) Commit: $($env:BUILD_SOURCEVERSION))"
-      git config user.name $pipelineInfo
-      git add --all
-      git diff --cached --quiet
-      if ($LASTEXITCODE -eq 0) {
-        #'git commit' fails when nothing changed
-        Write-Host 'No changes in the output - nothing to commit'
-        exit 0
-      }
-      git commit -m "wiki $executionDateTimeInternationalReadable ($currentTimeZone)"
-      if ($LASTEXITCODE -ne 0) { Write-Host '##vso[task.logissue type=error]git commit failed'; exit 1 }
-      #another run may have pushed in the meantime; without this the push is rejected
-      git -c http.extraheader="$authHeader" pull --rebase origin $branch
-      if ($LASTEXITCODE -ne 0) {
-        #runs that overlap change the same output files (report, CSV, change history); see README 'Azure DevOps and GitHub Actions'
-        git rebase --abort
-        Write-Host "##vso[task.logissue type=error]git pull --rebase from '$branch' failed: another run changed the same output files at the same time. Runs of this pipeline must not overlap (schedule, manual runs; optionally an exclusive lock); run it again."
-        exit 1
-      }
-      git -c http.extraheader="$authHeader" push origin "HEAD:$branch"
-      if ($LASTEXITCODE -ne 0) { Write-Host "##vso[task.logissue type=error]git push to '$branch' failed - the build service needs 'Contribute' on the repository"; exit 1 }
+      & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Push-AzADSPIOutput.ps1" -RepositoryPath $env:SYSTEM_DEFAULTWORKINGDIRECTORY
     displayName: 'Push AzADServicePrincipalInsights output to repository'
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
-  # review F-55: the ingestion after the push (as on GitHub): a failing ingestion no longer keeps the report and the change history
-  # from being pushed
+  # after the push: a failing ingestion or publishing does not keep the output from being pushed
   - task: AzurePowerShell@5
     condition: and(succeeded(), eq(variables['IngestToLogAnalytics'], 'true'))
     inputs:
@@ -133,14 +96,12 @@ jobs:
         $output = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Get-AzADSPIOutputPath.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" -BasePath $env:SYSTEM_DEFAULTWORKINGDIRECTORY
         $params = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIIngestArguments.json"
         $params['ImportPath'] = $output.JsonPath
-        . "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/$($env:INGESTSCRIPT)" @params
+        . "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Send-AzADSPILogAnalyticsData.ps1" @params
       azurePowerShellVersion: latestVersion
     displayName: 'Upload data to Log Analytics via Logs ingestion API'
     env:
-      # review F-12: AzAPICall renews an expired federated (workload identity) login on Azure DevOps with this token
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
-  # Publishes only to a WebApp that requires a login (Authentication v1 or v2, unauthenticated requests not allowed)
   - task: AzurePowerShell@5
     condition: and(succeeded(), eq(variables['WebAppPublish'], 'true'))
     inputs:
@@ -148,11 +109,9 @@ jobs:
       ScriptType: 'InlineScript'
       pwsh: true
       Inline: |
-        & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Publish-AzADSPIWebApp.ps1" `
+        $publish = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIPublishArguments.json"
+        & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Publish-AzADSPIWebApp.ps1" @publish `
           -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" `
-          -WebAppSubscriptionId $env:WEBAPPSUBSCRIPTIONID `
-          -WebAppResourceGroup $env:WEBAPPRESOURCEGROUP `
-          -WebAppName $env:WEBAPPNAME `
           -BasePath $env:SYSTEM_DEFAULTWORKINGDIRECTORY `
           -ZipDirectory $env:AGENT_TEMPDIRECTORY
       azurePowerShellVersion: latestVersion

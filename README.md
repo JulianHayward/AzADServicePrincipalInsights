@@ -83,19 +83,24 @@ From the console, as a user with **Reader** on the management group:
 ```powershell
 Install-Module -Name Az.Accounts
 Connect-AzAccount -TenantId <tenantId>
-git clone https://github.com/JulianHayward/AzADServicePrincipalInsights.git
-Set-Location AzADServicePrincipalInsights
-./pwsh/AzADServicePrincipalInsights.ps1 -ManagementGroupId <managementGroupId> -OutputPath ./output
+
+#the script needs only two files in one folder (no Git needed)
+New-Item -ItemType Directory -Force -Path "$HOME/AzADSPI" | Out-Null
+Set-Location "$HOME/AzADSPI"
+foreach ($file in 'AzADServicePrincipalInsights.ps1', 'permissionClassification.json') {
+    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/pwsh/$file" -OutFile $file
+}
+./AzADServicePrincipalInsights.ps1 -ManagementGroupId <managementGroupId> -OutputPath ./output
 ```
 
-Open the `.html` file in the output folder. The script offers to install the AzAPICall module if it is missing. Step by step, with checks and troubleshooting: [setup/console.md](setup/console.md).
+Or clone the repository (`git clone https://github.com/JulianHayward/AzADServicePrincipalInsights.git`) and run `./pwsh/AzADServicePrincipalInsights.ps1`. Open the `.html` file in the output folder. The script offers to install the AzAPICall module if it is missing. Step by step, with checks and troubleshooting: [setup/console.md](setup/console.md).
 
 As a service principal (USER: the Application (client) ID, PASSWORD: the client secret):
 
 ```powershell
 $credential = Get-Credential
 Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $credential
-./pwsh/AzADServicePrincipalInsights.ps1 -ManagementGroupId <managementGroupId> -OutputPath ./output
+./AzADServicePrincipalInsights.ps1 -ManagementGroupId <managementGroupId> -OutputPath ./output
 ```
 
 ## Setup
@@ -211,7 +216,9 @@ The column, property and file names are stable. New versions add columns and fil
 
 The script parameters are set in a variables file, one entry per parameter, with the same names and layout on both platforms:
 - Azure DevOps: [.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml](.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml). This is the variables template of the pipeline. Variables from variable groups or the pipeline UI with the name of a parameter are used too; secret variables are not visible to the step.
-- GitHub Actions: [.github/AzADServicePrincipalInsights.variables.yml](.github/AzADServicePrincipalInsights.variables.yml). The workflow settings (script directory, Web App publishing, Log Analytics ingestion on/off) are in the `env` section of the workflow.
+- GitHub Actions: [.github/AzADServicePrincipalInsights.variables.yml](.github/AzADServicePrincipalInsights.variables.yml).
+
+Both files start with the settings of the pipeline/workflow - Azure DevOps: section 'Pipeline' (`ServiceConnection`, `ScriptDir`); GitHub: section 'Workflow' (`ScriptDir`). From there on they have the same content: the required parameters, the optional ones (grouped), then the optional features with their switch first - sections 'Log Analytics ingestion' and 'Web App publishing'. The pipeline/workflow file keeps the schedule; on GitHub also the sign-in and the path of the variables file (`env`).
 
 **Values**
 - Each entry documents its type, default and an example.
@@ -224,6 +231,8 @@ The script parameters are set in a variables file, one entry per parameter, with
 - The run steps read the arguments file ([pwsh/Read-AzADSPIArgumentFile.ps1](pwsh/Read-AzADSPIArgumentFile.ps1)) and pass the parameters to the script by splatting, so a value is never part of a script text.
 - The same mechanism provides the arguments of the Log Analytics ingestion ([pwsh/Send-AzADSPILogAnalyticsData.ps1](pwsh/Send-AzADSPILogAnalyticsData.ps1)). The pipeline or workflow sets the JSON folder of the run.
 
+**Pushing the output:** the step 'Push AzADServicePrincipalInsights output to repository' ([pwsh/Push-AzADSPIOutput.ps1](pwsh/Push-AzADSPIOutput.ps1), the same script on both platforms) commits only when the output changed, sets the git identity for the repository only, rebases on a run that pushed in the meantime, and then pushes to the branch of the run.
+
 **Web App publishing:** [pwsh/Publish-AzADSPIWebApp.ps1](pwsh/Publish-AzADSPIWebApp.ps1) publishes only to a Web App that requires a login (App Service Authentication v1 or v2, unauthenticated requests not allowed).
 
 **Runs must not overlap.** They change the same output files (report, CSVs, change history), so a second run could not push its output.
@@ -232,8 +241,8 @@ The script parameters are set in a variables file, one entry per parameter, with
 - **Either way,** an overlapping run stops in the push step with a clear message. Run it again.
 
 **Migrating from an earlier pipeline/workflow:** move your values into the variables file. Parameters that were added to the run line by hand are set in the variables file now.
-- **Azure DevOps:** the `managementGroupIds` / `subscriptionQuotaIdWhitelistParameters` parameters and the `variables` block of the pipeline become `ManagementGroupId` / `SubscriptionQuotaIdWhitelist` (comma separated) and the other entries of `AzADServicePrincipalInsights.variables.yml`.
-- **GitHub:** `ManagementGroups_s` / `OutputPath` / the Data Collection Rule values of the workflow `env` become `ManagementGroupId` / `OutputPath` / the entries of the section 'Log Analytics ingestion'.
+- **Azure DevOps:** the `managementGroupIds` / `subscriptionQuotaIdWhitelistParameters` parameters and the `variables` block of the pipeline become `ManagementGroupId` / `SubscriptionQuotaIdWhitelist` (comma separated) and the other entries of `AzADServicePrincipalInsights.variables.yml`; `ServiceConnection` and `ScriptDir` are in its section 'Pipeline'.
+- **GitHub:** `ManagementGroups_s` / `OutputPath` / `WebAppPublish`, `IngestToLogAnalytics` and the `WebApp*` values / the Data Collection Rule values of the workflow `env` become `ManagementGroupId` / `OutputPath` / the entries of the sections 'Web App publishing' and 'Log Analytics ingestion' of `.github/AzADServicePrincipalInsights.variables.yml`. `ScriptDir` moves to its section 'Workflow'; the workflow's `env` keeps only `VariablesFile`.
 
 ## Change history
 

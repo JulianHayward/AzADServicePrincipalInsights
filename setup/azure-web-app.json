@@ -70,7 +70,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional: object ID of the service principal (or managed identity) of the pipeline that publishes the report - gets the role Website Contributor on the web app (requires Owner, User Access Administrator or Role Based Access Control Administrator)"
+        "description": "Optional: object ID of the enterprise application (service principal) of the pipeline identity that publishes the report, or the object (principal) ID of its managed identity - not the object ID of the app registration - gets the role Website Contributor on the web app (requires Owner, User Access Administrator or Role Based Access Control Administrator)"
       }
     },
     "tags": {

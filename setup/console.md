@@ -4,11 +4,13 @@ The quickest way to get a report: run the script on your own computer (or in a G
 
 ## Before you start
 
+The Microsoft Entra steps are described in the [Azure portal](https://portal.azure.com) (**Microsoft Entra ID**). The [Microsoft Entra admin center](https://entra.microsoft.com/) has the same pages, if you prefer it.
+
 **Tools** - install these on your computer:
 
-- [Git](https://git-scm.com/downloads)
 - [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (7.0.3 or later; Windows PowerShell 5.1 is not supported)
 - The PowerShell module `Az.Accounts`: `Install-Module -Name Az.Accounts`
+- Only if you clone the repository (step 2): [Git](https://git-scm.com/downloads)
 
 Nothing to install? Use a [GitHub Codespace](#run-in-a-github-codespace-instead) - it has all the tools.
 
@@ -34,6 +36,20 @@ Note the **management group ID** (on the overview page of the management group, 
 
 ## Step 2 - Get the code
 
+The script needs only two files in one folder: `AzADServicePrincipalInsights.ps1` and `permissionClassification.json`. In PowerShell 7:
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$HOME/AzADSPI" | Out-Null
+Set-Location "$HOME/AzADSPI"
+foreach ($file in 'AzADServicePrincipalInsights.ps1', 'permissionClassification.json') {
+    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/pwsh/$file" -OutFile $file
+}
+```
+
+Downloaded with the browser instead (GitHub > the file > **Download raw file**)? Put both files in one folder; on Windows, run `Unblock-File ./AzADServicePrincipalInsights.ps1` once. For a new version, download both again.
+
+Or clone the repository with Git - that also gets the setup files and the tests, and you update with `git pull`:
+
 ```powershell
 git clone 'https://github.com/JulianHayward/AzADServicePrincipalInsights.git'
 Set-Location 'AzADServicePrincipalInsights'
@@ -45,8 +61,10 @@ Set-Location 'AzADServicePrincipalInsights'
 Connect-AzAccount -TenantId <tenant ID> -UseDeviceAuthentication
 
 New-Item -ItemType Directory -Force -Path "$HOME/AzADSPI-Output"
-./pwsh/AzADServicePrincipalInsights.ps1 -ManagementGroupId <management group ID> -OutputPath "$HOME/AzADSPI-Output"
+./AzADServicePrincipalInsights.ps1 -ManagementGroupId <management group ID> -OutputPath "$HOME/AzADSPI-Output"
 ```
+
+- With the cloned repository (or in a Codespace) the script is in the folder `pwsh`: `./pwsh/AzADServicePrincipalInsights.ps1`.
 
 - On the first run, the script asks to install the PowerShell module `AzAPICall` - answer `y`.
 - The run takes a few minutes; large tenants take longer.
@@ -80,7 +98,8 @@ The output contains insights about your tenant. Store it like other sensitive da
 | What you see | Why | What to do |
 |---|---|---|
 | `MG '<ID>' Reader permission check FAILED` | You don't have '**Reader**' on the management group, or you entered the display name instead of the ID. | Step 1. |
-| `AAD ... Read permission check FAILED` (only as a service principal) | The Microsoft Graph permissions are missing. | [Run as a service principal](#run-as-a-service-principal-instead), part 2. |
+| `AAD ... Read permission check FAILED - the Microsoft Graph application permission ... is missing` (only as a service principal) | The message names the Microsoft Graph permission that is missing - not added, added as **Delegated** instead of **Application**, or without admin consent. | [Run as a service principal](#run-as-a-service-principal-instead), part 2. |
+| `permissionClassification.json not found` | The script is alone in its folder. | Put `permissionClassification.json` next to it (step 2). |
 | `Install it first: Install-Module -Name AzAPICall -RequiredVersion <version>` | The script runs unattended (e.g. `pwsh -NonInteractive`) and can't ask. | Run the command shown, then run the script again. |
 | The report has no styling and shows all sections on one page | The browser can't reach azadvertizer.net. | Open the report on a computer with internet access. |
 
@@ -92,9 +111,9 @@ The repository includes a [Codespace](https://docs.github.com/codespaces/getting
 
 A service principal can't read users, groups and applications in Microsoft Entra ID by default. Before the first run:
 
-1. The service principal needs the '**Reader**' role on the management group - as in step 1, with the object ID of the service principal (**Enterprise applications** > the application > **Object ID**).
+1. The service principal needs the '**Reader**' role on the management group - as in step 1, with the object ID of its **enterprise application** (**Enterprise applications** > the application > **Object ID** - not the object ID under **App registrations**; see [Which ID is which?](README.md#which-id-is-which)).
 1. A '**Privileged Role Administrator**' or '**Global Administrator**' grants it four Microsoft Graph permissions:
-   1. [Microsoft Entra admin center](https://entra.microsoft.com/) > **App registrations** > the application > **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions**
+   1. [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > the application > **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions**
    1. Select `Application.Read.All`, `Group.Read.All`, `RoleManagement.Read.Directory` and `User.Read.All` > **Add permissions**
    1. **Grant admin consent for _&lt;tenant&gt;_** > **Yes** - the status changes to **Granted for _&lt;tenant&gt;_**
 

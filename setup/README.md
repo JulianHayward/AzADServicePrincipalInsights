@@ -2,6 +2,8 @@
 
 **[Setup assistant](https://www.azadvertizer.net/azadserviceprincipalinsights/setup-assistant.html)** asks a few questions (where to run it, how to sign in, which optional features) and gives you the steps for your setup, with your values filled into the commands. It sends nothing and stores nothing. The same page is in this folder ([setup-assistant.html](setup-assistant.html)) - open it from your clone to use it offline.
 
+The Microsoft Entra steps are described in the [Azure portal](https://portal.azure.com) (**Microsoft Entra ID**). The [Microsoft Entra admin center](https://entra.microsoft.com/) has the same pages, if you prefer it.
+
 ## Choose your guide
 
 | You want | Guide |
@@ -20,6 +22,17 @@ After GitHub or Azure DevOps, optionally:
 The output contains insights about your tenant: who has which permissions, credentials and owners. Keep the repository private. The GitHub workflows stop if the repository is public, and the Web App publishing stops if the Web App can be opened without signing in.
 
 The guides contain every step you need. The rest of this page is the reference: all permissions and how the parameters are set.
+
+## Which ID is which?
+
+An identity in Microsoft Entra ID has several IDs, and the setup needs the right one in each place:
+
+| ID | Where you find it | Used for |
+|---|---|---|
+| **Application (client) ID** | **App registrations** > the app > **Overview** (also shown on the enterprise application) | signing in: `CLIENT_ID`, `CREDS`, the service connection, `-EntraClientId` |
+| **Object ID of the enterprise application** (service principal) | **Enterprise applications** > the app > **Overview** > **Object ID** | roles and permissions: `-PublisherPrincipalObjectId`, `principalId`, the Microsoft Graph permission script |
+| **Object (principal) ID of a managed identity** | **Managed Identities** > the identity > **Overview** | the same as the object ID of an enterprise application - a managed identity has no app registration |
+| Object ID of the app registration | **App registrations** > the app > **Overview** > **Object ID** | **not used** in this setup - it is a different object than the enterprise application, and a role assignment to it fails (`PrincipalTypeNotSupported`) |
 
 ## Permissions
 
@@ -52,7 +65,7 @@ A '**Privileged Role Administrator**' or '**Global Administrator**' grants them.
 
 **App registration, in the portal**
 
-1. [Microsoft Entra admin center](https://entra.microsoft.com/) > **App registrations** > **All applications** > your app registration
+1. [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > **All applications** > your app registration
 1. **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions**
 1. Select the permissions > **Add permissions**
 1. **Grant admin consent for _&lt;tenant&gt;_** > **Yes** - the status changes to **Granted for _&lt;tenant&gt;_**
@@ -79,7 +92,7 @@ foreach ($permission in $permissions) {
 }
 ```
 
-Check: Microsoft Entra admin center > **Enterprise applications** > your identity (a managed identity: filter **Application type** = **Managed Identities**) > **Permissions** lists the permissions.
+Check: Azure portal > **Microsoft Entra ID** > **Enterprise applications** > your identity (a managed identity: filter **Application type** = **Managed Identities**) > **Permissions** lists the permissions.
 
 ### Optional features
 
@@ -96,3 +109,5 @@ Every parameter of the script is described in the [README](../README.md#paramete
 - Azure DevOps: [.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml](../.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml)
 
 An empty value means "not set" (the script default applies). A switch is `true`/`false`, a list is comma separated (`mgId0,mgId1`). Each entry in the file documents its type, default and an example.
+
+Both files start with the settings of the pipeline/workflow (Azure DevOps: `ServiceConnection`, `ScriptDir`; GitHub: `ScriptDir`); from the section 'Required' on they have the same content. The optional features have their own sections, each with its switch first: 'Log Analytics ingestion' (`IngestToLogAnalytics`) and 'Web App publishing' (`WebAppPublish`). The schedule (and on GitHub the sign-in) is in the pipeline/workflow file.

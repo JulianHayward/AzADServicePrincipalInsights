@@ -170,7 +170,7 @@ Describe 'batch 4: pipelines' {
             $index = $script:Ado.IndexOf($step)
             $script:Ado.Substring($index, 400) | Should -Match 'SYSTEM_ACCESSTOKEN: \$\(System\.AccessToken\)' -Because $step
         }
-        $script:Gh[1] | Should -Match "(?m)^      - name: Connect Azure OIDC \(again\)\r?\n        if: env\.WebAppPublish == 'true' \|\| env\.IngestToLogAnalytics == 'true'"
+        $script:Gh[1] | Should -Match "(?m)^      - name: Connect Azure OIDC \(again\)\r?\n        if: steps\.arguments\.outputs\.WebAppPublish == 'true' \|\| steps\.arguments\.outputs\.IngestToLogAnalytics == 'true'"
     }
     It 'F-55: Azure DevOps pushes before the ingestion (as GitHub)' {
         $script:Ado.IndexOf("displayName: 'Push AzADServicePrincipalInsights output to repository'") | Should -BeLessThan $script:Ado.IndexOf("displayName: 'Upload data to Log Analytics via Logs ingestion API'")

@@ -162,6 +162,16 @@ Describe 'Log Analytics template' {
         $script:Template.variables.streamName | Should -Be "[format('Custom-{0}', parameters('tableName'))]"
         $dcr.kind | Should -Be 'Direct' -Because 'Send-AzADSPILogAnalyticsData.ps1 uses the own logs ingestion endpoint of the rule'
     }
+    It 'creates the workspace only with createWorkspace (default false); the table waits for it' {
+        #real test 2026-11-11: createWorkspace true created workspace, table (30 columns) and rule; false left the existing workspace unchanged
+        $script:Template.parameters.createWorkspace.type | Should -Be 'bool'
+        $script:Template.parameters.createWorkspace.defaultValue | Should -BeFalse -Because 'true would overwrite the settings of an existing workspace'
+        $workspace = @($script:Template.resources).where({ $_.type -eq 'Microsoft.OperationalInsights/workspaces' })[0]
+        $workspace.condition | Should -Be "[parameters('createWorkspace')]"
+        $workspace.name | Should -Be "[parameters('workspaceName')]"
+        $table = @($script:Template.resources).where({ $_.type -eq 'Microsoft.OperationalInsights/workspaces/tables' })[0]
+        $table.dependsOn | Should -Contain "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+    }
     It 'the Deploy to Azure button of the guide points to the template on the main branch' {
         $guide = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'setup/log-analytics.md')
         $m = [regex]::Match($guide, '\(https://portal\.azure\.com/#create/Microsoft\.Template/uri/(?<uri>[^)\s]+)\)')
@@ -169,6 +179,16 @@ Describe 'Log Analytics template' {
         $uri = [uri]::UnescapeDataString($m.Groups['uri'].Value)
         $uri | Should -Be 'https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/setup/log-analytics-dcr.json'
         Join-Path $script:RepoRoot ($uri -replace '^https://raw\.githubusercontent\.com/JulianHayward/AzADServicePrincipalInsights/main/', '') | Should -Exist
+    }
+}
+
+Describe 'permission check messages' {
+    It 'every failed Microsoft Graph check names a required permission of the permission reference (setup/README.md)' {
+        $readme = Get-Content -Raw -LiteralPath (Join-Path $script:SetupDir 'README.md')
+        $required = @([regex]::Matches($readme, '(?m)^\| `(?<p>[\w.]+)` \| required') | ForEach-Object { $_.Groups['p'].Value })
+        $required.Count | Should -Be 4
+        $failed = @([regex]::Matches((Get-Content -Raw -LiteralPath $script:MainScriptPath), "'AAD \w+ Read permission check FAILED - the Microsoft Graph application permission (?<p>[\w.]+) \(with admin consent\) is missing'") | ForEach-Object { $_.Groups['p'].Value })
+        @($failed | Sort-Object) | Should -Be @($required | Sort-Object)
     }
 }
 

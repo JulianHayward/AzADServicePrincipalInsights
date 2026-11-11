@@ -1,13 +1,22 @@
 # AzADServicePrincipalInsights - GitHub Actions variables (.github/workflows/AzADServicePrincipalInsights*.yml)
-# Same names and layout as the Azure DevOps variables template (.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml).
+# The section 'Workflow' (script folder), then the parameters of the scripts and the optional features (Log Analytics
+# ingestion, Web App publishing). The sign-in and the schedule are set in the workflow file.
+# From the section 'Required' on the same content as the Azure DevOps variables template (.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml).
 # Variable name = parameter name of the script; empty value = not set (the script default applies).
 # Values are plain text (no PowerShell code): a switch is true/false, a list is comma separated.
 # The step 'Create arguments' (pwsh/New-AzADSPIArgumentFile.ps1) converts and checks them; the script gets them as parameters.
-# The workflow settings (script directory, WebApp publishing, Log Analytics ingestion on/off) are in the env section of the workflow.
 # Secrets do not belong here: the workflow adds them in the run step (OIDC: SUBSCRIPTION_ID).
 
 variables:
-### Required Variables
+
+### Workflow
+
+  # Folder of the AzADServicePrincipalInsights scripts, relative to the repository root - adjust if AzADServicePrincipalInsights is part of an existing repository
+  - name: ScriptDir
+    # String | example: value: my folder/pwsh
+    value: pwsh
+
+### Required
 
   # The Management Group ID(s) to process - the ID, not the display name; casing matters (Linux!=linuX). Empty: the Tenant Root Group
   - name: ManagementGroupId
@@ -19,7 +28,7 @@ variables:
     # String | example: value: wiki
     value: wiki
 
-### Optional Variables - Modify as Needed
+### Optional: scope of the data collection
 
   # Process only Subscriptions whose QuotaId starts with one of the values
   - name: SubscriptionQuotaIdWhitelist
@@ -35,6 +44,8 @@ variables:
   - name: OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes
     # Switch | example: value: true
     value:
+
+### Optional: classification and thresholds
 
   # Microsoft Entra ID roles (role definition IDs) treated as critical in addition to the roles Microsoft marks as privileged
   - name: CriticalAADRoles
@@ -61,6 +72,8 @@ variables:
     # Integer | default = 730 | example: value: 365
     value:
 
+### Optional: output
+
   # Do not export the enriched data as CSV
   - name: NoCsvExport
     # Switch | example: value: true
@@ -85,6 +98,18 @@ variables:
   - name: FileTimeStampFormat
     # String | default = yyyyMMdd_HHmmss | example: value: yyyyMMdd_HHmm
     value:
+
+  # Do not record the change history (on by default: the changes since the previous run are appended to a file in the output folder, README: Change history)
+  - name: NoChangeHistory
+    # Switch | example: value: true
+    value:
+
+  # Period (days) of the report section 'Changes' - the history file itself is kept without time limit
+  - name: ChangeHistoryDays
+    # Integer | default = 30 | range 1-3650 | example: value: 90
+    value:
+
+### Optional: performance, troubleshooting, telemetry
 
   # Parallel Azure Resource Manager API requests
   - name: ThrottleLimitARM
@@ -126,17 +151,12 @@ variables:
     # Switch | example: value: true
     value:
 
-  # Do not record the change history (on by default: the changes since the previous run are appended to a file in the output folder, README: Change history)
-  - name: NoChangeHistory
+### Log Analytics ingestion (Send-AzADSPILogAnalyticsData.ps1) - optional, guide: setup/log-analytics.md
+
+  # Upload the JSON output to Log Analytics (Logs ingestion API) - set the variables below
+  - name: IngestToLogAnalytics
     # Switch | example: value: true
-    value:
-
-  # Period (days) of the report section 'Changes' - the history file itself is kept without time limit
-  - name: ChangeHistoryDays
-    # Integer | default = 30 | range 1-3650 | example: value: 90
-    value:
-
-### Log Analytics ingestion (Send-AzADSPILogAnalyticsData.ps1) - used when IngestToLogAnalytics is true
+    value: false
 
   # Subscription ID of the Data Collection Rule
   - name: DataCollectionRuleSubscriptionId
@@ -167,3 +187,25 @@ variables:
   - name: MaxRequestBytes
     # Integer | default = 921600 | range 10240-1048576 | example: value: 524288
     value:
+
+### Web App publishing (Publish-AzADSPIWebApp.ps1) - optional, guide: setup/azure-web-app.md
+
+  # Publish the HTML report to an Azure Web App that requires a login (App Service Authentication) - set the variables below
+  - name: WebAppPublish
+    # Switch | example: value: true
+    value: false
+
+  # Subscription ID of the Web App
+  - name: WebAppSubscriptionId
+    # String | example: value: 2674403a-4acd-40e6-a694-2ac7b968761e
+    value: '<YourWebAppSubscriptionId>'
+
+  # Resource group of the Web App
+  - name: WebAppResourceGroup
+    # String | example: value: rg-webapp
+    value: '<YourWebAppResourceGroup>'
+
+  # Name of the Web App
+  - name: WebAppName
+    # String | example: value: azadspi-report
+    value: '<YourWebAppName>'

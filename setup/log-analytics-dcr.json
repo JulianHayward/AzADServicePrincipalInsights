@@ -2,12 +2,24 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "metadata": {
-    "description": "AzADServicePrincipalInsights: Log Analytics custom table and Data Collection Rule for Send-AzADSPILogAnalyticsData.ps1 (Logs Ingestion API). Deploy into the resource group of the Log Analytics workspace. See setup/log-analytics.md."
+    "description": "AzADServicePrincipalInsights: Log Analytics custom table and Data Collection Rule for Send-AzADSPILogAnalyticsData.ps1 (Logs Ingestion API), optionally the workspace too (createWorkspace). Deploy into the resource group of the Log Analytics workspace. See setup/log-analytics.md."
   },
   "parameters": {
     "workspaceName": {
       "type": "string",
-      "metadata": { "description": "Name of the existing Log Analytics workspace (in the resource group of the deployment)" }
+      "metadata": { "description": "Name of the Log Analytics workspace in the resource group of the deployment - the existing one, or the new one (createWorkspace)" }
+    },
+    "createWorkspace": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": { "description": "true only if there is no workspace yet: creates the workspace workspaceName (pricing tier pay-as-you-go, PerGB2018). For an existing workspace leave it false - true would overwrite its settings (e.g. the retention)" }
+    },
+    "workspaceRetentionInDays": {
+      "type": "int",
+      "defaultValue": 30,
+      "minValue": 30,
+      "maxValue": 730,
+      "metadata": { "description": "Only with createWorkspace: how long the workspace keeps the data, in days (30 is included in the price)" }
     },
     "tableName": {
       "type": "string",
@@ -27,7 +39,7 @@
     "principalId": {
       "type": "string",
       "defaultValue": "",
-      "metadata": { "description": "Optional: object ID of the identity of the pipeline/workflow; gets the role Monitoring Metrics Publisher on the Data Collection Rule" }
+      "metadata": { "description": "Optional: object ID of the enterprise application (service principal) of the pipeline identity, or the object (principal) ID of its managed identity - not the object ID of the app registration; gets the role Monitoring Metrics Publisher on the Data Collection Rule" }
     },
     "principalType": {
       "type": "string",
@@ -74,9 +86,21 @@
   },
   "resources": [
     {
+      "condition": "[parameters('createWorkspace')]",
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2023-09-01",
+      "name": "[parameters('workspaceName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": { "name": "PerGB2018" },
+        "retentionInDays": "[parameters('workspaceRetentionInDays')]"
+      }
+    },
+    {
       "type": "Microsoft.OperationalInsights/workspaces/tables",
       "apiVersion": "2022-10-01",
       "name": "[format('{0}/{1}', parameters('workspaceName'), parameters('tableName'))]",
+      "dependsOn": [ "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]" ],
       "properties": {
         "plan": "Analytics",
         "schema": {

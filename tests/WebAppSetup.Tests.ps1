@@ -101,12 +101,17 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
                 'GET *applications(appId=*' { return respond $global:WebAppSetupTest.ExistingApplication }
                 'GET *applications?*' { return respond @{ value = @($global:WebAppSetupTest.FoundApplications) } }
                 'POST */applications' { return respond @{ id = 'app-object-id'; appId = $global:WebAppSetupTest.AppId; signInAudience = 'AzureADMyOrg'; web = @{ redirectUris = @() } } 201 }
+                "GET *servicePrincipals?*appId eq 'pipeline-app-id'*" { return respond @{ value = @(@{ id = '66666666-6666-6666-6666-666666666666' }) } }
                 "GET *servicePrincipals?*appId eq '00000003-0000-0000-c000-000000000000'*" {
                     return respond @{ value = @(@{ id = 'graph-sp-id'; oauth2PermissionScopes = @('openid', 'profile', 'email', 'offline_access', 'User.Read' | ForEach-Object { @{ value = $_; id = "scope-$_" } }) }) }
                 }
                 'GET *servicePrincipals?*' { return respond @{ value = @() } }
                 'POST */servicePrincipals' { return respond @{ id = 'sp-object-id' } 201 }
                 'GET *oauth2PermissionGrants?*' { return respond @{ value = @() } }
+                'GET *directoryObjects/*' {
+                    if ($null -eq $global:WebAppSetupTest.PublisherObject) { return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"Request_ResourceNotFound"}}' } }
+                    return respond $global:WebAppSetupTest.PublisherObject
+                }
                 'GET *appRoleAssignedTo' { return respond @{ value = @() } }
                 'GET *federatedIdentityCredentials' { return respond @{ value = @() } }
                 'PUT */userAssignedIdentities/*' { return respond @{ id = "$($target.Split('?')[0])"; properties = @{ clientId = 'mi-client-id'; principalId = 'mi-principal-id' } } }
@@ -118,6 +123,7 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
         $global:WebAppSetupTest.FoundApplications = @()
         $global:WebAppSetupTest.ExistingApplication = $null
         $global:WebAppSetupTest.DefaultHostName = 'azadspi-contoso.azurewebsites.net'
+        $global:WebAppSetupTest.PublisherObject = @{ '@odata.type' = '#microsoft.graph.servicePrincipal'; displayName = 'pipeline'; servicePrincipalType = 'Application' }
     }
 
     It 'Assignment: the access control before the authentication of the web app, the federated credential last' {
@@ -196,6 +202,23 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
         $call.Target | Should -BeLike "$siteId/providers/Microsoft.Authorization/roleAssignments/$($expectedName)?*"
         $call.Body.properties.principalId | Should -Be $script:PublisherId
         $call.Body.properties.roleDefinitionId | Should -BeLike '*/roleDefinitions/de139f84-1756-47ae-9be6-808fbbe84772'
+    }
+
+    It 'the object ID of an app registration as pipeline identity: its enterprise application gets the role (seen 2026-11-11: 400 PrincipalTypeNotSupported)' {
+        $global:WebAppSetupTest.PublisherObject = @{ '@odata.type' = '#microsoft.graph.application'; displayName = 'pipeline app'; appId = 'pipeline-app-id' }
+        invokeSetup @{ ManagementGroupId = 'Contoso'; PublisherPrincipalObjectId = $script:PublisherId }
+        $call = (getCalls 'PUT' '*/providers/Microsoft.Authorization/roleAssignments/*')[0]
+        $call.Body.properties.principalId | Should -Be '66666666-6666-6666-6666-666666666666'
+    }
+
+    It 'stops before creating anything when the pipeline identity does not exist or is no service principal' {
+        $global:WebAppSetupTest.PublisherObject = $null
+        { invokeSetup @{ ManagementGroupId = 'Contoso'; PublisherPrincipalObjectId = $script:PublisherId } } | Should -Throw '*does not exist in this tenant*'
+        getCalls 'PUT' '*' | Should -BeNullOrEmpty
+        getCalls 'POST' '*' | Should -BeNullOrEmpty
+        $global:WebAppSetupTest.PublisherObject = @{ '@odata.type' = '#microsoft.graph.user'; displayName = 'someone' }
+        { invokeSetup @{ ManagementGroupId = 'Contoso'; PublisherPrincipalObjectId = $script:PublisherId } } | Should -Throw '*is a user, not the pipeline identity*'
+        getCalls 'PUT' '*' | Should -BeNullOrEmpty
     }
 
     It 'GroupClaim: no assignment, the groups claim and the group check of the web app' {

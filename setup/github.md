@@ -21,6 +21,8 @@ flowchart LR
 
 ## Before you start
 
+The Microsoft Entra steps are described in the [Azure portal](https://portal.azure.com) (**Microsoft Entra ID**). The [Microsoft Entra admin center](https://entra.microsoft.com/) has the same pages, if you prefer it.
+
 ### Who you need
 
 | Steps | Role |
@@ -52,7 +54,7 @@ Note the **management group ID** first: Azure portal > **Management groups** > y
 
 **1. Create the app registration**
 
-1. [Microsoft Entra admin center](https://entra.microsoft.com/) > **App registrations** > **New registration**
+1. [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > **New registration**
 1. Name, e.g. `AzADServicePrincipalInsights_GitHub`; keep **Accounts in this organizational directory only** > **Register**
 1. Note the **Application (client) ID** and the **Directory (tenant) ID**
 
@@ -60,10 +62,19 @@ Note the **management group ID** first: Azure portal > **Management groups** > y
 
 - **Option A:** in the app registration > **Certificates & secrets** > **Federated credentials** > **Add credential**
   1. Scenario **GitHub Actions deploying Azure resources**
-  1. **Organization**: your GitHub organization; **Repository**: your repository name; **Entity type**: **Branch**; **GitHub branch name**: `main` (the default branch of the imported repository)
+  1. **Organization** and **Organization ID**: the owner of the repository - your GitHub organization (or your user name, for a repository of your personal account) and its number
+  1. **Repository** and **Repository ID**: your repository name and its number
+  1. **Entity type**: **Branch**; **GitHub branch name**: `main` (the default branch of the imported repository)
+  1. **Subject identifier** now shows `repo:<organization>@<organization ID>/<repository>@<repository ID>:ref:refs/heads/main`
   1. A name, e.g. `AzADServicePrincipalInsights_GitHub` > **Add**
 
-  Only runs of that branch can sign in. The report's section 'Federated identity credentials' shows this trust.
+  **Finding the two IDs** - take both from the repository itself, then they belong to it for sure:
+  - GitHub CLI (first the organization ID, then the repository ID): `gh api repos/<organization>/<repository> --jq '.owner.id, .id'`
+  - Browser: signed in to GitHub, open the repository > **View page source** > search for `octolytics-dimension`: `user_id` is the organization ID (also for an organization), `repository_id` the repository ID
+
+  Looking up the organization ID by name (`https://api.github.com/orgs/<organization>`, for a personal account `https://api.github.com/users/<user name>`) works too - but check the name: a similarly named account has a different ID, and the sign-in fails.
+
+  Why the IDs: GitHub puts them into the token of repositories created after July 15, 2026 - your imported repository is one of them ([immutable subject](https://learn.microsoft.com/entra/workload-id/workload-identities-github-immutable-subjects)). Only runs of that branch of exactly this repository can sign in; a renamed or newly created repository with the same name can't. The report's section 'Federated identity credentials' shows this trust.
 - **Option B:** in the app registration > **Certificates & secrets** > **Client secrets** > **New client secret** > a description and an expiry > **Add**. Copy the **Value** now - it is shown only once.
 
 **3. Give it the '**Reader**' role**
@@ -93,7 +104,7 @@ Your repository > **Settings** > **Secrets and variables** > **Actions** > **New
 
 The app registration needs four Microsoft Graph permissions. A '**Privileged Role Administrator**' or '**Global Administrator**' grants them:
 
-1. [Microsoft Entra admin center](https://entra.microsoft.com/) > **App registrations** > **All applications** > your app registration
+1. [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > **All applications** > your app registration
 1. **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions**
 1. Select `Application.Read.All`, `Group.Read.All`, `RoleManagement.Read.Directory` and `User.Read.All` > **Add permissions**
 1. **Grant admin consent for _&lt;tenant&gt;_** > **Yes**
@@ -109,7 +120,7 @@ More data with [optional permissions](README.md#microsoft-graph) - grant them th
 In your repository, edit `.github/AzADServicePrincipalInsights.variables.yml`:
 
 - `ManagementGroupId`: replace `<YourManagementGroupId>` with your management group ID (exact upper and lower case). Several: comma separated.
-- All other variables are optional and explained in the file.
+- All other variables are optional and explained in the file. The optional features have their own sections at the end, each with its switch first ([Log Analytics](log-analytics.md), [Web App](azure-web-app.md)).
 
 Commit the change.
 
@@ -132,12 +143,13 @@ Runs of the same branch wait for each other: they change the same files. A manua
 |---|---|---|
 | Step **Create arguments**: `Variable 'ManagementGroupId' = '<YourManagementGroupId>' - provide the value ...` | The variables file still holds the placeholder. | Step 4, part 1. |
 | Step **Check prerequisites**: `Repository '...' is accessible from the public ...` | The report would be readable by anyone. | Make the repository private. |
-| Step **Connect Azure OIDC** fails with `AADSTS700213: No matching federated identity record found` | The federated credential doesn't match the repository or branch. | Step 2, part 2: check organization, repository and branch name. |
+| Step **Connect Azure OIDC** fails with `AADSTS700213: No matching federated identity record found` | The federated credential doesn't match the repository or branch - or the IDs: a repository created after July 15, 2026 sends `repo:<organization>@<ID>/<repository>@<ID>:...`, an older one `repo:<organization>/<repository>:...` (unless switched to the new format in its OIDC settings). | The error message shows the subject GitHub sent (`... for presented assertion subject 'repo:...'`): compare it character by character with the **Subject identifier** of the credential (step 2, part 2) - names, both IDs, branch. |
 | Step **Connect Azure** / **Connect Azure OIDC** fails with an error about the subscription | The subscription in the secrets is not in the management group, or the '**Reader**' role is missing. | Step 2, parts 3 and 4. |
 | `MG '<ID>' Reader permission check FAILED` | No '**Reader**' on the management group, or `ManagementGroupId` holds the display name. | Step 2, part 3; step 4. |
-| `AAD ... Read permission check FAILED` | The Microsoft Graph permissions are missing. | Step 3. |
+| `AAD ... Read permission check FAILED - the Microsoft Graph application permission ... is missing` | The message names the Microsoft Graph permission that is missing - not added, added as **Delegated** instead of **Application**, or without admin consent. | Step 3: **API permissions** must show it with type **Application** and status **Granted for <tenant>**. |
+| Step **Script directory**: `Variable 'ScriptDir' in '...' = '...' - the folder of the AzADServicePrincipalInsights scripts` | `ScriptDir` in the variables file doesn't name the folder with the scripts. | Set it to the folder, relative to the repository root (default `pwsh`). |
 | Step **Push AzADServicePrincipalInsights output to repository** fails with `403` | The workflow may not write to the branch (a branch protection rule, or your organization limits the workflow token). | Allow the push: **Settings** > **Branches**, or **Settings** > **Actions** > **General** > **Workflow permissions**. |
-| `git pull --rebase failed: another run changed the same output files at the same time` | Two runs overlapped. | Run it again. |
+| `git pull --rebase ... failed: another run changed the same output files at the same time` | Two runs overlapped. | Run it again. |
 | Option B: the sign-in fails with `AADSTS7000222` | The client secret has expired. | Create a new client secret and update `CREDS` - or switch to option A. |
 
 ## Updating

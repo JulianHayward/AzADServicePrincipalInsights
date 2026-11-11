@@ -15,6 +15,10 @@ Describe 'getFederatedCredentialTrust' {
         @{ Issuer = 'https://token.actions.githubusercontent.com'; Subject = 'repo:contoso/app:ref:refs/heads/main'; Type = 'GitHub Actions'; Trust = 'repository contoso/app, branch main'; Finding = '' }
         @{ Issuer = 'https://token.actions.githubusercontent.com'; Subject = 'repo:contoso/app:environment:prod'; Type = 'GitHub Actions'; Trust = 'repository contoso/app, environment prod'; Finding = '' }
         @{ Issuer = 'https://token.actions.githubusercontent.com'; Subject = 'repo:contoso/app:pull_request'; Type = 'GitHub Actions'; Trust = 'repository contoso/app, any pull request'; Finding = 'broad*' }
+        #GitHub's immutable subject: owner and repository with their IDs
+        @{ Issuer = 'https://token.actions.githubusercontent.com'; Subject = 'repo:contoso@5544123/app@821093847:ref:refs/heads/main'; Type = 'GitHub Actions'; Trust = 'repository contoso/app (owner ID 5544123, repository ID 821093847), branch main'; Finding = '' }
+        @{ Issuer = 'https://token.actions.githubusercontent.com'; Subject = 'repo:contoso@5544123/app@821093847:environment:prod'; Type = 'GitHub Actions'; Trust = 'repository contoso/app (owner ID 5544123, repository ID 821093847), environment prod'; Finding = '' }
+        @{ Issuer = 'https://token.actions.githubusercontent.com'; Subject = 'repo:contoso@5544123/app@821093847:pull_request'; Type = 'GitHub Actions'; Trust = 'repository contoso/app (owner ID 5544123, repository ID 821093847), any pull request'; Finding = 'broad*' }
         @{ Issuer = 'https://vstoken.dev.azure.com/01ce4a3c'; Subject = 'sc://org/proj/conn'; Type = 'Azure DevOps'; Trust = 'organization org, project proj, service connection conn'; Finding = 'deprecated Azure DevOps issuer (retirement 2027-07-01)*' }
         @{ Issuer = 'https://westeurope.oic.prod-aks.azure.com/t/i/'; Subject = 'system:serviceaccount:ns1:sa1'; Type = 'Kubernetes (AKS)'; Trust = 'namespace ns1, service account sa1'; Finding = '' }
         @{ Issuer = 'https://login.microsoftonline.com/tenant1/v2.0'; Subject = 'mi-object-id'; Type = 'Microsoft Entra ID*'; Trust = 'mi-object-id'; Finding = '' }

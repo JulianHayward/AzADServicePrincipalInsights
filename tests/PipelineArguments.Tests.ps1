@@ -45,11 +45,11 @@ BeforeAll {
 
     #runs the create script; returns @{ Params; Output; Error; FileWritten }
     function Invoke-Create {
-        param([string]$ScriptFile, [string]$VariablesFile, [string[]]$KnownScriptFile, [string]$SettingsFile, [string]$ScriptPath)
+        param([string]$ScriptFile, [string]$VariablesFile, [string[]]$KnownScriptFile, [string]$SettingsFile, [string]$ScriptPath, [string[]]$KnownVariable, [string[]]$WorkflowSwitch)
         $outputFile = Join-Path $TestDrive 'arguments.json'
         Set-Content -LiteralPath $outputFile -Value '{"stale":true}'
         $splat = @{ ScriptFile = $ScriptFile; OutputFile = $outputFile }
-        foreach ($key in 'VariablesFile', 'KnownScriptFile', 'SettingsFile', 'ScriptPath') {
+        foreach ($key in 'VariablesFile', 'KnownScriptFile', 'SettingsFile', 'ScriptPath', 'KnownVariable', 'WorkflowSwitch') {
             if ($PSBoundParameters.ContainsKey($key)) { $splat[$key] = $PSBoundParameters[$key] }
         }
         $result = @{ Params = $null; Output = ''; Error = $null; FileWritten = $false }
@@ -99,6 +99,23 @@ param(
 }
 
 Describe 'New-AzADSPIArgumentFile.ps1: conversion and checks (stub script)' {
+    It 'ScriptDir in the variables file is no unknown variable and no parameter; it must equal the ScriptDir of the workflow' {
+        $saved = $env:ScriptDir
+        try {
+            $vars = New-VariablesFile ((yamlVariable ScriptDir 'pwsh') + (yamlVariable Id 'abc'))
+            $env:ScriptDir = $null
+            $r = Invoke-Create -ScriptFile $script:Stub -VariablesFile $vars
+            $r.Error | Should -BeNullOrEmpty
+            $r.Params.Keys | Should -Be @('Id')
+            $env:ScriptDir = 'pwsh'
+            (Invoke-Create -ScriptFile $script:Stub -VariablesFile $vars).Error | Should -BeNullOrEmpty
+            $env:ScriptDir = 'other/pwsh'
+            $r = Invoke-Create -ScriptFile $script:Stub -VariablesFile $vars
+            "$($r.Error) $($r.Output)" | Should -Match "Variable 'ScriptDir' = 'pwsh' in the variables file .* differs from the script directory of the workflow \('other/pwsh'"
+            $r.FileWritten | Should -BeFalse
+        }
+        finally { $env:ScriptDir = $saved }
+    }
     It 'converts every type and writes a JSON object' {
         $vars = New-VariablesFile ((yamlVariable Id 'abc') + (yamlVariable Flag 'True') + (yamlVariable Count '5') + (yamlVariable List "'a, `$(whoami) ,b,'") + (yamlVariable Array 'x') + (yamlVariable Map "'@{ `"root`" = `"r`"; `"corp`" = `"c`" }'") + (yamlVariable Text "'two words; `$(x)'") + (yamlVariable Untyped 'a,b'))
         $r = Invoke-Create -ScriptFile $script:Stub -VariablesFile $vars -ScriptPath 'pwsh'
@@ -231,16 +248,32 @@ Describe 'AzADServicePrincipalInsights variables files and settings' {
         $script:IngestSettings = Import-PowerShellDataFile -LiteralPath (Join-Path $script:Pwsh 'Send-AzADSPILogAnalyticsData.arguments.psd1')
         $script:Gh = readVariablesFile -Path $script:GhVariables
         $script:Ado = readVariablesFile -Path $script:AdoVariables
-        $script:AdoOnly = @('ServiceConnection', 'ScriptDir', 'Script', 'ScriptPrerequisites', 'IngestScript', 'IngestToLogAnalytics', 'WebAppPublish', 'WebAppSubscriptionId', 'WebAppResourceGroup', 'WebAppName')
+        $script:PublishNames = Get-ParameterName $script:Publish
+        $script:PublishSettings = Import-PowerShellDataFile -LiteralPath (Join-Path $script:Pwsh 'Publish-AzADSPIWebApp.arguments.psd1')
+        $script:Switches = @('WebAppPublish', 'IngestToLogAnalytics')
+        #every script of the workflow and its switches, as the workflow passes them
+        $script:Known = @{ KnownScriptFile = @($script:Ingest, $script:Publish); KnownVariable = $script:Switches }
     }
-    It 'the GitHub file has every parameter users set (main and ingest script), and nothing else' {
-        $expected = @($script:MainNames | Where-Object { $_ -notin $script:MainSettings.Internal }) + @($script:IngestNames | Where-Object { $_ -notin $script:IngestSettings.Internal })
+    It 'the GitHub file has every parameter users set (main, ingest and publish script) and the workflow switches, and nothing else' {
+        $expected = @($script:MainNames | Where-Object { $_ -notin $script:MainSettings.Internal }) + @($script:IngestNames | Where-Object { $_ -notin $script:IngestSettings.Internal }) + @($script:PublishNames | Where-Object { $_ -notin $script:PublishSettings.Internal }) + $script:Switches + 'ScriptDir'
         @($script:Gh.Keys | Sort-Object) | Should -Be @($expected | Sort-Object)
     }
-    It 'the Azure DevOps file has the same variables (same order, same values) plus its pipeline variables' {
-        @($script:Ado.Keys | Where-Object { $_ -notin $script:AdoOnly }) | Should -Be @($script:Gh.Keys)
+    It 'from the section Required on, the Azure DevOps file has the same content as the GitHub file' {
+        $body = { param($path) $text = (Get-Content -LiteralPath $path -Raw) -replace '\r\n', "`n"; $text.Substring($text.IndexOf("`n### Required`n") + 1) }
+        (& $body $script:AdoVariables) | Should -BeExactly (& $body $script:GhVariables)
+        @($script:Ado.Keys | Where-Object { $_ -ne 'ServiceConnection' }) | Should -Be @($script:Gh.Keys)
         foreach ($name in $script:Gh.Keys) { $script:Ado[$name] | Should -BeExactly $script:Gh[$name] -Because $name }
-        foreach ($name in $script:AdoOnly) { $script:Ado.ContainsKey($name) | Should -BeTrue -Because $name; $name | Should -Not -BeIn ($script:MainNames + $script:IngestNames) }
+    }
+    It 'the files start with the pipeline/workflow settings; the pipeline includes only the template and names the scripts' {
+        @($script:Ado.Keys)[0..1] | Should -Be @('ServiceConnection', 'ScriptDir')
+        @($script:Gh.Keys)[0] | Should -Be 'ScriptDir'
+        $script:Ado['ServiceConnection'] | Should -BeExactly '<YourServiceConnection>'
+        $script:Gh['ScriptDir'] | Should -BeExactly 'pwsh'
+        foreach ($name in 'Script', 'ScriptPrerequisites', 'IngestScript') { $script:Ado.ContainsKey($name) | Should -BeFalse -Because $name }
+        $ado = (Get-Content -LiteralPath $script:AdoPipeline -Raw) -replace '\r\n', "`n"
+        $ado | Should -Match "(?m)^variables:\n  - template: 'AzADServicePrincipalInsights.variables.yml'\n\n"
+        $ado | Should -Not -Match '\$env:(SCRIPT|SCRIPTPREREQUISITES|INGESTSCRIPT)\)' -Because 'the script file names are written out (as on GitHub)'
+        foreach ($workflow in $script:Workflows) { Get-Content -LiteralPath $workflow -Raw | Should -Not -Match '(?m)^  ScriptDir:' -Because "$workflow - ScriptDir is in the variables file" }
     }
     It 'every entry documents its type' {
         foreach ($path in $script:GhVariables, $script:AdoVariables) {
@@ -268,15 +301,15 @@ Describe 'AzADServicePrincipalInsights variables files and settings' {
         $checked | Should -BeGreaterOrEqual 12
     }
     It 'the GitHub file as shipped fails on the ManagementGroupId placeholder' {
-        $r = Invoke-Create -ScriptFile $script:Main -VariablesFile $script:GhVariables -KnownScriptFile $script:Ingest -ScriptPath 'pwsh'
+        $r = Invoke-Create -ScriptFile $script:Main -VariablesFile $script:GhVariables -ScriptPath 'pwsh' @script:Known
         $r.Error | Should -Match "Variable 'ManagementGroupId' = '<YourManagementGroupId>'"
         $r.FileWritten | Should -BeFalse
-        $r.Output | Should -Not -Match 'ignored' -Because 'every variable of the file is a parameter of one of the two scripts'
+        $r.Output | Should -Not -Match 'ignored' -Because 'every variable of the file is a parameter of one of the scripts or a workflow switch'
     }
     It 'with management groups set: the expected arguments, no warnings' {
         $vars = Join-Path $TestDrive 'gh.yml'
         (Get-Content -LiteralPath $script:GhVariables -Raw) -replace "'<YourManagementGroupId>'", 'mg0, mg1' | Set-Content -LiteralPath $vars -NoNewline
-        $r = Invoke-Create -ScriptFile $script:Main -VariablesFile $vars -KnownScriptFile $script:Ingest -ScriptPath 'pwsh'
+        $r = Invoke-Create -ScriptFile $script:Main -VariablesFile $vars -ScriptPath 'pwsh' @script:Known
         $r.Error | Should -BeNullOrEmpty
         @($r.Params.Keys | Sort-Object) | Should -Be @('ManagementGroupId', 'OutputPath', 'ScriptPath')
         $r.Params.ManagementGroupId | Should -Be @('mg0', 'mg1')
@@ -293,10 +326,43 @@ Describe 'AzADServicePrincipalInsights variables files and settings' {
         (Invoke-Create -ScriptFile $script:Main -VariablesFile $vars -KnownScriptFile $script:Ingest).Error | Should -Match 'not set: OutputPath'
     }
     It 'ingest: the four Data Collection Rule values are required; ImportPath is set by the pipeline' {
-        $r = Invoke-Create -ScriptFile $script:Ingest -VariablesFile $script:GhVariables -KnownScriptFile $script:Main
+        $r = Invoke-Create -ScriptFile $script:Ingest -VariablesFile $script:GhVariables -KnownScriptFile $script:Main, $script:Publish -KnownVariable $script:Switches
         $r.Error | Should -Match 'not set: DataCollectionRuleName, DataCollectionRuleResourceGroup, DataCollectionRuleSubscriptionId, LogAnalyticsCustomLogTableName'
         $r.Error | Should -Not -Match 'ImportPath'
         $r.Output | Should -Not -Match 'ignored'
+    }
+    It 'publish: the shipped placeholders are refused; with the Web App values the three arguments, no internal ones' {
+        $r = Invoke-Create -ScriptFile $script:Publish -VariablesFile $script:GhVariables -KnownScriptFile $script:Main, $script:Ingest -KnownVariable $script:Switches
+        $r.Error | Should -Match "Variable 'WebApp\w+' = '<YourWebApp\w+>'"
+        $r.FileWritten | Should -BeFalse
+        $vars = Join-Path $TestDrive 'gh_webapp.yml'
+        (Get-Content -LiteralPath $script:GhVariables -Raw) -replace "'<YourWebAppSubscriptionId>'", '22222222-2222-2222-2222-222222222222' -replace "'<YourWebAppResourceGroup>'", 'rg-webapp' -replace "'<YourWebAppName>'", 'azadspi-report' | Set-Content -LiteralPath $vars -NoNewline
+        $r = Invoke-Create -ScriptFile $script:Publish -VariablesFile $vars -KnownScriptFile $script:Main, $script:Ingest -KnownVariable $script:Switches
+        $r.Error | Should -BeNullOrEmpty
+        @($r.Params.Keys | Sort-Object) | Should -Be @('WebAppName', 'WebAppResourceGroup', 'WebAppSubscriptionId')
+        $r.Output | Should -Not -Match 'ignored'
+    }
+    It 'workflow switches: step outputs true/false (empty = false); any other value stops the step' {
+        $outputFile = Join-Path $TestDrive 'github_output.txt'
+        $saved = $env:GITHUB_OUTPUT
+        try {
+            $env:GITHUB_OUTPUT = $outputFile
+            $vars = Join-Path $TestDrive 'gh_switches.yml'
+            (Get-Content -LiteralPath $script:GhVariables -Raw) -replace "'<YourManagementGroupId>'", 'mg0' -replace '(?m)(- name: WebAppPublish\r?\n.*\r?\n\s+value:) false', '$1 True' -replace '(?m)(- name: IngestToLogAnalytics\r?\n.*\r?\n\s+value:) false', '$1' | Set-Content -LiteralPath $vars -NoNewline
+            $r = Invoke-Create -ScriptFile $script:Main -VariablesFile $vars -ScriptPath 'pwsh' -KnownScriptFile $script:Ingest, $script:Publish -WorkflowSwitch $script:Switches
+            $r.Error | Should -BeNullOrEmpty
+            @(Get-Content -LiteralPath $outputFile) | Should -Be @('WebAppPublish=true', 'IngestToLogAnalytics=false')
+            $r.Output | Should -Not -Match 'ignored'
+            Remove-Item -LiteralPath $outputFile
+            (Get-Content -LiteralPath $vars -Raw) -replace '(?m)(- name: WebAppPublish\r?\n.*\r?\n\s+value:) True', '$1 yes' | Set-Content -LiteralPath $vars -NoNewline
+            $r = Invoke-Create -ScriptFile $script:Main -VariablesFile $vars -ScriptPath 'pwsh' -KnownScriptFile $script:Ingest, $script:Publish -WorkflowSwitch $script:Switches
+            $r.Error | Should -Match "Variable 'WebAppPublish' = 'yes' - switch: true or false"
+            $r.FileWritten | Should -BeFalse
+            Test-Path -LiteralPath $outputFile | Should -BeFalse -Because 'no step output when the arguments are refused'
+        }
+        finally {
+            $env:GITHUB_OUTPUT = $saved
+        }
     }
     It 'Azure DevOps (simulated): the variables template as environment variables gives the same arguments' {
         $saved = @{}
@@ -447,6 +513,42 @@ Describe 'Publish-AzADSPIWebApp.ps1 (mocked Azure calls)' {
 }
 
 Describe 'pipeline and workflow wiring' {
+    It 'GitHub step Script directory: reads ScriptDir from the variables file, accepts only a script folder (<_>)' -ForEach @('AzADServicePrincipalInsights.yml', 'AzADServicePrincipalInsights_OIDC.yml') {
+        $lines = Get-Content -LiteralPath (Join-Path $script:RepoRoot ".github/workflows/$_")
+        $start = [array]::IndexOf($lines, '      - name: Script directory')
+        $start | Should -BeGreaterThan 0
+        $lines[$start + 1] | Should -Be '        shell: pwsh'
+        $stepScript = @(Get-YamlBlockScalarLines -Lines $lines[($start + 2)..($start + 20)] -KeyPattern 'run') | ForEach-Object { $_.Substring(10) }
+        $stepFile = Join-Path $TestDrive 'scriptdir-step.ps1'
+        Set-Content -LiteralPath $stepFile -Value $stepScript
+        $runStep = {
+            param([string]$Value)
+            $vars = Join-Path $TestDrive 'scriptdir-vars.yml'
+            Set-Content -LiteralPath $vars -Value "variables:`n  # folder`n  - name: ScriptDir`n    # String | example`n    value: $Value`n  - name: OutputPath`n    value: wiki"
+            $envFile = Join-Path $TestDrive 'github_env'
+            Set-Content -LiteralPath $envFile -Value ''
+            $env:VariablesFile = $vars; $env:GITHUB_ENV = $envFile
+            try {
+                Push-Location $script:RepoRoot
+                $out = & pwsh -NoProfile -NonInteractive -File $stepFile 2>&1 | Out-String
+                [PSCustomObject]@{ ExitCode = $LASTEXITCODE; Output = $out; Env = (Get-Content -LiteralPath $envFile -Raw) }
+            }
+            finally { Pop-Location; $env:VariablesFile = $null; $env:GITHUB_ENV = $null }
+        }
+        foreach ($good in 'pwsh', "'pwsh'", '"pwsh"', 'pwsh # the scripts') {
+            $r = & $runStep $good
+            $r.ExitCode | Should -Be 0 -Because "$good $($r.Output)"
+            $r.Env | Should -Match '(?m)^ScriptDir=pwsh\r?$' -Because $good
+        }
+        foreach ($bad in 'missing', '../pwsh', 'pwsh/..', "'pwsh\x'", '', 'C:/pwsh') {
+            $r = & $runStep $bad
+            $r.ExitCode | Should -Be 1 -Because "'$bad' $($r.Output)"
+            $r.Output | Should -Match "::error::Variable 'ScriptDir' in"
+            $r.Env.Trim() | Should -BeNullOrEmpty -Because $bad
+        }
+        $text = $lines -join "`n"
+        $text.IndexOf('      - name: Script directory') | Should -BeLessThan $text.IndexOf('      - name: Create arguments')
+    }
     It 'no Azure DevOps macro $(...) inside a script of the pipeline (only in task inputs and env mappings)' {
         $lines = Get-Content -LiteralPath $script:AdoPipeline
         $scriptLines = Get-YamlBlockScalarLines -Lines $lines -KeyPattern '(- pwsh|Inline)'
@@ -461,21 +563,49 @@ Describe 'pipeline and workflow wiring' {
             foreach ($line in $scriptLines) { $line | Should -Not -Match '\$\{\{' -Because $workflow }
         }
     }
+    It 'both platforms: same runner image, shallow checkout, same step names; checked switches and Web App arguments; prerequisites without Azure login' {
+        $ado = Get-Content -LiteralPath $script:AdoPipeline -Raw
+        $ado | Should -Match "vmImage: 'ubuntu-latest'"
+        $ado | Should -Match 'fetchDepth: 1'
+        $ado | Should -Match '-WorkflowSwitch WebAppPublish, IngestToLogAnalytics'
+        $ado | Should -Match 'Publish-AzADSPIWebApp\.ps1" -OutputFile "\$\(\$env:AGENT_TEMPDIRECTORY\)/AzADSPIPublishArguments\.json"'
+        $ado | Should -Match 'Publish-AzADSPIWebApp\.ps1" @publish'
+        $ado | Should -Not -Match '\$env:WEBAPP(SUBSCRIPTIONID|RESOURCEGROUP|NAME)' -Because 'the Web App values come checked from the arguments file'
+        $adoNames = @([regex]::Matches($ado, "(?m)^    displayName: '([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+        foreach ($workflow in $script:Workflows) {
+            $text = Get-Content -LiteralPath $workflow -Raw
+            $text | Should -Match '(?m)^    runs-on: ubuntu-latest' -Because $workflow
+            $text | Should -Match '(?m)^          fetch-depth: 1' -Because $workflow
+            $ghNames = @([regex]::Matches($text, '(?m)^      - name: (.+?)(?: #.*)?\r?$') | ForEach-Object { $_.Groups[1].Value })
+            foreach ($name in 'Create arguments', 'Check prerequisites', 'Run AzADServicePrincipalInsights', 'Push AzADServicePrincipalInsights output to repository', 'Upload data to Log Analytics via Logs ingestion API', 'Publish HTML to WebApp') {
+                $name | Should -BeIn $ghNames -Because $workflow
+                $name | Should -BeIn $adoNames
+            }
+            $text | Should -Match '(?m)^      - name: Check prerequisites\r?\n        shell: pwsh' -Because "$workflow - no Azure login needed"
+            $text.IndexOf('      - name: Check prerequisites') | Should -BeLessThan $text.IndexOf('uses: azure/login') -Because $workflow
+            $text | Should -Not -Match 'review F-' -Because $workflow
+        }
+        $ado | Should -Not -Match 'review F-'
+    }
     It 'the run steps splat the arguments file; the arguments are created before the Azure login (GitHub)' {
         $ado = Get-Content -LiteralPath $script:AdoPipeline -Raw
         $ado | Should -Match "template: 'AzADServicePrincipalInsights.variables.yml'"
         $ado | Should -Match 'New-AzADSPIArgumentFile\.ps1'
-        $ado | Should -Match '\$\(\$env:SCRIPT\)" @params'
-        $ado | Should -Match '\$\(\$env:INGESTSCRIPT\)" @params'
+        $ado | Should -Match '/AzADServicePrincipalInsights\.ps1" @params'
+        $ado | Should -Match '/Send-AzADSPILogAnalyticsData\.ps1" @params'
+        $ado | Should -Match '/Test-AzADSPIPrerequisite\.ps1" -OutputPath'
         $ado | Should -Match 'SYSTEM_ACCESSTOKEN: \$\(System.AccessToken\)'
-        $ado | Should -Match 'HEAD:\$branch'
         foreach ($workflow in $script:Workflows) {
             $text = Get-Content -LiteralPath $workflow -Raw
             $text | Should -Match 'VariablesFile: \.github/AzADServicePrincipalInsights\.variables\.yml'
             $text.IndexOf('name: Create arguments') | Should -BeLessThan $text.IndexOf('uses: azure/login')
-            $text | Should -Match '\$\(\$env:ScriptFile\)" @params'
-            $text | Should -Match '\$\(\$env:IngestScriptFile\)" @params'
-            $text | Should -Match 'Publish-AzADSPIWebApp\.ps1'
+            $text | Should -Match 'AzADServicePrincipalInsights\.ps1" @params'
+            $text | Should -Match 'Send-AzADSPILogAnalyticsData\.ps1" @params'
+            $text | Should -Match 'Publish-AzADSPIWebApp\.ps1" @publish'
+            $text | Should -Match '-WorkflowSwitch WebAppPublish, IngestToLogAnalytics'
+            $text | Should -Match "(?m)^        if: steps\.arguments\.outputs\.WebAppPublish == 'true'"
+            $text | Should -Match "(?m)^        if: steps\.arguments\.outputs\.IngestToLogAnalytics == 'true'"
+            $text | Should -Not -Match '(?m)^  (WebAppPublish|WebAppSubscriptionId|WebAppResourceGroup|WebAppName|IngestToLogAnalytics|ScriptFile|ScriptPrereqFile|IngestScriptFile):' -Because 'the settings are in the variables file'
         }
         (Get-Content -LiteralPath $script:Workflows[1] -Raw) | Should -Match "\`$params\['SubscriptionId4AzContext'\] = \`$env:SUBSCRIPTION_ID"
     }
@@ -483,11 +613,11 @@ Describe 'pipeline and workflow wiring' {
         foreach ($workflow in $script:Workflows) {
             $text = Get-Content -LiteralPath $workflow -Raw
             $text | Should -Match '(?m)^concurrency:\r?\n  group: AzADServicePrincipalInsights-\$\{\{ github\.ref \}\}\r?\n  cancel-in-progress: false' -Because $workflow
-            $text | Should -Match 'if ! git pull --rebase; then' -Because $workflow
-            $text | Should -Match 'git rebase --abort' -Because $workflow
         }
-        $ado = Get-Content -LiteralPath $script:AdoPipeline -Raw
-        $ado | Should -Match 'another run changed the same output files at the same time'
-        $ado | Should -Match 'git rebase --abort'
+        #the push step of all three: pwsh/Push-AzADSPIOutput.ps1 (behaviour tested in PushOutput.Tests.ps1)
+        $push = Get-Content -LiteralPath (Join-Path $script:Pwsh 'Push-AzADSPIOutput.ps1') -Raw
+        $push | Should -Match 'pull --rebase origin \$Branch'
+        $push | Should -Match 'rebase --abort'
+        $push | Should -Match 'another run changed the same output files at the same time'
     }
 }

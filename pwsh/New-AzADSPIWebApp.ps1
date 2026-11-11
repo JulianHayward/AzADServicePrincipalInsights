@@ -57,8 +57,9 @@ Location of the resources (default: location of the resource group).
 App Service plan SKU (default B1; F1 is free, without SLA).
 
 .PARAMETER PublisherPrincipalObjectId
-Object ID of the service principal or managed identity of the pipeline (the service connection / GitHub identity) - gets the
-role Website Contributor on the web app.
+Object ID of the enterprise application (service principal) of the pipeline identity (the service connection / GitHub identity),
+or the object (principal) ID of its managed identity - gets the role Website Contributor on the web app. The object ID of an app
+registration is resolved to its enterprise application.
 
 .PARAMETER AppRegistrationDisplayName
 Display name of the app registration (default AzADSPI-WebApp-<WebAppName>); an existing one with this name is reused.
@@ -183,6 +184,45 @@ $reportReference = getReportReference -ManagementGroupId $ManagementGroupId -Ten
 $defaultDocument = "AzADServicePrincipalInsights_$($reportReference).html"
 Write-Host "Report: $($defaultDocument)"
 #endregion context
+
+#region the pipeline identity, before anything is created
+#the role needs the object ID of a service principal (enterprise application or managed identity). The object ID of the app
+#registration is an easy mix-up - the role assignment fails at the end with 400 PrincipalTypeNotSupported (seen 2026-11-11). An app
+#registration is resolved to its service principal; anything else stops here.
+if ($PublisherPrincipalObjectId) {
+    $publisherObject = $null
+    try {
+        $publisherObject = invokeRest -Method GET -Uri "$($graph)/directoryObjects/$($PublisherPrincipalObjectId)"
+    }
+    catch {
+        if ($_.Exception.Message -match '\(404\)') {
+            throw "-PublisherPrincipalObjectId $($PublisherPrincipalObjectId) does not exist in this tenant - use the object ID of the pipeline identity (Microsoft Entra ID > Enterprise applications > the identity > Object ID)"
+        }
+        #e.g. no permission to read the directory: the role assignment checks it anyway
+        Write-Host "The pipeline identity $($PublisherPrincipalObjectId) could not be checked in Microsoft Graph ($($_.Exception.Message)) - continuing" -ForegroundColor Yellow
+    }
+    if ($publisherObject) {
+        switch ($publisherObject.'@odata.type') {
+            '#microsoft.graph.servicePrincipal' {
+                Write-Host "Pipeline identity: $($publisherObject.displayName) ($($publisherObject.servicePrincipalType))"
+                break
+            }
+            '#microsoft.graph.application' {
+                $publisherServicePrincipal = @(getAll -Uri "$($graph)/servicePrincipals?`$filter=appId eq '$($publisherObject.appId)'")[0]
+                if (-not $publisherServicePrincipal) {
+                    throw "-PublisherPrincipalObjectId $($PublisherPrincipalObjectId) is the app registration '$($publisherObject.displayName)', which has no enterprise application in this tenant - use the object ID of the enterprise application"
+                }
+                Write-Host "-PublisherPrincipalObjectId $($PublisherPrincipalObjectId) is the object ID of the app registration '$($publisherObject.displayName)' - using the object ID of its enterprise application: $($publisherServicePrincipal.id)" -ForegroundColor Yellow
+                $PublisherPrincipalObjectId = $publisherServicePrincipal.id
+                break
+            }
+            default {
+                throw "-PublisherPrincipalObjectId $($PublisherPrincipalObjectId) is a $($publisherObject.'@odata.type' -replace '^#microsoft\.graph\.'), not the pipeline identity - use the object ID of its enterprise application (Microsoft Entra ID > Enterprise applications > the identity > Object ID)"
+            }
+        }
+    }
+}
+#endregion the pipeline identity, before anything is created
 
 #region Microsoft Entra: app registration, service principal, consent, access control
 $application = $null

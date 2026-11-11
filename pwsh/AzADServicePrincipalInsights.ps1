@@ -1581,6 +1581,11 @@ function getFederatedCredentialTrust([string]$issuer, [string]$subject, [string]
             $trust.issuerType = 'GitHub Actions'
             if ($subject -match '^repo:(?<repo>[^:]+):(?<rest>.+)$') {
                 $repo = $Matches['repo']; $rest = $Matches['rest']
+                #GitHub's immutable subject (default for repositories created, renamed or transferred after 2026-07-15):
+                #repo:<owner>@<owner ID>/<repository>@<repository ID>:... - the IDs bind the credential to that repository
+                if ($repo -match '^(?<owner>[^/@]+)@(?<ownerId>\d+)/(?<name>[^/@]+)@(?<repoId>\d+)$') {
+                    $repo = "$($Matches['owner'])/$($Matches['name']) (owner ID $($Matches['ownerId']), repository ID $($Matches['repoId']))"
+                }
                 $trust.trust = switch -Regex ($rest) {
                     '^ref:refs/heads/(?<b>.+)$' { "repository $repo, branch $($Matches['b'])"; break }
                     '^ref:refs/tags/(?<t>.+)$' { "repository $repo, tag $($Matches['t'])"; break }
@@ -3566,7 +3571,7 @@ function getSpiShellStartHtml {
     return @"
     <header class="az-topbar">
         <button type="button" class="az-iconbtn" id="azNavToggle" aria-label="Toggle navigation" title="Toggle navigation"></button>
-        <div class="az-brand"><i class="fa fa-id-badge az-brand-icon" aria-hidden="true"></i><span class="az-brand-name">$encodedProduct</span><span class="az-brand-short" aria-hidden="true">AzADSPI</span> <small id="azVersion">$([HtmlSafe]::Encode($ProductVersion))</small></div>
+        <div class="az-brand"><span class="az-brand-name">$encodedProduct</span><span class="az-brand-short" aria-hidden="true">AzADSPI</span> <small id="azVersion">$([HtmlSafe]::Encode($ProductVersion))</small></div>
         <div class="az-search"><input type="search" id="azSearch" placeholder="Search sections (/)" aria-label="Search sections" autocomplete="off" spellcheck="false"></div>
         $UpdateHtml
         <div class="az-meta" id="azMeta">$([HtmlSafe]::Encode($TenantId)) <span class="az-dim">&middot; $([HtmlSafe]::Encode($ReportDate))</span></div>
@@ -6737,7 +6742,7 @@ if ($azAPICallConf['htParameters'].onAzureDevOps -eq $true -or $azAPICallConf['c
     $res = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validateAccess -noPaging
 
     if ($res -eq 'failed') {
-        $permissionCheckResults += 'AAD Users Read permission check FAILED'
+        $permissionCheckResults += 'AAD Users Read permission check FAILED - the Microsoft Graph application permission User.Read.All (with admin consent) is missing'
         $permissionsCheckFailed = $true
     }
     else {
@@ -6750,7 +6755,7 @@ if ($azAPICallConf['htParameters'].onAzureDevOps -eq $true -or $azAPICallConf['c
     $res = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validateAccess -noPaging
 
     if ($res -eq 'failed') {
-        $permissionCheckResults += 'AAD Groups Read permission check FAILED'
+        $permissionCheckResults += 'AAD Groups Read permission check FAILED - the Microsoft Graph application permission Group.Read.All (with admin consent) is missing'
         $permissionsCheckFailed = $true
     }
     else {
@@ -6763,7 +6768,7 @@ if ($azAPICallConf['htParameters'].onAzureDevOps -eq $true -or $azAPICallConf['c
     $res = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validateAccess -noPaging
 
     if ($res -eq 'failed') {
-        $permissionCheckResults += 'AAD ServicePrincipals Read permission check FAILED'
+        $permissionCheckResults += 'AAD ServicePrincipals Read permission check FAILED - the Microsoft Graph application permission Application.Read.All (with admin consent) is missing'
         $permissionsCheckFailed = $true
     }
     else {
@@ -6776,7 +6781,7 @@ if ($azAPICallConf['htParameters'].onAzureDevOps -eq $true -or $azAPICallConf['c
     $res = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -consistencyLevel 'eventual' -validateAccess -noPaging
 
     if ($res -eq 'failed') {
-        $permissionCheckResults += 'AAD RoleManagement Read permission check FAILED'
+        $permissionCheckResults += 'AAD RoleManagement Read permission check FAILED - the Microsoft Graph application permission RoleManagement.Read.Directory (with admin consent) is missing'
         $permissionsCheckFailed = $true
     }
     else {
@@ -6797,7 +6802,7 @@ if (-not $NoAzureResourceSideRelations) {
         $selectedManagementGroupId = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn 'Content' -validateAccess -noPaging
 
         if ($selectedManagementGroupId -eq 'failed') {
-            $permissionCheckResults += "MG '$($managementGroupIdEntry)' Reader permission check FAILED"
+            $permissionCheckResults += "MG '$($managementGroupIdEntry)' Reader permission check FAILED - the Azure role 'Reader' on this management group is missing, or the ID is not a management group ID (use the ID, not the display name)"
             $permissionsCheckFailed = $true
         }
         else {

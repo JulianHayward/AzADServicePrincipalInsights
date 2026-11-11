@@ -176,6 +176,12 @@ else {
     }
     if ($htIngestResults.Failed.Count -gt 0) {
         $htIngestResults.Failed | ForEach-Object { Write-Host "  failed: $_" -ForegroundColor Red }
+        #a send request failed (not only unreadable files): AzAPICall printed the status above and threw a generic message - the most
+        #common cause is a 403 'does not have access to ingest data' (missing role, or a role assignment that is not active yet)
+        if (@($htIngestResults.Failed | Where-Object { $_ -notmatch 'cannot be read as JSON' }).Count -gt 0) {
+            $signedInAs = $azAPICallConf['checkContext'].Account.Id
+            Write-Host "If the output above shows 403 / 'does not have access to ingest data': the identity '$($signedInAs)' needs the role 'Monitoring Metrics Publisher' on the Data Collection Rule '$($DCR.id)' (or its resource group). A new role assignment can take up to about 30 minutes to work - then run it again. Guide: https://github.com/JulianHayward/AzADServicePrincipalInsights/blob/main/setup/log-analytics.md#step-2---allow-your-pipeline-identity-to-send" -ForegroundColor Yellow
+        }
         throw "$($htIngestResults.Failed.Count) ingestion requests or files failed"
     }
     #review F-65: every file is ingested or skipped (too large) - anything else is an error, also outside pipelines

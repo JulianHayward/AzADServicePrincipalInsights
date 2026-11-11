@@ -31,9 +31,11 @@ The publish step of the pipeline ([pwsh/Publish-AzADSPIWebApp.ps1](../pwsh/Publi
 
 ## Before you start
 
+The Microsoft Entra steps are described in the [Azure portal](https://portal.azure.com) (**Microsoft Entra ID**). The [Microsoft Entra admin center](https://entra.microsoft.com/) has the same pages, if you prefer it.
+
 ### Question 1: Does your tenant have Microsoft Entra ID P1 or P2?
 
-Check it: [Microsoft Entra admin center](https://entra.microsoft.com/) > **Overview** > field **License**.
+Check it: [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **Overview** > field **License**.
 
 | License | Your setting | What happens |
 |---|---|---|
@@ -58,13 +60,13 @@ Collect these values. You need them in the next steps.
 
 | Value | Example | Where to find it |
 |---|---|---|
-| Tenant ID | `11111111-...` | Microsoft Entra admin center > **Overview** > **Tenant ID** |
+| Tenant ID | `11111111-...` | Azure portal > **Microsoft Entra ID** > **Overview** > **Tenant ID** |
 | Subscription ID for the web app | `22222222-...` | Azure portal > **Subscriptions** |
 | Resource group for the web app | `rg-azadspi` | Create one in the Azure portal if you don't have one yet |
 | Web app name | `azadspi-contoso` | Your choice - it becomes the URL `https://azadspi-contoso.azurewebsites.net` and must be unique worldwide |
 | Management group ID | `Contoso` | The same value your pipeline uses (`ManagementGroupId` in the variables file; several: comma separated; empty: the Tenant Root Group) |
-| Object ID of the viewer group | `33333333-...` | Microsoft Entra admin center > **Groups** > your group > **Object ID**. Create a **security** group if you don't have one |
-| Object ID of the pipeline identity | `44444444-...` | Microsoft Entra admin center > **Enterprise applications** > search the name of the identity your pipeline uses (step 2 of the [GitHub](github.md) or [Azure DevOps](azure-devops.md) guide; a managed identity: filter **Application type** = **Managed Identities**) > **Object ID** |
+| Object ID of the viewer group | `33333333-...` | Azure portal > **Microsoft Entra ID** > **Groups** > your group > **Object ID**. Create a **security** group if you don't have one |
+| Object ID of the pipeline identity's enterprise application | `44444444-...` | Azure portal > **Microsoft Entra ID** > **Enterprise applications** (not **App registrations** - that object ID is a different one; see [Which ID is which?](README.md#which-id-is-which)) > search the name of the identity your pipeline uses (step 2 of the [GitHub](github.md) or [Azure DevOps](azure-devops.md) guide; a managed identity: filter **Application type** = **Managed Identities**) > **Object ID** |
 | Your setting from question 1 | `Assignment` or `GroupClaim` | |
 
 > **Checkpoint 1:** all values are filled in, and the viewer group has at least one test user in it.
@@ -82,7 +84,7 @@ Connect-AzAccount -TenantId <Tenant ID>
   -WebAppName <Web app name> `
   -ManagementGroupId <Management group ID> `
   -AuthorizedGroupObjectId <Object ID of the viewer group> `
-  -PublisherPrincipalObjectId <Object ID of the pipeline identity> `
+  -PublisherPrincipalObjectId <Object ID of the pipeline identity's enterprise application> `
   -AccessControl <Assignment or GroupClaim>
 ```
 
@@ -92,7 +94,7 @@ The script needs only the module `Az.Accounts` and takes a few minutes. You can 
 
 ## Step 3 - Connect your pipeline
 
-Tell the pipeline where to upload the report:
+Tell the pipeline where to upload the report - in the variables file of your pipeline, section 'Web App publishing':
 
 | Variable | Value |
 |---|---|
@@ -101,8 +103,8 @@ Tell the pipeline where to upload the report:
 | `WebAppResourceGroup` | the resource group from step 1 |
 | `WebAppName` | the web app name from step 1 |
 
-- **GitHub:** in the `env` section of the workflow file (`AzADServicePrincipalInsights_OIDC.yml` or `AzADServicePrincipalInsights.yml` in `.github/workflows`)
-- **Azure DevOps:** in `.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml`
+- **GitHub:** `.github/AzADServicePrincipalInsights.variables.yml`
+- **Azure DevOps:** `.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml`
 
 Then run the pipeline or workflow.
 
@@ -124,7 +126,8 @@ The report loads its styling from azadvertizer.net, so the readers' browsers nee
 | What you see | Why | What to do |
 |---|---|---|
 | Pipeline: `HTML NOT published - the WebApp (...) has no Authentication configured` (or `allows unauthenticated requests`, or `excludes paths from the authentication`) | The web app doesn't require a sign-in for the report. The pipeline never publishes to an open website. | Run the script from step 2 again. |
-| Pipeline: `HTML NOT published (...) - RBAC Role 'Website Contributor' on the WebApp (...) is required` | The pipeline identity may not upload to the web app. | Run the script again with the right `-PublisherPrincipalObjectId` (step 1 explains where to find it). |
+| Pipeline: `HTML NOT published (...) - RBAC Role 'Website Contributor' on the WebApp (...) is required` | The pipeline identity may not upload to the web app. | Run the script again with the object ID of the pipeline identity's enterprise application as `-PublisherPrincipalObjectId` (step 1). |
+| Script: `... failed (400): ... PrincipalTypeNotSupported` | An older version of the script got the object ID of the app registration instead of the enterprise application. The current script uses the enterprise application itself. | Run the current script again; it reuses what exists. |
 | Pipeline: `WebAppSubscriptionId '<subscriptionId>' - provide the Web App details (not the template placeholder)` | A `WebApp*` value still holds the placeholder. | Step 3. |
 | Pipeline: `'...AzADServicePrincipalInsights_<ID>.html' not found` | The management group ID in the pipeline and the file name differ (also in upper/lower case). | Use exactly the same management group ID everywhere. |
 | After signing in, the URL shows an error page instead of the report | The default document is a different report name: the script got another management group ID than the pipeline. | Run the script again with the `ManagementGroupId` of the pipeline. |
@@ -136,7 +139,7 @@ The report loads its styling from azadvertizer.net, so the readers' browsers nee
 
 Do the steps in this order - then the web app is never open to the whole tenant.
 
-**1. Entra admin - create the sign-in** ([Microsoft Entra admin center](https://entra.microsoft.com/))
+**1. Entra admin - create the sign-in** ([Azure portal](https://portal.azure.com) > **Microsoft Entra ID**)
 
 1. **App registrations** > **New registration**: name e.g. `AzADSPI-WebApp-<web app name>`, keep **Accounts in this organizational directory only** > **Register**
 1. Note the **Application (client) ID** - the Azure admin needs it
