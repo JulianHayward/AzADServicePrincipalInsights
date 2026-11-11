@@ -1691,8 +1691,9 @@ function getOwnedResourceConsentSetting([string[]]$PermissionGrantPoliciesAssign
 #redirect URI findings (scheme, wildcard, Azure-hosted domains that can be taken over when the resource is deleted)
 function getRedirectUriFindings([string]$platform, [string]$uri) {
     $findings = [System.Collections.ArrayList]@()
-    $isLocalhost = $uri -match '^https?://(localhost|127\.0\.0\.1|\[::1\])([:/]|$)'
-    if ($uri -like 'http://*' -and -not $isLocalhost) {
+    #this check finds http:// and localhost redirect URIs - the URLs are what it looks for, not what it calls
+    $isLocalhost = $uri -match '^https?://(localhost|127\.0\.0\.1|\[::1\])([:/]|$)' # DevSkim: ignore DS137138,DS162092
+    if ($uri -like 'http://*' -and -not $isLocalhost) { # DevSkim: ignore DS137138,DS162092
         $null = $findings.Add([ordered]@{ severity = 'high'; finding = 'redirect URI without https' })
     }
     if ($uri.Contains('*')) {
@@ -1702,7 +1703,7 @@ function getRedirectUriFindings([string]$platform, [string]$uri) {
         $null = $findings.Add([ordered]@{ severity = 'medium'; finding = 'Azure-hosted domain: check the resource still exists (otherwise the name can be registered by others)' })
     }
     if ($isLocalhost -and $platform -eq 'web') {
-        $null = $findings.Add([ordered]@{ severity = 'info'; finding = 'localhost redirect URI on the web platform' })
+        $null = $findings.Add([ordered]@{ severity = 'info'; finding = 'localhost redirect URI on the web platform' }) # DevSkim: ignore DS162092
     }
     #items, not the list (the caller collects them with @())
     $findings
@@ -1715,7 +1716,7 @@ $script:spiRiskExplanations = @{
         'redirect URI without https' = 'Sign-in results (tokens, authorization codes) are sent to this address unencrypted: anyone on the network path can read them and use them to act as the user or the app.'
         'wildcard redirect URI' = 'Every address that matches the wildcard receives the sign-in results, including subdomains or paths that someone else may control. Use exact redirect URIs.'
         'Azure-hosted domain*' = 'If the Azure resource behind this name (web app, storage account, CDN, ...) was deleted, anyone can create a resource with the same name and receive the sign-in results for this app (subdomain takeover).'
-        'localhost redirect URI on the web platform' = 'Usually left over from development: the sign-in result goes to whatever listens on the user''s machine. Remove it if it is not needed.'
+        'localhost redirect URI on the web platform' = 'Usually left over from development: the sign-in result goes to whatever listens on the user''s machine. Remove it if it is not needed.' # DevSkim: ignore DS162092
         'implicit grant: access tokens' = 'Access tokens are returned in the browser address (implicit flow) and can leak through browser history, logs or referrers. The implicit flow is deprecated; use the authorization code flow with PKCE.'
         'implicit grant: ID tokens' = 'ID tokens through the implicit flow are only needed by older sign-in libraries. Prefer the authorization code flow; remove it when the app does not need it.'
         'public client flows allowed' = 'The app accepts sign-in flows without its own credential (device code, username/password, integrated Windows authentication). Device code phishing and password flows weaken the sign-in protection.'
@@ -3029,7 +3030,8 @@ function buildSpiGrid {
     $dataBase64 = compressSpiGridText -Text ('{"rows":[' + $rowsBuilder.ToString() + '],"dictionaries":' + $dictionariesJson + ',"columns":' + $columnsJson + '}')
 
     #one definition per column signature
-    $keyBytes = [System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::UTF8.GetBytes($columnDefsJs))
+    #SHA-1 only derives a cache key from the column definitions (no security use)
+    $keyBytes = [System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::UTF8.GetBytes($columnDefsJs)) # DevSkim: ignore DS126858
     $key = ([System.BitConverter]::ToString($keyBytes, 0, 8)).Replace('-', '').ToLowerInvariant()
     if (-not $script:htSpiGrid.definitions.Contains($key)) {
         $script:htSpiGrid.definitions[$key] = @"

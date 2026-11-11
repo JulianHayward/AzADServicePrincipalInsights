@@ -237,7 +237,8 @@ Describe 'R-11 reading only the period of a long log' {
         New-Log $log 1000
         $offset = getChangeHistoryLogOffset -LogPath $log -SinceLine $script:SinceLine
         $lines = [System.IO.File]::ReadAllLines($log)
-        $expectedOffset = [System.Text.Encoding]::UTF8.GetByteCount((($lines[0..287] -join "`r`n") + "`r`n"))
+        #WriteAllLines ends the lines with the platform's line break: CRLF on Windows, LF on Linux (CI, pipelines)
+        $expectedOffset = [System.Text.Encoding]::UTF8.GetByteCount((($lines[0..287] -join [Environment]::NewLine) + [Environment]::NewLine))
         $offset | Should -Be $expectedOffset
         $rows = @(getChangeHistoryRows -LogPath $log -Days 30 -NowUtc $script:Now)
         $rows.Count | Should -Be 712

@@ -14,7 +14,7 @@ Microsoft Entra (skipped with -SkipEntra):
 - access: 'Assignment' (default) - 'Assignment required' on the enterprise application and the group assigned to it;
   'GroupClaim' - the app registration emits the security groups and the web app accepts only tokens with the group
 Azure:
-- user-assigned managed identity, App Service plan (Windows), web app (HTTPS only, TLS 1.2, FTP off, basic authentication for
+- user-assigned managed identity, App Service plan (Windows), web app (HTTPS only, minimum TLS version 1.2, FTP off, basic authentication for
   FTP and SCM off, default document AzADServicePrincipalInsights_<reference>.html)
 - App Service Authentication (Microsoft Entra, login required, client assertion by the managed identity)
 - optional: role Website Contributor on the web app for the identity of the pipeline (Publish-AzADSPIWebApp.ps1)
@@ -142,12 +142,13 @@ function getArmGuid([string[]]$Values) {
     #by '-' - the script and the template give the role assignment the same name
     $namespace = ([guid]'11fb06fb-712d-4ddd-98c7-e71bbd588830').ToByteArray()
     [array]::Reverse($namespace, 0, 4); [array]::Reverse($namespace, 4, 2); [array]::Reverse($namespace, 6, 2)
-    $sha1 = [System.Security.Cryptography.SHA1]::Create()
+    #SHA-1 is required by the ARM template function guid() (UUID v5, RFC 4122) - no security use
+    $sha1 = [System.Security.Cryptography.SHA1]::Create() # DevSkim: ignore DS126858
     try {
-        $hash = $sha1.ComputeHash([byte[]]($namespace + [System.Text.Encoding]::UTF8.GetBytes($Values -join '-')))[0..15]
+        $hash = $sha1.ComputeHash([byte[]]($namespace + [System.Text.Encoding]::UTF8.GetBytes($Values -join '-')))[0..15] # DevSkim: ignore DS126858
     }
     finally {
-        $sha1.Dispose()
+        $sha1.Dispose() # DevSkim: ignore DS126858
     }
     $hash[6] = ($hash[6] -band 0x0F) -bor 0x50
     $hash[8] = ($hash[8] -band 0x3F) -bor 0x80

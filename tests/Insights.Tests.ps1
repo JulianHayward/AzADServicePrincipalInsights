@@ -111,20 +111,20 @@ Describe 'Azure DevOps service connection converted to the Microsoft Entra issue
 Describe 'getRedirectUriFindings' {
     It '<Platform> <Uri> -> <Expected>' -ForEach @(
         @{ Platform = 'web'; Uri = 'https://app.contoso.com/signin'; Expected = '' }
-        @{ Platform = 'web'; Uri = 'http://app.contoso.com/signin'; Expected = 'high:redirect URI without https' }
+        @{ Platform = 'web'; Uri = 'http://app.contoso.com/signin'; Expected = 'high:redirect URI without https' } # DevSkim: ignore DS137138,DS162092
         @{ Platform = 'spa'; Uri = 'https://*.contoso.com'; Expected = 'high:wildcard redirect URI' }
         @{ Platform = 'web'; Uri = 'https://myapp.azurewebsites.net/.auth/login/aad/callback'; Expected = 'medium:Azure-hosted domain*' }
         #review F-29: a query or fragment right after the host
         @{ Platform = 'web'; Uri = 'https://myapp.azurewebsites.net?x=1'; Expected = 'medium:Azure-hosted domain*' }
         @{ Platform = 'web'; Uri = 'https://myapp.azurewebsites.net#a'; Expected = 'medium:Azure-hosted domain*' }
-        @{ Platform = 'web'; Uri = 'http://localhost:8080'; Expected = 'info:localhost redirect URI on the web platform' }
-        @{ Platform = 'publicClient'; Uri = 'http://localhost'; Expected = '' }
+        @{ Platform = 'web'; Uri = 'http://localhost:8080'; Expected = 'info:localhost redirect URI on the web platform' } # DevSkim: ignore DS137138,DS162092
+        @{ Platform = 'publicClient'; Uri = 'http://localhost'; Expected = '' } # DevSkim: ignore DS137138,DS162092
     ) {
         $r = @(getRedirectUriFindings -platform $Platform -uri $Uri)
         (($r | ForEach-Object { "$($_.severity):$($_.finding)" }) -join '|') | Should -BeLike $Expected
     }
     It 'returns a flat list (not a list inside a list)' {
-        $r = @(getRedirectUriFindings -platform 'web' -uri 'http://*.contoso.com')
+        $r = @(getRedirectUriFindings -platform 'web' -uri 'http://*.contoso.com') # DevSkim: ignore DS137138,DS162092
         $r.Count | Should -Be 2
         $r[0].severity | Should -Be 'high'
     }

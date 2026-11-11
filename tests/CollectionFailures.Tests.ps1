@@ -4,7 +4,8 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     $ast = Get-ScriptAst -Path $script:MainScriptPath
     $cls = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.TypeDefinitionAst] -and $n.Name -eq 'HtmlSafe' }, $true)
-    Invoke-Expression $cls.Extent.Text
+    #loads the class definition of the script under test
+    Invoke-Expression $cls.Extent.Text # DevSkim: ignore DS104456
     foreach ($name in 'addFindingsOverview', 'writePipelineWarning', 'checkParallelFailures') {
         . ([scriptblock]::Create($ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true).Extent.Text))
     }

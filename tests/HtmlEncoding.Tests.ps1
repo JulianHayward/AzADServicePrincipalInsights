@@ -7,7 +7,8 @@ BeforeAll {
     #load class HtmlSafe from the main script without running the script
     $cls = $script:Ast.Find({ param($n) $n -is [System.Management.Automation.Language.TypeDefinitionAst] -and $n.Name -eq 'HtmlSafe' }, $true)
     if (-not $cls) { throw 'class HtmlSafe not found in main script' }
-    Invoke-Expression $cls.Extent.Text
+    #loads the class definition of the script under test
+    Invoke-Expression $cls.Extent.Text # DevSkim: ignore DS104456
     function ConvertTo-HtmlSafe { param($Value) [HtmlSafe]::Encode($Value) }
 
     #<td> cells in summary() whose content interpolates a value without [HtmlSafe]::Encode
