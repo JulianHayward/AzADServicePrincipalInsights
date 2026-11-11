@@ -15,6 +15,13 @@ Do not include data of your tenant (names, IDs, report files). Use made-up value
 
 AzADServicePrincipalInsights is a personal, community-driven project. Reports are handled on a best-effort basis: you get an answer, a fix is released as a new version, and the advisory is published once the fix is available.
 
+## How fixes are published
+
+- A confirmed vulnerability gets a [GitHub Security Advisory](https://github.com/JulianHayward/AzADServicePrincipalInsights/security/advisories) in this repository, published together with the fixed version - with a CVE when the severity warrants it, and credit to the reporter.
+- Every version is a [GitHub Release](https://github.com/JulianHayward/AzADServicePrincipalInsights/releases); the release of a security fix and its [changelog](CHANGELOG.md) entry (starting with **Security**) link the advisory.
+- To be notified: **Watch** > **Custom** > **Releases**. The report and the console also show when a newer version exists.
+- AzADServicePrincipalInsights is not distributed through a package manager, so Dependabot cannot alert you about it - watch the repository.
+
 ## Supported versions
 
 Only the latest version (the `main` branch) receives fixes.
