@@ -88,9 +88,14 @@ Connect-AzAccount -TenantId <Tenant ID>
   -AccessControl <Assignment or GroupClaim>
 ```
 
-The script needs only the module `Az.Accounts` and takes a few minutes. You can run it again at any time - it reuses what exists and sets the web app back to its secure settings.
+Tenant Root Group (an empty `ManagementGroupId` in the pipeline): remove the line `-ManagementGroupId`.
 
-> **Checkpoint 2:** the script ends with a green line `Web app: https://<name>.azurewebsites.net`. Open that URL in a private browser window: you are sent to the **Microsoft sign-in page**. (After signing in you see an error page - that's expected, the report isn't there yet.)
+The script needs only the module `Az.Accounts` and takes a few minutes. It first checks that the web app name is still free - a taken name stops it before anything is created. You can run it again at any time - it reuses what exists and sets the web app back to its secure settings: its app settings and authentication are written again (changes made by hand in the portal are overwritten); the App Service plan keeps its size and region unless you pass `-Sku` or `-Location`.
+
+> **Checkpoint 2:** the script ends with a green line `Web app: https://<name>.azurewebsites.net (the report appears after the first publish)`. Open that URL in a private browser window:
+> 1. you are sent to the **Microsoft sign-in page**;
+> 2. sign in as a member of the viewer group: you see an error page - that's expected, the report isn't there yet;
+> 3. sign in (another private window) as somebody who is **not** in the viewer group: they are turned away, as described in [step 4](#step-4---check-who-can-see-the-report). If they get the same error page as the member instead, stop here - the access control isn't set up (Path B: step 1, last point) and the report would be open to the whole tenant.
 
 ## Step 3 - Connect your pipeline
 
@@ -108,7 +113,9 @@ Tell the pipeline where to upload the report - in the variables file of your pip
 
 Then run the pipeline or workflow.
 
-> **Checkpoint 3:** in the run, the step **Publish HTML to WebApp** shows `Published '.../AzADServicePrincipalInsights_<management group ID>.html'`.
+> **Checkpoint 3:** in the run, the step **Publish HTML to WebApp** shows `Published '.../AzADServicePrincipalInsights_<management group ID>.html'` (several management groups: `..._<ID1>_<ID2>.html`; the Tenant Root Group: `..._<tenant ID>.html`) and the URL of the report.
+
+Right after step 2 the step can fail with `403` / `AuthorizationFailed`: a new role assignment can take up to about 30 minutes to work. Run it again later.
 
 ## Step 4 - Check who can see the report
 
@@ -117,7 +124,7 @@ Then run the pipeline or workflow.
    - with `Assignment`: Microsoft shows a message that the user is not assigned to the application
    - with `GroupClaim`: the web app shows an "access denied" (403) page
 
-The report loads its styling from azadvertizer.net, so the readers' browsers need access to it.
+The report loads styles and scripts from `www.azadvertizer.net`, `cdnjs.cloudflare.com` and `cdn.jsdelivr.net`, so the readers' browsers need access to these hosts.
 
 > **Checkpoint 4:** both tests behave as described - you're done. From now on, every run updates the report, and you manage who can see it by adding or removing members of the viewer group.
 
@@ -126,14 +133,19 @@ The report loads its styling from azadvertizer.net, so the readers' browsers nee
 | What you see | Why | What to do |
 |---|---|---|
 | Pipeline: `HTML NOT published - the WebApp (...) has no Authentication configured` (or `allows unauthenticated requests`, or `excludes paths from the authentication`) | The web app doesn't require a sign-in for the report. The pipeline never publishes to an open website. | Run the script from step 2 again. |
-| Pipeline: `HTML NOT published (...) - RBAC Role 'Website Contributor' on the WebApp (...) is required` | The pipeline identity may not upload to the web app. | Run the script again with the object ID of the pipeline identity's enterprise application as `-PublisherPrincipalObjectId` (step 1). |
+| Pipeline: `The authentication settings of the WebApp (...) could not be read` (with `403` / `AuthorizationFailed` above) | The pipeline identity has no '**Website Contributor**' role on the web app yet, or the role assignment is new. | A new role assignment can take up to about 30 minutes - run it again later. Otherwise assign the role: the script of step 2 with `-PublisherPrincipalObjectId` (the object ID of the pipeline identity's enterprise application). |
+| Pipeline: `HTML NOT published (...) - check: the WebApp (...) is running; its advanced tool site (SCM/Kudu) accepts requests from the pipeline agent ...` | The upload failed after the settings were read - the role works. Usually the web app is stopped, or access restrictions / a private endpoint of the advanced tool site (`<name>.scm.azurewebsites.net`) block the runner or agent. | Start the web app; allow the agent's network on the advanced tool site (**Networking** > **Access restriction** > **Advanced tool site**). The message above it names git's or Azure's reason. |
+| Pipeline: `HTML NOT published - the authentication of the WebApp (...) is configured by the file '...'` | The web app reads its authentication settings from a file; the pipeline cannot check it. | Configure the authentication in the web app settings instead (run the script of step 2 again). |
 | Script: `... failed (400): ... PrincipalTypeNotSupported` | An older version of the script got the object ID of the app registration instead of the enterprise application. The current script uses the enterprise application itself. | Run the current script again; it reuses what exists. |
-| Pipeline: `WebAppSubscriptionId '<subscriptionId>' - provide the Web App details (not the template placeholder)` | A `WebApp*` value still holds the placeholder. | Step 3. |
+| Step **Create arguments**: `Variable 'WebAppSubscriptionId' = '<YourWebAppSubscriptionId>' - provide the value ...` (or `Variable(s) not set: ...`) | `WebAppPublish` is `true`, but a `WebApp*` value is empty or still the placeholder. | Step 3. |
+| Script: `The web app name '...' is not available` | Web app names are unique worldwide. | Choose another `-WebAppName`. Nothing was created. |
+| Script: `... failed (409): ... MissingSubscriptionRegistration` | The subscription never hosted a web app or a managed identity: the resource providers `Microsoft.Web` and `Microsoft.ManagedIdentity` are not registered. | Somebody with the right on the subscription registers them (**Subscriptions** > **Resource providers** > **Register**); then run the script again. |
 | Pipeline: `'...AzADServicePrincipalInsights_<ID>.html' not found` | The management group ID in the pipeline and the file name differ (also in upper/lower case). | Use exactly the same management group ID everywhere. |
 | After signing in, the URL shows an error page instead of the report | The default document is a different report name: the script got another management group ID than the pipeline. | Run the script again with the `ManagementGroupId` of the pipeline. |
 | A group member gets "not assigned to the application" (`Assignment`) | The user is only in a group *inside* the viewer group. | Add the user directly to the viewer group. |
 | A group member gets "access denied" (`GroupClaim`) | The user is in very many groups. | Use `Assignment` if you have P1/P2, or ask your Entra admin about the user's group memberships. |
-| Everybody gets an error right after signing in, code `AADSTS50011`, `AADSTS70021` or `AADSTS700213` | The sign-in of the web app is not finished (redirect URI, or the managed identity isn't connected to the app registration yet). | Path A: run the script again. Path B: check the last step of the Entra admin. |
+| Everybody gets an error right after signing in, code `AADSTS700054` (`response_type 'id_token' is not enabled`) | **ID tokens** are off in the app registration - the sign-in of the web app needs them. | Path A: run the current script again. Path B: the Entra admin ticks **ID tokens** (step 3 of Path B). |
+| Everybody gets an error right after signing in, code `AADSTS50011`, `AADSTS70021`, `AADSTS70025` or `AADSTS700213` | The sign-in of the web app is not finished (redirect URI, or the managed identity isn't connected to the app registration yet). | Path A: run the script again. Path B: check the last step of the Entra admin. |
 
 ## Path B - two teams (Entra admin and Azure admin)
 
@@ -145,7 +157,7 @@ Do the steps in this order - then the web app is never open to the whole tenant.
 1. Note the **Application (client) ID** - the Azure admin needs it
 1. **API permissions** > **Add a permission** > **Microsoft Graph** > **Delegated permissions**: `openid`, `profile`, `email`, `offline_access` > **Add permissions** > **Grant admin consent for _&lt;tenant&gt;_**
 1. Access, depending on question 1:
-   - `Assignment`: **Enterprise applications** > the same name > **Properties** > **Assignment required?** **Yes** > **Save**; then **Users and groups** > **Add user/group** > the viewer group > **Assign**
+   - `Assignment`: **Enterprise applications** > the same name > **Properties** > **Assignment required?** **Yes** > **Save**; then **Users and groups** > **Add user/group** > the viewer group > **Assign**. Don't skip it: the web app accepts every user of the tenant that Microsoft Entra lets sign in
    - `GroupClaim`: back in the app registration: **Token configuration** > **Add groups claim** > **Security groups** > **Add**
 
 **2. Azure admin - create the web app**, either
@@ -153,20 +165,20 @@ Do the steps in this order - then the web app is never open to the whole tenant.
 - with the script (step 2 above) plus `-SkipEntra -EntraClientId <Application (client) ID>` - it prints the values the Entra admin needs next, or
 - with this button: [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FJulianHayward%2FAzADServicePrincipalInsights%2Fmain%2Fsetup%2Fazure-web-app.json) - fill in the values from step 1, **Entra Client Id** = the Application (client) ID, **Access Control** = the same setting as the Entra admin used. The deployment's **Outputs** show the values the Entra admin needs next.
 
-Tell the Entra admin the **redirect URI** (`https://<web app name>.azurewebsites.net/.auth/login/aad/callback`) and the name of the managed identity: `id-<web app name>-auth`.
+Tell the Entra admin the **redirect URI** from the script output or the deployment outputs (usually `https://<web app name>.azurewebsites.net/.auth/login/aad/callback`) and the name of the managed identity: `id-<web app name>-auth`. If the Entra admin cannot see the Azure resource group, also give them the **issuer**, **subject** and **audience** of the federated credential (script output, or the outputs `federatedCredentialIssuer`, `federatedCredentialSubject`, `federatedCredentialAudience`).
 
 **3. Entra admin - finish the sign-in**
 
-1. App registration > **Authentication** > **Add a platform** > **Web** > the redirect URI > **Configure**
+1. App registration > **Authentication** > **Add a platform** > **Web** > the redirect URI > tick **ID tokens (used for implicit and hybrid flows)** > **Configure** (the sign-in of the web app needs ID tokens; access tokens stay off)
 1. App registration > **Certificates & secrets** > **Federated credentials** > **Add credential**
-1. Scenario **Managed identity** > select the managed identity `id-<web app name>-auth` > give it a name > **Add**
+1. Scenario **Managed identity** > select the managed identity `id-<web app name>-auth` > give it a name > **Add**. Can't see the managed identity? Scenario **Other issuer** with the issuer, subject and audience the Azure admin gave you.
 
 Then continue with [checkpoint 2](#step-2---create-the-web-app-path-a).
 
 <details>
 <summary><b>Technical details</b> - what exactly gets created</summary>
 
-- **Microsoft Entra ID:** app registration (single tenant, redirect URI `/.auth/login/aad/callback`, delegated Microsoft Graph permissions `openid profile email offline_access` with admin consent) and its enterprise application. `Assignment`: `appRoleAssignmentRequired` and the group assigned (default app role). `GroupClaim`: `groupMembershipClaims: SecurityGroup`. Federated identity credential: issuer `https://login.microsoftonline.com/<tenant>/v2.0`, subject = principal ID of the managed identity, audience `api://AzureADTokenExchange`.
+- **Microsoft Entra ID:** app registration (single tenant, redirect URI `/.auth/login/aad/callback`, ID tokens on - App Service signs in with the hybrid flow `code id_token` -, access tokens off, delegated Microsoft Graph permissions `openid profile email offline_access` with admin consent) and its enterprise application. `Assignment`: `appRoleAssignmentRequired` and the group assigned (default app role). `GroupClaim`: `groupMembershipClaims: SecurityGroup`. Federated identity credential: issuer `https://login.microsoftonline.com/<tenant>/v2.0`, subject = principal ID of the managed identity, audience `api://AzureADTokenExchange` (Azure Government: `api://AzureADTokenExchangeUSGov`; Azure operated by 21Vianet: `api://AzureADTokenExchangeChina`).
 - **Azure:** user-assigned managed identity `id-<name>-auth` (only for the sign-in - don't assign it to anything else), App Service plan `asp-<name>` (Windows, default SKU B1; `-Sku F1` is free but without SLA), web app `<name>`: HTTPS only, TLS 1.2, FTP disabled, basic authentication (FTP and SCM) disabled, default document `AzADServicePrincipalInsights_<management group ID>.html` (several management groups: joined by `_`; the Tenant Root Group: the tenant ID).
 - **App Service Authentication (v2):** Microsoft Entra, login required (redirect to the sign-in page), client assertion by the managed identity (app setting `OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID`, no client secret), allowed tenant = your tenant. `GroupClaim`: `jwtClaimChecks.allowedGroups` and `defaultAuthorizationPolicy.allowedPrincipals.groups` = the viewer group.
 - **Role:** '**Website Contributor**' on the web app for the pipeline identity. The publish step uploads with a Microsoft Entra token - basic authentication is not needed.

@@ -61,6 +61,28 @@ Describe 'setup assistant' {
         @($broken) | Should -BeNullOrEmpty
         $script:Assistant | Should -Match ([regex]::Escape("var GUIDE = 'https://github.com/JulianHayward/AzADServicePrincipalInsights/blob/main/setup/';"))
     }
+    It 'links to existing files and headings of the repository (REPO + /blob/main/...)' {
+        $script:Assistant | Should -Match ([regex]::Escape("var REPO = 'https://github.com/JulianHayward/AzADServicePrincipalInsights';"))
+        $links = @([regex]::Matches($script:Assistant, "REPO \+ '/blob/main/(?<path>[\w./-]+?)(#(?<anchor>[\w-]+))?[)']"))
+        $links.Count | Should -BeGreaterThan 1
+        $links.Groups.Where({ $_.Name -eq 'anchor' -and $_.Success }).Value | Should -Contain 'upgrading-from-v1'
+        $broken = foreach ($link in $links) {
+            $target = Join-Path $script:RepoRoot $link.Groups['path'].Value
+            if (-not (Test-Path -LiteralPath $target)) { "missing file: $($link.Groups['path'].Value)"; continue }
+            if ($link.Groups['anchor'].Success -and $link.Groups['anchor'].Value -notin (getAnchors $target)) { "missing heading: $($link.Value)" }
+        }
+        @($broken) | Should -BeNullOrEmpty
+    }
+    It 'grants the Microsoft Graph permissions with the PowerShell block of setup/README.md' {
+        #README: the lines from $graphUrl to the end of the block; the assistant: the JavaScript strings of GRANT_SCRIPT
+        $readme = $script:SetupReadme -replace '\r\n', "`n"
+        $block = [regex]::Match($readme, '(?s)\n(?<code>\$graphUrl = .*?\n\})\n```').Groups['code'].Value
+        $block | Should -Match 'not found in Microsoft Graph' -Because 'the README block stops on an unknown permission name'
+        $array = [regex]::Match($script:Assistant, '(?s)var GRANT_SCRIPT = \[(?<body>.*?)\n  \];').Groups['body'].Value
+        $array | Should -Not -BeNullOrEmpty
+        $lines = @([regex]::Matches($array, "'(?<s>(?:[^'\\]|\\.)*)'") | ForEach-Object { $_.Groups['s'].Value -replace "\\(.)", '$1' })
+        ($lines -join "`n") | Should -BeExactly $block
+    }
     It 'lists the Microsoft Graph permissions of the permission reference (setup/README.md)' {
         $readmeRows = @([regex]::Matches($script:SetupReadme, '(?m)^\| `(?<first>[\w.]+)`(?: and `(?<second>[\w.]+)`)? \| (?<kind>required|optional)'))
         $required = @($readmeRows.where({ $_.Groups['kind'].Value -eq 'required' }) | ForEach-Object { $_.Groups['first'].Value })

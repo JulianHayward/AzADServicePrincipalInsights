@@ -30,9 +30,9 @@ You need the '**Reader**' role (or more) on the management group you want to rep
 1. If '**Reader**' (or '**Owner**', '**Contributor**', ...) is listed, continue with step 2.
 1. If not: somebody with '**Owner**' or '**User Access Administrator**' on the management group [assigns you the role](https://learn.microsoft.com/azure/role-based-access-control/role-assignments-portal).
 
-Note the **management group ID** (on the overview page of the management group, not the display name).
+Note the **management group ID** (on the overview page of the management group, not the display name) and the **tenant ID** (**Microsoft Entra ID** > **Overview** > **Tenant ID**; the ID of the Tenant Root Group is the tenant ID too).
 
-> **Checkpoint 1:** you have '**Reader**' (or more) on the management group, and you know its ID.
+> **Checkpoint 1:** you have '**Reader**' (or more) on the management group, and you know its ID and the tenant ID.
 
 ## Step 2 - Get the code
 
@@ -57,14 +57,20 @@ Set-Location 'AzADServicePrincipalInsights'
 
 ## Step 3 - Sign in and run
 
+Replace the values in `<...>` (the angle brackets too) with yours from step 1:
+
 ```powershell
-Connect-AzAccount -TenantId <tenant ID> -UseDeviceAuthentication
+Connect-AzAccount -TenantId <tenant ID>
 
 New-Item -ItemType Directory -Force -Path "$HOME/AzADSPI-Output"
+#the two files of step 2:
 ./AzADServicePrincipalInsights.ps1 -ManagementGroupId <management group ID> -OutputPath "$HOME/AzADSPI-Output"
+#or, in the cloned repository (and in a Codespace), the script is in the folder pwsh:
+#./pwsh/AzADServicePrincipalInsights.ps1 -ManagementGroupId <management group ID> -OutputPath "$HOME/AzADSPI-Output"
 ```
 
-- With the cloned repository (or in a Codespace) the script is in the folder `pwsh`: `./pwsh/AzADServicePrincipalInsights.ps1`.
+- No browser on this computer, or in a Codespace: `Connect-AzAccount -TenantId <tenant ID> -UseDeviceAuthentication` (sign in with a code on another device - some tenants block this).
+- Azure Government or Azure operated by 21Vianet: add `-Environment AzureUSGovernment` or `-Environment AzureChinaCloud` to `Connect-AzAccount`.
 
 - On the first run, the script asks to install the PowerShell module `AzAPICall` - answer `y`.
 - The run takes a few minutes; large tenants take longer.
@@ -81,7 +87,7 @@ The report is the file `AzADServicePrincipalInsights_<version>_<date and time>_<
 Get-ChildItem "$HOME/AzADSPI-Output" -Filter 'AzADServicePrincipalInsights_*.html' | Sort-Object LastWriteTime | Select-Object -Last 1 | Invoke-Item
 ```
 
-The report loads its styling from azadvertizer.net, so the browser needs internet access. In a Codespace, right-click the HTML file in the Explorer and select **Download**.
+The report loads styles and scripts from `www.azadvertizer.net`, `cdnjs.cloudflare.com` and `cdn.jsdelivr.net`, so the browser needs internet access. In a Codespace, right-click the HTML file in the Explorer and select **Download**.
 
 The folder also contains:
 
@@ -97,21 +103,24 @@ The output contains insights about your tenant. Store it like other sensitive da
 
 | What you see | Why | What to do |
 |---|---|---|
-| `MG '<ID>' Reader permission check FAILED` | You don't have '**Reader**' on the management group, or you entered the display name instead of the ID. | Step 1. |
+| `This script ... contains a "#requires" statement for PowerShell 7.0` or `Unexpected token '??'` | The script runs in Windows PowerShell 5.1 (the **Windows PowerShell** icon). | Start **PowerShell 7** (`pwsh`). |
+| `The '<' operator is reserved for future use` | A value still holds the placeholder `<...>`. | Replace it with your value, without the angle brackets. |
+| The sign-in is refused (`AADSTS53003`, or device code sign-in blocked) | A Conditional Access policy blocks this kind of sign-in. | Sign in without `-UseDeviceAuthentication` in a browser on this computer, or ask your administrator. |
+| `MG '<ID>' Reader permission check FAILED` | You don't have '**Reader**' on the management group (or it was assigned only minutes ago - a new role assignment can take up to about 30 minutes), or you entered the display name instead of the ID. | Step 1. |
 | `AAD ... Read permission check FAILED - the Microsoft Graph application permission ... is missing` (only as a service principal) | The message names the Microsoft Graph permission that is missing - not added, added as **Delegated** instead of **Application**, or without admin consent. | [Run as a service principal](#run-as-a-service-principal-instead), part 2. |
 | `permissionClassification.json not found` | The script is alone in its folder. | Put `permissionClassification.json` next to it (step 2). |
 | `Install it first: Install-Module -Name AzAPICall -RequiredVersion <version>` | The script runs unattended (e.g. `pwsh -NonInteractive`) and can't ask. | Run the command shown, then run the script again. |
-| The report has no styling and shows all sections on one page | The browser can't reach azadvertizer.net. | Open the report on a computer with internet access. |
+| The report has no styling and shows all sections on one page | The browser can't reach the hosts the report loads from (step 4). | Open the report on a computer with internet access. |
 
 ## Run in a GitHub Codespace instead
 
-The repository includes a [Codespace](https://docs.github.com/codespaces/getting-started/quickstart) configuration ([.devcontainer/devcontainer.json](../.devcontainer/devcontainer.json)) with PowerShell 7, Git, `Az.Accounts` and `AzAPICall`. On the [repository page](https://github.com/JulianHayward/AzADServicePrincipalInsights), select **Code** > **Codespaces** > **Create codespace on main**, then continue with step 3 in the terminal of the Codespace. Use `./AzADSPI-Output` instead of `"$HOME/AzADSPI-Output"` there: then the Explorer of the Codespace shows the output folder. Download the output before you delete the Codespace, and don't commit it.
+The repository includes a [Codespace](https://docs.github.com/codespaces/getting-started/quickstart) configuration ([.devcontainer/devcontainer.json](../.devcontainer/devcontainer.json)) with PowerShell 7, Git, `Az.Accounts` and `AzAPICall`. Do step 1. Then, instead of step 2: on the [repository page](https://github.com/JulianHayward/AzADServicePrincipalInsights), select **Code** > **Codespaces** > **Create codespace on main**, and continue with step 3 in the terminal of the Codespace (sign in with `-UseDeviceAuthentication`). Use `./AzADSPI-Output` instead of `"$HOME/AzADSPI-Output"` there: then the Explorer of the Codespace shows the output folder. Download the output before you delete the Codespace, and don't commit it.
 
 ## Run as a service principal instead
 
 A service principal can't read users, groups and applications in Microsoft Entra ID by default. Before the first run:
 
-1. The service principal needs the '**Reader**' role on the management group - as in step 1, with the object ID of its **enterprise application** (**Enterprise applications** > the application > **Object ID** - not the object ID under **App registrations**; see [Which ID is which?](README.md#which-id-is-which)).
+1. The service principal needs the '**Reader**' role on the management group: somebody with '**Owner**' or '**User Access Administrator**' on the management group [assigns it](https://learn.microsoft.com/azure/role-based-access-control/role-assignments-portal) to its **enterprise application** (**Enterprise applications** > the application > **Object ID** - not the object ID under **App registrations**; see [Which ID is which?](README.md#which-id-is-which)).
 1. A '**Privileged Role Administrator**' or '**Global Administrator**' grants it four Microsoft Graph permissions:
    1. [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > the application > **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions**
    1. Select `Application.Read.All`, `Group.Read.All`, `RoleManagement.Read.Directory` and `User.Read.All` > **Add permissions**
@@ -119,7 +128,7 @@ A service principal can't read users, groups and applications in Microsoft Entra
 
    More data with [optional permissions](README.md#microsoft-graph) (e.g. `DelegatedPermissionGrant.Read.All` makes the run faster).
 
-Then sign in as the service principal instead of `Connect-AzAccount -TenantId <tenant ID> -UseDeviceAuthentication` in step 3:
+Then sign in as the service principal instead of `Connect-AzAccount -TenantId <tenant ID>` in step 3:
 
 ```powershell
 $credential = Get-Credential   # User: the Application (client) ID; Password: a client secret of the app registration

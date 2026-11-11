@@ -88,15 +88,19 @@ if (-not (Test-Path -LiteralPath $output.HtmlPath -PathType Leaf)) {
     stopWithError "'$($output.HtmlPath)' not found - check the ManagementGroupId (casing, Linux!=linuX) and the OutputPath"
 }
 $zipPath = Join-Path -Path $ZipDirectory -ChildPath "AzADServicePrincipalInsights_$($output.Reference).zip"
+#the URL path of the report on the web app (published at the root)
+$reportUrlPath = "/$(Split-Path -Path $output.HtmlPath -Leaf)"
 #endregion input
 
 #region authentication of the Web App
-$azAPICallConf = initAzAPICall -DebugAzAPICall $true
+#the subscription of the web app as context: no check of the default subscription of the sign-in (it may have none)
+$azAPICallConf = initAzAPICall -DebugAzAPICall $true -SubscriptionId4AzContext $WebAppSubscriptionId
 $uriConfig = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$($WebAppSubscriptionId)/resourceGroups/$($WebAppResourceGroup)/providers/Microsoft.Web/sites/$($WebAppName)/config"
 
 $authEnabled = $false
 $requireAuthentication = $false
 $authVersion = $null
+$excludedPathsCoveringReport = @()
 try {
     $currentTask = "AzAPICall - Check if WebApp ($($WebAppName)) has Authentication (v1) enabled"
     $request = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri "$($uriConfig)/authsettings/list?api-version=2026-08-01" -method 'POST' -currentTask $currentTask -listenOn 'Content'
@@ -113,21 +117,34 @@ try {
         if ($requestV2.properties.platform.enabled -eq $true) {
             $authEnabled = $true
             $authVersion = 'v2'
-            $requireAuthentication = $requestV2.properties.globalValidation.requireAuthentication -eq $true
+            #AllowAnonymous lets unauthenticated requests through although requireAuthentication is set
+            $requireAuthentication = $requestV2.properties.globalValidation.requireAuthentication -eq $true -and $requestV2.properties.globalValidation.unauthenticatedClientAction -ne 'AllowAnonymous'
+            #a configuration file replaces the settings read here - what the web app enforces is unknown
+            $configFilePath = [string]$requestV2.properties.platform.configFilePath
             #review F-58: paths excluded from the authentication - the report is published at the root of the app (<name>.html)
             $excludedPaths = @($requestV2.properties.globalValidation.excludedPaths).where({ $_ })
             if ($excludedPaths.Count -gt 0) {
-                $excludedPathsCoveringReport = @($excludedPaths.where({ $_ -in '/', '/*', '/**' -or $_ -like '*.htm*' -or $_ -like '/AzADServicePrincipalInsights*' }))
-                if ($excludedPathsCoveringReport.Count -gt 0) {
-                    stopWithError "HTML NOT published - the WebApp ($($WebAppName)) excludes paths from the authentication that cover the report ($($excludedPathsCoveringReport -join ', ')); the report would be publicly accessible"
+                #covering: the root, the report itself (also by a wildcard, e.g. /Az*), anything named like the report
+                $excludedPathsCoveringReport = @($excludedPaths.where({ $_ -in '/', '/*', '/**' -or $reportUrlPath -like $_ -or $reportUrlPath -like "$($_)*" -or $_ -like '/AzADServicePrincipalInsights*' }))
+                $excludedPathsOther = @($excludedPaths.where({ $_ -notin $excludedPathsCoveringReport }))
+                if ($excludedPathsOther.Count -gt 0) {
+                    Write-Host "WebApp ($($WebAppName)) excludes these paths from the authentication (not the report): $($excludedPathsOther -join ', ')" -ForegroundColor Yellow
                 }
-                Write-Host "WebApp ($($WebAppName)) excludes these paths from the authentication (not the report): $($excludedPaths -join ', ')" -ForegroundColor Yellow
             }
         }
     }
 }
 catch {
-    stopWithError "The authentication settings of the WebApp ($($WebAppName)) could not be read ($($_.Exception.Message)) - HTML NOT published"
+    #mostly a 403: the role is missing (or not active yet) - reading the settings needs Microsoft.Web/sites/config/list/action
+    $signedInAs = if ($azAPICallConf['checkContext'].Account.Id) { "'$($azAPICallConf['checkContext'].Account.Id)'" } else { 'of the pipeline' }
+    stopWithError "The authentication settings of the WebApp ($($WebAppName)) could not be read ($($_.Exception.Message)) - HTML NOT published. If the output above shows 403 / AuthorizationFailed: the identity $($signedInAs) needs the role 'Website Contributor' on the WebApp (New-AzADSPIWebApp.ps1 -PublisherPrincipalObjectId or the template parameter publisherPrincipalObjectId: the object ID of its enterprise application). A new role assignment can take up to about 30 minutes to work - then run it again."
+}
+#checked after the try: its message must not be taken for a read error
+if ($configFilePath) {
+    stopWithError "HTML NOT published - the authentication of the WebApp ($($WebAppName)) is configured by the file '$($configFilePath)' (platform.configFilePath), which this step cannot check - configure the authentication in the WebApp settings (App Service Authentication) instead"
+}
+if ($excludedPathsCoveringReport.Count -gt 0) {
+    stopWithError "HTML NOT published - the WebApp ($($WebAppName)) excludes paths from the authentication that cover the report ($($excludedPathsCoveringReport -join ', ')); the report would be publicly accessible"
 }
 
 Write-Host "WebApp ($($WebAppName)) has Authentication enabled: $($authEnabled)$(if ($authVersion) { " ($($authVersion))" }); login required: $($requireAuthentication)"
@@ -135,7 +152,9 @@ if (-not $authEnabled) {
     stopWithError "HTML NOT published - the WebApp ($($WebAppName)) has no Authentication configured. Assuming and insisting that you do not want to publish your tenant insights to the public - configure Authentication on the WebApp"
 }
 if (-not $requireAuthentication) {
-    $authSetting = if ($authVersion -eq 'v1') { "unauthenticatedClientAction '$($request.properties.unauthenticatedClientAction)', not 'RedirectToLoginPage'" } else { 'globalValidation.requireAuthentication false' }
+    $authSetting = if ($authVersion -eq 'v1') { "unauthenticatedClientAction '$($request.properties.unauthenticatedClientAction)', not 'RedirectToLoginPage'" }
+    elseif ($requestV2.properties.globalValidation.requireAuthentication -eq $true) { "globalValidation.unauthenticatedClientAction 'AllowAnonymous'" }
+    else { 'globalValidation.requireAuthentication false' }
     stopWithError "HTML NOT published - the WebApp ($($WebAppName)) has Authentication enabled but allows unauthenticated requests ($($authSetting)), the report would be publicly accessible. Configure the WebApp to require authentication"
 }
 #endregion authentication of the Web App
@@ -143,13 +162,16 @@ if (-not $requireAuthentication) {
 #region publish
 try {
     Compress-Archive -LiteralPath $output.HtmlPath -DestinationPath $zipPath -Force -ErrorAction Stop
-    $null = Select-AzSubscription -SubscriptionId $WebAppSubscriptionId -ErrorAction Stop
-    if (-not (Publish-AzWebApp -ResourceGroupName $WebAppResourceGroup -Name $WebAppName -ArchivePath $zipPath -Force -ErrorAction Stop)) {
+    $null = Set-AzContext -SubscriptionId $WebAppSubscriptionId -ErrorAction Stop
+    $published = Publish-AzWebApp -ResourceGroupName $WebAppResourceGroup -Name $WebAppName -ArchivePath $zipPath -Force -ErrorAction Stop
+    if (-not $published) {
         throw 'Publish-AzWebApp returned no result'
     }
 }
 catch {
-    stopWithError "HTML NOT published ($($_.Exception.Message)) - RBAC Role 'Website Contributor' on the WebApp ($($WebAppName)) is required"
+    #the role was already used to read the settings above - other causes are as likely
+    stopWithError "HTML NOT published ($($_.Exception.Message)) - check: the WebApp ($($WebAppName)) is running; its advanced tool site (SCM/Kudu) accepts requests from the pipeline agent (access restrictions, private endpoint); the pipeline identity has the role 'Website Contributor' on the WebApp"
 }
 Write-Host "Published '$($output.HtmlPath)'"
+if ($published.DefaultHostName) { Write-Host "Report: https://$($published.DefaultHostName)" }
 #endregion publish

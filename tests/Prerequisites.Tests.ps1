@@ -1,7 +1,7 @@
 #pwsh/Test-AzADSPIPrerequisite.ps1: output folder from -OutputPath (review R-2: Azure DevOps used the removed WIKIDIR variable)
 BeforeAll {
     $script:PrereqScript = Join-Path $PSScriptRoot '..' 'pwsh' 'Test-AzADSPIPrerequisite.ps1'
-    $script:EnvNames = @('SYSTEM_TEAMPROJECTID', 'BUILD_REPOSITORY_ID', 'SYSTEM_DEFAULTWORKINGDIRECTORY', 'SYSTEM_COLLECTIONURI', 'SYSTEM_TEAMPROJECT', 'SYSTEM_ACCESSTOKEN', 'GITHUB_ACTIONS', 'GITHUB_WORKSPACE', 'GITHUB_REPOSITORY', 'GITHUB_SERVER_URL', 'GITHUB_API_URL', 'GITHUB_TOKEN', 'WIKIDIR')
+    $script:EnvNames = @('SYSTEM_TEAMPROJECTID', 'BUILD_REPOSITORY_ID', 'SYSTEM_DEFAULTWORKINGDIRECTORY', 'SYSTEM_COLLECTIONURI', 'SYSTEM_TEAMPROJECT', 'SYSTEM_ACCESSTOKEN', 'GITHUB_ACTIONS', 'GITHUB_WORKSPACE', 'GITHUB_REPOSITORY', 'GITHUB_SERVER_URL', 'GITHUB_API_URL', 'GITHUB_TOKEN', 'WIKIDIR', 'BUILD_SOURCEBRANCH', 'GITHUB_REF', 'AGENT_TEMPDIRECTORY')
 }
 
 Describe 'Test-AzADSPIPrerequisite.ps1 on Azure DevOps' {
@@ -17,7 +17,10 @@ Describe 'Test-AzADSPIPrerequisite.ps1 on Azure DevOps' {
         $env:SYSTEM_COLLECTIONURI = 'https://tfs.example.invalid/tfs/DefaultCollection/'
         $env:SYSTEM_TEAMPROJECT = 'proj'
         $env:SYSTEM_ACCESSTOKEN = 'dummy'
+        $env:BUILD_SOURCEBRANCH = 'refs/heads/main'
         Mock Invoke-RestMethod { [pscustomobject]@{ value = @() } }
+        Mock Invoke-RestMethod { [pscustomobject]@{ visibility = 'private' } } -ParameterFilter { $Uri -like '*/_apis/projects/*' }
+        Mock Start-Sleep {}
         Mock Write-Host {}
     }
     AfterEach {
@@ -34,7 +37,34 @@ Describe 'Test-AzADSPIPrerequisite.ps1 on Azure DevOps' {
     It 'skips creation and the repository check when the folder exists' {
         $null = New-Item -ItemType Directory -Path (Join-Path $WorkDir 'out')
         $null = & $PrereqScript -OutputPath 'out'
-        Should -Invoke Invoke-RestMethod -Times 0 -Exactly
+        Should -Invoke Invoke-RestMethod -Times 0 -Exactly -ParameterFilter { $Uri -like '*/_apis/git/repositories*' }
+        Should -Invoke Invoke-RestMethod -Times 1 -Exactly -ParameterFilter { $Uri -eq 'https://tfs.example.invalid/tfs/DefaultCollection/_apis/projects/11111111-1111-1111-1111-111111111111?api-version=7.1' }
+    }
+
+    It 'SR-16: a public project stops the run before the output folder is created' {
+        Mock Invoke-RestMethod { [pscustomobject]@{ visibility = 'public' } } -ParameterFilter { $Uri -like '*/_apis/projects/*' }
+        { & $PrereqScript -OutputPath 'wiki' } | Should -Throw "*Project 'proj' is public*"
+        Test-Path -LiteralPath (Join-Path $WorkDir 'wiki') | Should -BeFalse
+    }
+
+    It 'SR-16: a visibility that cannot be determined stops the run after 3 tries' {
+        Mock Invoke-RestMethod { throw 'offline' } -ParameterFilter { $Uri -like '*/_apis/projects/*' }
+        { & $PrereqScript -OutputPath 'wiki' } | Should -Throw "*visibility of project 'proj' could not be determined*"
+        Should -Invoke Invoke-RestMethod -Times 3 -Exactly -ParameterFilter { $Uri -like '*/_apis/projects/*' }
+    }
+
+    It 'SR-39: a run that is not on a branch stops before the collection' {
+        $env:BUILD_SOURCEBRANCH = 'refs/pull/7/merge'
+        { & $PrereqScript -OutputPath 'wiki' } | Should -Throw "*The run is not on a branch ('refs/pull/7/merge')*"
+    }
+
+    It 'SR-57: an output folder outside the repository or ignored by git stops the run' {
+        { & $PrereqScript -OutputPath '../outside' } | Should -Throw '*is not inside the repository*'
+        $null = git -C $WorkDir init --quiet 2>&1
+        Set-Content -LiteralPath (Join-Path $WorkDir '.gitignore') -Value 'AzADSPI-Output/'
+        { & $PrereqScript -OutputPath 'AzADSPI-Output' } | Should -Throw '*is ignored by git*'
+        $null = & $PrereqScript -OutputPath 'wiki'
+        Test-Path -LiteralPath (Join-Path $WorkDir 'wiki') | Should -BeTrue
     }
 
     It 'keeps a rooted -OutputPath' {
@@ -60,6 +90,7 @@ Describe 'Test-AzADSPIPrerequisite.ps1 on GitHub Actions' {
         $env:GITHUB_ACTIONS = 'true'
         $env:GITHUB_WORKSPACE = $WorkDir
         $env:GITHUB_REPOSITORY = 'owner/repo'
+        $env:GITHUB_REF = 'refs/heads/main'
         #review F-59: anonymous, the repository API answers 404 for a repository that is not public
         Mock Invoke-WebRequest { throw [Microsoft.PowerShell.Commands.HttpResponseException]::new('not found', [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]::NotFound)) }
         Mock Start-Sleep {}

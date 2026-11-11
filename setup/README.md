@@ -19,7 +19,7 @@ After GitHub or Azure DevOps, optionally:
 | Colleagues open the report on a website, after signing in | [Publish the report to an Azure Web App](azure-web-app.md) (a script creates it) |
 | Query and alert on the data in Log Analytics or Microsoft Sentinel | [Send the output to Log Analytics](log-analytics.md) |
 
-The output contains insights about your tenant: who has which permissions, credentials and owners. Keep the repository private. The GitHub workflows stop if the repository is public, and the Web App publishing stops if the Web App can be opened without signing in.
+The output contains insights about your tenant: who has which permissions, credentials and owners. Keep the repository private. The GitHub workflows stop if the repository is public, the Azure DevOps pipeline if the project is public, and the Web App publishing stops if the Web App can be opened without signing in. Log Analytics: everybody who can read the workspace can read the table - see [Who can read the table](log-analytics.md#before-you-start).
 
 The guides contain every step you need. The rest of this page is the reference: all permissions and how the parameters are set.
 
@@ -81,13 +81,20 @@ $permissions = 'Application.Read.All', 'Group.Read.All', 'RoleManagement.Read.Di
     'DelegatedPermissionGrant.Read.All', 'DirectoryRecommendations.Read.All', 'CustomSecAttributeAssignment.Read.All',
     'Policy.Read.All', 'Policy.Read.PermissionGrant'
 
-$graph = (Invoke-AzRestMethod -Uri "https://graph.microsoft.com/v1.0/servicePrincipals(appId='00000003-0000-0000-c000-000000000000')").Content | ConvertFrom-Json
-$granted = ((Invoke-AzRestMethod -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$principalId/appRoleAssignments").Content | ConvertFrom-Json).value.appRoleId
+$graphUrl = 'https://graph.microsoft.com' # Azure Government: https://graph.microsoft.us; Azure operated by 21Vianet: https://microsoftgraph.chinacloudapi.cn
+
+$response = Invoke-AzRestMethod -Uri "$graphUrl/v1.0/servicePrincipals(appId='00000003-0000-0000-c000-000000000000')"
+if ($response.StatusCode -ne 200) { throw "Microsoft Graph could not be read: $($response.Content)" }
+$graph = $response.Content | ConvertFrom-Json
+$response = Invoke-AzRestMethod -Uri "$graphUrl/v1.0/servicePrincipals/$principalId/appRoleAssignments"
+if ($response.StatusCode -ne 200) { throw "The permissions of $principalId could not be read: $($response.Content)" }
+$granted = @(($response.Content | ConvertFrom-Json).value.appRoleId)
 foreach ($permission in $permissions) {
     $appRoleId = ($graph.appRoles | Where-Object { $_.value -eq $permission -and $_.allowedMemberTypes -contains 'Application' }).id
+    if (-not $appRoleId) { "$permission - not found in Microsoft Graph (check the name)"; continue }
     if ($appRoleId -in $granted) { "$permission - already granted"; continue }
     $body = @{ principalId = $principalId; resourceId = $graph.id; appRoleId = $appRoleId } | ConvertTo-Json
-    $result = Invoke-AzRestMethod -Method POST -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$principalId/appRoleAssignments" -Payload $body
+    $result = Invoke-AzRestMethod -Method POST -Uri "$graphUrl/v1.0/servicePrincipals/$principalId/appRoleAssignments" -Payload $body
     "$permission - $(if ($result.StatusCode -eq 201) { 'granted' } else { $result.Content })"
 }
 ```
@@ -99,7 +106,7 @@ Check: Azure portal > **Microsoft Entra ID** > **Enterprise applications** > you
 | Feature | Role | Scope |
 |---|---|---|
 | [Web App publishing](azure-web-app.md) | '**Website Contributor**' | the Web App |
-| [Log Analytics ingestion](log-analytics.md) | '**Monitoring Metrics Publisher**' | the Data Collection Rule |
+| [Log Analytics ingestion](log-analytics.md) | '**Monitoring Metrics Publisher**' and '**Monitoring Reader**' | the Data Collection Rule |
 
 ## Parameters
 

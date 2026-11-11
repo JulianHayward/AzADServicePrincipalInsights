@@ -61,9 +61,10 @@
     },
     "authorizedGroupObjectId": {
       "type": "string",
-      "defaultValue": "",
+      "minLength": 36,
+      "maxLength": 36,
       "metadata": {
-        "description": "Object ID of the security group whose members may view the report (required for GroupClaim, informational for Assignment)"
+        "description": "Object ID of the security group whose members may view the report (checked by the web app for GroupClaim; for Assignment the group the Entra admin assigns)"
       }
     },
     "publisherPrincipalObjectId": {
@@ -85,8 +86,9 @@
     "tenantId": "[subscription().tenantId]",
     "appServicePlanName": "[format('asp-{0}', parameters('webAppName'))]",
     "managedIdentityName": "[format('id-{0}-auth', parameters('webAppName'))]",
-    "managementGroupIds": "[split(replace(parameters('managementGroupId'), ' ', ''), ',')]",
-    "reportReference": "[if(or(empty(replace(parameters('managementGroupId'), ' ', '')), contains(variables('managementGroupIds'), variables('tenantId'))), variables('tenantId'), join(variables('managementGroupIds'), '_'))]",
+    "managementGroupIds": "[filter(split(replace(parameters('managementGroupId'), ' ', ''), ','), lambda('id', not(empty(lambdaVariables('id')))))]",
+    "reportReference": "[if(or(empty(variables('managementGroupIds')), contains(variables('managementGroupIds'), variables('tenantId'))), variables('tenantId'), join(variables('managementGroupIds'), '_'))]",
+    "tokenExchangeAudience": "[if(equals(environment().name, 'AzureUSGovernment'), 'api://AzureADTokenExchangeUSGov', if(equals(environment().name, 'AzureChinaCloud'), 'api://AzureADTokenExchangeChina', 'api://AzureADTokenExchange'))]",
     "defaultDocument": "[format('AzADServicePrincipalInsights_{0}.html', variables('reportReference'))]",
     "assertionSettingName": "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID",
     "websiteContributorRoleId": "de139f84-1756-47ae-9be6-808fbbe84772",
@@ -291,7 +293,7 @@
     },
     "federatedCredentialAudience": {
       "type": "string",
-      "value": "api://AzureADTokenExchange"
+      "value": "[variables('tokenExchangeAudience')]"
     }
   }
 }

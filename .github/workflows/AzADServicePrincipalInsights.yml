@@ -23,8 +23,8 @@ on:
 permissions:
   contents: write
 
-#runs of this branch wait for each other (they change the same output files); a waiting run is not cancelled (GitHub keeps one
-#waiting run per group - a newer one replaces it)
+#runs of this branch wait for each other (they change the same output files); the running run is never cancelled - of several
+#waiting runs GitHub keeps only the newest (the others are cancelled)
 concurrency:
   group: AzADServicePrincipalInsights-${{ github.ref }}
   cancel-in-progress: false
@@ -105,13 +105,9 @@ jobs:
         with:
           creds: ${{secrets.CREDS}}
           enable-AzPSSession: true
-          # CREDS looks like this:
-          # {
-          #   "tenantId": "<GUID>",
-          #   "subscriptionId": "<GUID>",
-          #   "clientId": "<GUID>",
-          #   "clientSecret": "<GUID>"
-          # }
+          # CREDS looks like this - on one line (each line of a secret is masked in the logs on its own), clientSecret is the Value of
+          # the client secret, not its Secret ID:
+          # {"tenantId": "<Directory (tenant) ID>", "subscriptionId": "<subscription ID>", "clientId": "<Application (client) ID>", "clientSecret": "<client secret value>"}
 
       - name: Run AzADServicePrincipalInsights
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3.0.0
@@ -122,12 +118,15 @@ jobs:
           azPSVersion: "latest"
 
       - name: Push AzADServicePrincipalInsights output to repository
+        id: push
         shell: pwsh
         run: |
-          & "./$($env:ScriptDir)/Push-AzADSPIOutput.ps1" -RepositoryPath $env:GITHUB_WORKSPACE
+          $params = & "./$($env:ScriptDir)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:RUNNER_TEMP)/AzADSPIArguments.json"
+          & "./$($env:ScriptDir)/Push-AzADSPIOutput.ps1" -RepositoryPath $env:GITHUB_WORKSPACE -OutputPath $params['OutputPath']
 
+      # ingestion and publishing need only the pushed output - a failure of one does not skip the other
       - name: Upload data to Log Analytics via Logs ingestion API
-        if: steps.arguments.outputs.IngestToLogAnalytics == 'true'
+        if: ${{ !cancelled() && steps.push.outcome == 'success' && steps.arguments.outputs.IngestToLogAnalytics == 'true' }}
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3.0.0
         with:
           inlineScript: |
@@ -138,7 +137,7 @@ jobs:
           azPSVersion: "latest"
 
       - name: Publish HTML to WebApp
-        if: steps.arguments.outputs.WebAppPublish == 'true'
+        if: ${{ !cancelled() && steps.push.outcome == 'success' && steps.arguments.outputs.WebAppPublish == 'true' }}
         uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3.0.0
         with:
           inlineScript: |

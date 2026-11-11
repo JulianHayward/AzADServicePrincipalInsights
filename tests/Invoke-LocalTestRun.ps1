@@ -53,7 +53,8 @@ if ($KeyringUser) {
 }
 if ($Credential) {
     if (-not $TenantId) { throw '-Credential needs -TenantId' }
-    $null = Connect-AzAccount -ServicePrincipal -TenantId $TenantId -Credential $Credential -WarningAction SilentlyContinue
+    #-Scope Process: the default context of later sessions stays as it was (context autosave)
+    $null = Connect-AzAccount -ServicePrincipal -TenantId $TenantId -Credential $Credential -Scope Process -WarningAction SilentlyContinue
 }
 $context = Get-AzContext
 if (-not $context) { throw 'No Azure context - run Connect-AzAccount first, or pass -Credential and -TenantId, or -KeyringUser' }
@@ -72,6 +73,12 @@ if ($NoAzureResourceSideRelations) { $params.NoAzureResourceSideRelations = $tru
 if ($OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes) { $params.OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes = $true }
 
 $start = Get-Date
-Set-Location -LiteralPath $RepoRoot
-& ./pwsh/AzADServicePrincipalInsights.ps1 @params
+#the session keeps its location (the next command of the example may run in another folder)
+Push-Location -LiteralPath $RepoRoot
+try {
+    & ./pwsh/AzADServicePrincipalInsights.ps1 @params
+}
+finally {
+    Pop-Location
+}
 Write-Host "LOCALRUN_EXIT: success, duration $([math]::Round(((Get-Date) - $start).TotalMinutes, 1)) min"

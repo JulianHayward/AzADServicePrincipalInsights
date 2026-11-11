@@ -136,6 +136,16 @@ variables:
     # Switch | example: value: true
     value:
 
+  # The AzAPICall module to use (installed by the run)
+  - name: AzAPICallModuleName
+    # String | default = AzAPICall | allowed: AzAPICall, AzAPICallBeta | example: value: AzAPICallBeta
+    value:
+
+  # The AzAPICall version to use (default: the tested version)
+  - name: azAPICallVersion
+    # String | default = 1.4.2 | example: value: 1.4.2
+    value:
+
   # Write a transcript of the console output to the output folder
   - name: DoTranscript
     # Switch | example: value: true
@@ -180,7 +190,7 @@ variables:
 
   # Parallel Logs ingestion API requests
   - name: ThrottleLimitMonitor
-    # Integer | default = 5 | example: value: 10
+    # Integer | default = 5 | range 1-100 | example: value: 10
     value:
 
   # Maximum size (bytes) of one Logs ingestion API request (the API limit is 1 MB)

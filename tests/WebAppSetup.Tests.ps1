@@ -97,6 +97,17 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
             $body = $(if ($Payload) { $Payload | ConvertFrom-Json -AsHashtable })
             $global:WebAppSetupTest.Calls.Add([pscustomobject]@{ Method = $Method; Target = $target; Body = $body; ResourceId = $ResourceId })
             switch -Wildcard ("$Method $target") {
+                #first: '?' in a pattern is a wildcard, the patterns below match these paths too
+                'GET *federatedIdentityCredentials' { return respond @{ value = @($global:WebAppSetupTest.Credentials) } }
+                'GET */providers/Microsoft.Web/sites/azadspi-contoso?*' {
+                    if ($global:WebAppSetupTest.SiteMissing) { return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"ResourceNotFound"}}' } }
+                    return respond @{ location = 'westeurope' }
+                }
+                'POST */providers/Microsoft.Web/checkNameAvailability?*' { return respond @{ nameAvailable = $global:WebAppSetupTest.NameAvailable; reason = 'AlreadyExists'; message = 'Hostname already exists' } }
+                'GET */serverfarms/*' {
+                    if ($null -eq $global:WebAppSetupTest.ExistingPlan) { return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"ResourceNotFound"}}' } }
+                    return respond $global:WebAppSetupTest.ExistingPlan
+                }
                 'GET /subscriptions/*/resourceGroups/rg-azadspi?*' { return respond @{ location = 'westeurope' } }
                 'GET *applications(appId=*' { return respond $global:WebAppSetupTest.ExistingApplication }
                 'GET *applications?*' { return respond @{ value = @($global:WebAppSetupTest.FoundApplications) } }
@@ -113,7 +124,6 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
                     return respond $global:WebAppSetupTest.PublisherObject
                 }
                 'GET *appRoleAssignedTo' { return respond @{ value = @() } }
-                'GET *federatedIdentityCredentials' { return respond @{ value = @() } }
                 'PUT */userAssignedIdentities/*' { return respond @{ id = "$($target.Split('?')[0])"; properties = @{ clientId = 'mi-client-id'; principalId = 'mi-principal-id' } } }
                 'PUT */serverfarms/*' { return respond @{ id = "$($target.Split('?')[0])" } }
                 'PUT */providers/Microsoft.Web/sites/azadspi-contoso?*' { return respond @{ id = "$($target.Split('?')[0])"; properties = @{ defaultHostName = $global:WebAppSetupTest.DefaultHostName } } }
@@ -124,6 +134,10 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
         $global:WebAppSetupTest.ExistingApplication = $null
         $global:WebAppSetupTest.DefaultHostName = 'azadspi-contoso.azurewebsites.net'
         $global:WebAppSetupTest.PublisherObject = @{ '@odata.type' = '#microsoft.graph.servicePrincipal'; displayName = 'pipeline'; servicePrincipalType = 'Application' }
+        $global:WebAppSetupTest.Credentials = @()
+        $global:WebAppSetupTest.SiteMissing = $false
+        $global:WebAppSetupTest.NameAvailable = $true
+        $global:WebAppSetupTest.ExistingPlan = $null
     }
 
     It 'Assignment: the access control before the authentication of the web app, the federated credential last' {
@@ -187,7 +201,8 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
         invokeSetup @{ ManagementGroupId = 'Contoso' }
         $redirect = (getCalls 'PATCH' '*/applications/app-object-id').where({ $_.Body.web })[0]
         $redirect.Body.web.redirectUris | Should -Be @('https://azadspi-contoso-abc123.westeurope-01.azurewebsites.net/.auth/login/aad/callback')
-        $redirect.Body.web.implicitGrantSettings.enableIdTokenIssuance | Should -BeFalse
+        $redirect.Body.web.implicitGrantSettings.enableIdTokenIssuance | Should -BeTrue -Because 'App Service signs in with the hybrid flow code id_token (else AADSTS700054)'
+        $redirect.Body.web.implicitGrantSettings.enableAccessTokenIssuance | Should -BeFalse
         $credential = (getCalls 'POST' '*/federatedIdentityCredentials')[0].Body
         $credential.issuer | Should -Be "https://login.microsoftonline.com/$($script:TenantId)/v2.0"
         $credential.subject | Should -Be 'mi-principal-id'
@@ -231,11 +246,49 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
         $validation.defaultAuthorizationPolicy.allowedPrincipals.groups | Should -Be @($script:GroupId)
     }
 
-    It 'reuses an existing app registration and its redirect URIs' {
-        $global:WebAppSetupTest.FoundApplications = @(@{ id = 'app-object-id'; appId = $script:AppId; signInAudience = 'AzureADMyOrg'; web = @{ redirectUris = @('https://azadspi-contoso.azurewebsites.net/.auth/login/aad/callback') } })
+    It 'reuses an existing app registration and its redirect URIs; turns ID tokens on when they are off' {
+        $global:WebAppSetupTest.FoundApplications = @(@{ id = 'app-object-id'; appId = $script:AppId; signInAudience = 'AzureADMyOrg'; web = @{ redirectUris = @('https://azadspi-contoso.azurewebsites.net/.auth/login/aad/callback'); implicitGrantSettings = @{ enableIdTokenIssuance = $true; enableAccessTokenIssuance = $false } } })
         invokeSetup @{ ManagementGroupId = 'Contoso' }
         getCalls 'POST' '*/applications' | Should -BeNullOrEmpty
-        (getCalls 'PATCH' '*/applications/app-object-id').where({ $_.Body.web }) | Should -BeNullOrEmpty -Because 'the redirect URI is there already'
+        (getCalls 'PATCH' '*/applications/app-object-id').where({ $_.Body.web }) | Should -BeNullOrEmpty -Because 'the redirect URI is there already and ID tokens are on'
+        $global:WebAppSetupTest.FoundApplications = @(@{ id = 'app-object-id'; appId = $script:AppId; signInAudience = 'AzureADMyOrg'; web = @{ redirectUris = @('https://other.example/callback', 'https://azadspi-contoso.azurewebsites.net/.auth/login/aad/callback'); implicitGrantSettings = @{ enableIdTokenIssuance = $false } } })
+        invokeSetup @{ ManagementGroupId = 'Contoso' }
+        $web = (getCalls 'PATCH' '*/applications/app-object-id').where({ $_.Body.web })[0].Body.web
+        $web.redirectUris | Should -Be @('https://other.example/callback', 'https://azadspi-contoso.azurewebsites.net/.auth/login/aad/callback')
+        $web.implicitGrantSettings.enableIdTokenIssuance | Should -BeTrue
+    }
+
+    It 'a web app name taken elsewhere stops before anything is created' {
+        $global:WebAppSetupTest.SiteMissing = $true
+        $global:WebAppSetupTest.NameAvailable = $false
+        { invokeSetup @{ ManagementGroupId = 'Contoso' } } | Should -Throw "*web app name 'azadspi-contoso' is not available*Nothing was created*"
+        getCalls 'PUT' '*' | Should -BeNullOrEmpty
+        @(getCalls 'POST' '*').where({ $_.Target -notlike '*/checkNameAvailability?*' }) | Should -BeNullOrEmpty
+        getCalls 'PATCH' '*' | Should -BeNullOrEmpty
+        $global:WebAppSetupTest.NameAvailable = $true
+        invokeSetup @{ ManagementGroupId = 'Contoso' }
+        getCalls 'PUT' '*/sites/azadspi-contoso?*' | Should -Not -BeNullOrEmpty
+    }
+
+    It 'a second run keeps the SKU and region of the existing plan unless -Sku / -Location are given' {
+        $global:WebAppSetupTest.ExistingPlan = @{ location = 'northeurope'; sku = @{ name = 'F1' } }
+        invokeSetup @{ ManagementGroupId = 'Contoso' }
+        $plan = (getCalls 'PUT' '*/serverfarms/*')[0].Body
+        $plan.sku.name | Should -Be 'F1'
+        $plan.location | Should -Be 'northeurope'
+        invokeSetup @{ ManagementGroupId = 'Contoso'; Sku = 'B1' }
+        (getCalls 'PUT' '*/serverfarms/*')[0].Body.sku.name | Should -Be 'B1'
+    }
+
+    It 'a federated credential of a re-created managed identity is updated, not created a second time (the name is unique)' {
+        $global:WebAppSetupTest.Credentials = @(@{ id = 'fic-id'; name = 'AzADSPIWebApp-azadspi-contoso'; issuer = "https://login.microsoftonline.com/$($script:TenantId)/v2.0"; subject = 'old-principal-id' })
+        invokeSetup @{ ManagementGroupId = 'Contoso' }
+        getCalls 'POST' '*/federatedIdentityCredentials' | Should -BeNullOrEmpty
+        (getCalls 'PATCH' '*/federatedIdentityCredentials/fic-id')[0].Body.subject | Should -Be 'mi-principal-id'
+        $global:WebAppSetupTest.Credentials = @(@{ id = 'fic-id'; name = 'AzADSPIWebApp-azadspi-contoso'; issuer = "https://login.microsoftonline.com/$($script:TenantId)/v2.0"; subject = 'mi-principal-id' })
+        invokeSetup @{ ManagementGroupId = 'Contoso' }
+        getCalls 'POST' '*/federatedIdentityCredentials' | Should -BeNullOrEmpty
+        getCalls 'PATCH' '*/federatedIdentityCredentials/*' | Should -BeNullOrEmpty
     }
 
     It 'stops for an app registration that allows accounts of other tenants' {
@@ -258,6 +311,7 @@ Describe 'New-AzADSPIWebApp.ps1 (mocked REST calls)' {
         $graphCalls.Count | Should -BeGreaterThan 0
         @($graphCalls.where({ $_.Target -notlike 'https://graph.microsoft.us/v1.0/*' -or $_.ResourceId -ne 'https://graph.microsoft.us' })) | Should -BeNullOrEmpty
         (getCalls 'PUT' '*/config/authsettingsV2?*')[0].Body.properties.identityProviders.azureActiveDirectory.registration.openIdIssuer | Should -Be "https://login.microsoftonline.us/$($script:TenantId)/v2.0"
+        (getCalls 'POST' '*/federatedIdentityCredentials')[0].Body.audiences | Should -Be @('api://AzureADTokenExchangeUSGov')
     }
 }
 
@@ -297,6 +351,22 @@ Describe 'setup/azure-web-app.json and New-AzADSPIWebApp.ps1 create the same Azu
         $auth.globalValidation.unauthenticatedClientAction | Should -Be 'RedirectToLoginPage'
         $auth.globalValidation.Keys | Should -Not -Contain 'excludedPaths' -Because 'Publish-AzADSPIWebApp.ps1 refuses excluded paths that cover the report'
         $auth.identityProviders.azureActiveDirectory.registration.clientSecretSettingName | Should -Be "[variables('assertionSettingName')]"
+    }
+    It 'SR-32: the template''s access control - authentication on, the group check for GroupClaim, the role scoped to the web app' {
+        $auth = (getTemplateResource 'Microsoft.Web/sites/config' "*'authsettingsV2')]").properties
+        $auth.platform.enabled | Should -BeTrue
+        $auth.httpSettings.requireHttps | Should -BeTrue
+        $auth.identityProviders.azureActiveDirectory.validation | Should -BeExactly "[if(equals(parameters('accessControl'), 'GroupClaim'), variables('groupClaimValidation'), createObject())]"
+        $script:Template.variables.groupClaimValidation.jwtClaimChecks.allowedGroups | Should -Be @("[parameters('authorizedGroupObjectId')]")
+        $script:Template.variables.groupClaimValidation.defaultAuthorizationPolicy.allowedPrincipals.groups | Should -Be @("[parameters('authorizedGroupObjectId')]")
+        $script:Template.parameters.authorizedGroupObjectId.minLength | Should -Be 36 -Because 'GroupClaim with an empty group would deploy (SR-78)'
+        $role = getTemplateResource 'Microsoft.Authorization/roleAssignments'
+        $role.scope | Should -BeExactly "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+        $role.properties.principalId | Should -BeExactly "[parameters('publisherPrincipalObjectId')]"
+        $role.properties.roleDefinitionId | Should -BeExactly "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('websiteContributorRoleId'))]"
+        $script:Template.variables.websiteContributorRoleId | Should -Be 'de139f84-1756-47ae-9be6-808fbbe84772'
+        $script:Template.variables.tokenExchangeAudience | Should -Match 'AzureADTokenExchangeUSGov' -Because 'SR-21: the audience follows the cloud'
+        $script:Template.variables.managementGroupIds | Should -Match 'filter\(' -Because 'SR-36: mg1, gives the same report name as the script'
     }
     It 'the guide has the Deploy to Azure button of the template on the main branch' {
         $guide = Get-Content -Raw -LiteralPath (Join-Path $script:RepoRoot 'setup/azure-web-app.md')

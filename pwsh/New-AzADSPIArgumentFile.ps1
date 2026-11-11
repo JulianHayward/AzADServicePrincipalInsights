@@ -18,6 +18,10 @@ Product specific rules are read from the settings file (default: <script name>.a
 - Required: parameters that must have a value (in addition to the Mandatory parameters of the script)
 - NoPlaceholder: parameters whose value (each item of a list) may not start with '<' (template placeholder) or contain spaces
 - Dependencies: parameter = parameter it needs; a note when it is set without the other one (the value is passed anyway)
+- Conflicts: parameter = workflow switch or parameter; the step stops when both are set (e.g. NoJsonExport and IngestToLogAnalytics)
+
+Unknown names in the variables file (-VariablesFile or -NamesFile) stop the step: a misspelled or a v1 name would be ignored and
+the default used (an empty ManagementGroupId means the Tenant Root Group).
 
 Any error fails the step (Azure DevOps '##vso[task.logissue]' / GitHub Actions '::error::' plus throw). The output file is
 deleted first and only written when every check passed.
@@ -31,6 +35,10 @@ output folder is pushed to the repository.
 
 .PARAMETER VariablesFile
 GitHub Actions: path of the variables file. Without it the values are read from the environment (Azure DevOps).
+
+.PARAMETER NamesFile
+Azure DevOps: path of the variables template. Only its names are checked (unknown names stop the step); the values come from the
+environment.
 
 .PARAMETER KnownScriptFile
 Other scripts whose parameters are also set in the variables file (e.g. a second script of the same workflow); their
@@ -72,6 +80,9 @@ param(
     [string]
     $VariablesFile,
 
+    [string]
+    $NamesFile,
+
     [string[]]
     $KnownScriptFile,
 
@@ -97,6 +108,8 @@ function writeMessage {
         [string]
         $Message
     )
+    #a value in the message must not start a logging command of the agent ('##vso[' anywhere in a line) or a second line
+    $Message = $Message -replace '##', '# #' -replace '[\r\n]+', ' '
     if ($env:TF_BUILD -eq 'True') { Write-Host "##vso[task.logissue type=$Type]$Message" }
     elseif ($env:GITHUB_ACTIONS -eq 'true') { Write-Host "::$($Type)::$Message" }
     else { Write-Host "$($Type.ToUpperInvariant()): $Message" }
@@ -161,8 +174,9 @@ function convertFromYamlScalar {
             stopWithError "Variables file line $($LineNumber) ($($Name)): the double quoted value is not closed"
         }
         $escaped = $match.Groups[1].Value
-        $unknownEscape = [regex]::Match($escaped, '\\[^\\"/nt]')
-        if ($unknownEscape.Success) {
+        #token by token: '\\' is one escape (C:\\temp\\out)
+        $unknownEscape = @([regex]::Matches($escaped, '\\(.)')).where({ $_.Groups[1].Value -notin '\', '"', '/', 'n', 't' })[0]
+        if ($unknownEscape) {
             stopWithError "Variables file line $($LineNumber) ($($Name)): unsupported escape sequence '$($unknownEscape.Value)' in the double quoted value (supported: \\ \"" \/ \n \t) - use a single quoted value"
         }
         return [regex]::Replace($escaped, '\\([\\"/nt])', {
@@ -175,7 +189,7 @@ function convertFromYamlScalar {
             })
     }
     if ($text -match '^[\[\{\|>&\*!%@`]') {
-        stopWithError "Variables file line $($LineNumber) ($($Name)): a value starting with '$($text[0])' must be quoted, e.g. value: '$($text)'"
+        stopWithError "Variables file line $($LineNumber) ($($Name)): a value starting with '$($text[0])' must be quoted, e.g. value: '$($text)' - a list is comma separated, without brackets: value: mg1,mg2"
     }
     if ($text.Contains('${{')) {
         stopWithError "Variables file line $($LineNumber) ($($Name)): expressions ('`${{ }}') are not supported in the variables file - provide the value itself (lists comma separated)"
@@ -199,7 +213,8 @@ function readVariablesFile {
         $Path
     )
     $variables = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $lines = Get-Content -LiteralPath $Path
+    #@(): a file with one line is a string, not an array of lines
+    $lines = @(Get-Content -LiteralPath $Path)
     $inVariables = $false
     $currentName = $null
     $currentNameLine = 0
@@ -207,7 +222,8 @@ function readVariablesFile {
         $lineNumber = $i + 1
         $line = $lines[$i]
         $trimmed = $line.Trim()
-        if ($trimmed -eq '' -or $trimmed.StartsWith('#')) {
+        if ($trimmed -eq '' -or $trimmed.StartsWith('#') -or $line -match '^(---|\.\.\.)\s*$') {
+            #empty, comment, YAML document start/end
             continue
         }
         if ($line -match '^variables:\s*(#.*)?$') {
@@ -217,7 +233,8 @@ function readVariablesFile {
         if (-not $inVariables) {
             stopWithError "Variables file line $($lineNumber): expected 'variables:' before '$($trimmed)'"
         }
-        if ($line -match '^\S') {
+        #the list may start in column 1 ('- name:' directly below 'variables:')
+        if ($line -match '^\S' -and $line -notmatch '^-\s') {
             stopWithError "Variables file line $($lineNumber): only the 'variables:' section is supported, found '$($trimmed)'"
         }
         $nameMatch = [regex]::Match($trimmed, '^-\s+name:\s*(.*)$')
@@ -316,14 +333,18 @@ if ($SettingsFile) {
         stopWithError "Settings file '$($SettingsFile)' cannot be read: $($_.Exception.Message)"
     }
     foreach ($key in $settings.Keys) {
-        if ($key -notin 'Internal', 'Required', 'NoPlaceholder', 'Dependencies') {
-            stopWithError "Settings file '$($SettingsFile)': unknown key '$($key)' (supported: Internal, Required, NoPlaceholder, Dependencies)"
+        if ($key -notin 'Internal', 'Required', 'NoPlaceholder', 'Dependencies', 'Conflicts') {
+            stopWithError "Settings file '$($SettingsFile)': unknown key '$($key)' (supported: Internal, Required, NoPlaceholder, Dependencies, Conflicts)"
         }
     }
     #a parameter name in the settings that the script does not have is a typo or a removed parameter
     $settingsNames = @($settings['Internal']) + @($settings['Required']) + @($settings['NoPlaceholder'])
     if ($settings['Dependencies']) {
         $settingsNames += @($settings['Dependencies'].Keys) + @($settings['Dependencies'].Values)
+    }
+    if ($settings['Conflicts']) {
+        #the values may be workflow switches (no parameter of the script)
+        $settingsNames += @($settings['Conflicts'].Keys)
     }
     foreach ($settingsName in ($settingsNames | Where-Object { $_ })) {
         if (-not $scriptParameterNames.Contains($settingsName)) {
@@ -335,6 +356,7 @@ $internalParameters = @($settings['Internal'] | Where-Object { $_ })
 $requiredParameters = @($settings['Required'] | Where-Object { $_ })
 $noPlaceholderParameters = @($settings['NoPlaceholder'] | Where-Object { $_ })
 $dependencies = if ($settings['Dependencies']) { $settings['Dependencies'] } else { @{} }
+$conflicts = if ($settings['Conflicts']) { $settings['Conflicts'] } else { @{} }
 
 if ($VariablesFile) {
     if (-not (Test-Path -LiteralPath $VariablesFile -PathType Leaf)) {
@@ -350,6 +372,11 @@ if ($VariablesFile) {
 }
 else {
     $source = 'environment (pipeline variables)'
+}
+if ($NamesFile -and -not (Test-Path -LiteralPath $NamesFile -PathType Leaf)) {
+    #e.g. the pipeline file and its variables template were moved - the values still come from the environment
+    writeMessage -Type 'warning' -Message "Variables file '$($NamesFile)' not found - the variable names are not checked"
+    $NamesFile = $null
 }
 Write-Host "Creating the arguments for '$($ScriptFile)' from the $($source)"
 #endregion prepare
@@ -370,7 +397,7 @@ foreach ($parameterAst in $ast.ParamBlock.Parameters) {
         continue
     }
     if ($name -in $internalParameters) {
-        if ($VariablesFile) {
+        if ($VariablesFile -or $NamesFile) {
             writeMessage -Type 'warning' -Message "Variable '$($name)' ignored - the parameter is set by the pipeline/workflow or internal to the script"
         }
         continue
@@ -398,6 +425,11 @@ foreach ($parameterAst in $ast.ParamBlock.Parameters) {
         }
         { $_ -in 'Array', 'Object[]', 'String[]' } {
             $listValues = @($value -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            #a YAML or PowerShell list written as text ('[mg1, mg2]', "@('mg1')") would give items like '[mg1' (parentheses alone are
+            #allowed: management group IDs may contain them)
+            if (@($listValues.where({ $_ -match '^(\[|@\(|["''])|(\]|["''])$' })).Count -gt 0) {
+                stopWithError "Variable '$($name)' = '$($value)' - a list is comma separated, without brackets or quotes: value: mg1,mg2"
+            }
             #review F-60: only separators (' , ') gave an empty list - -ManagementGroupId @() ran against the Tenant Root Group,
             #-SubscriptionQuotaIdWhitelist @() excluded every subscription
             if ($listValues.Count -eq 0) {
@@ -489,12 +521,35 @@ if ($ScriptPath -and $scriptParameterNames.Contains('ScriptPath')) {
     $params['ScriptPath'] = $ScriptPath
 }
 
-if ($VariablesFile) {
-    foreach ($variableName in $fileVariables.Keys) {
-        if (-not $scriptParameterNames.Contains($variableName) -and -not $knownVariableNames.Contains($variableName)) {
-            writeMessage -Type 'warning' -Message "Variable '$($variableName)' ignored - '$($ScriptFile)' has no such parameter"
+#unknown names stop the step: a misspelled or a v1 name would be ignored and the default used (an empty ManagementGroupId is the
+#Tenant Root Group)
+$namesToCheck = if ($VariablesFile) { @($fileVariables.Keys) } elseif ($NamesFile) { @((readVariablesFile -Path $NamesFile).Keys) } else { @() }
+if ($NamesFile) {
+    foreach ($variableName in $namesToCheck) {
+        if ($variableName -in $internalParameters) {
+            writeMessage -Type 'warning' -Message "Variable '$($variableName)' ignored - the parameter is set by the pipeline/workflow or internal to the script"
         }
     }
+}
+#names of v1 (before v2_20261111_0): what replaced them
+$v1Names = @{
+    ManagementGroups_s                     = "v1 name - now 'ManagementGroupId'"
+    managementGroupIds                     = "v1 name - now 'ManagementGroupId'"
+    subscriptionQuotaIdWhitelistParameters = "v1 name - now 'SubscriptionQuotaIdWhitelist'"
+    WikiDir                                = "v1 name - now 'OutputPath'"
+    Script                                 = 'v1 - not needed, the pipeline names the scripts'
+    ScriptFile                             = 'v1 - not needed, the workflow names the scripts'
+    ScriptPrereqFile                       = 'v1 - not needed, the workflow names the scripts'
+    IngestScriptFile                       = 'v1 - not needed, the pipeline/workflow names the scripts'
+}
+$unknownNames = @(foreach ($variableName in $namesToCheck) {
+        if (-not $scriptParameterNames.Contains($variableName) -and -not $knownVariableNames.Contains($variableName)) {
+            $v1Hint = @($v1Names.Keys.where({ $_ -eq $variableName }))[0]
+            if ($v1Hint) { "'$($variableName)' ($($v1Names[$v1Hint]))" } else { "'$($variableName)'" }
+        }
+    })
+if ($unknownNames.Count -gt 0) {
+    stopWithError "Unknown variable(s) in '$($VariablesFile)$($NamesFile)': $($unknownNames -join ', ') - no parameter of the scripts has this name. Rename or remove them (README: Upgrading from v1)"
 }
 #endregion parameters
 
@@ -508,6 +563,10 @@ foreach ($switchName in ($WorkflowSwitch | Where-Object { $_ })) {
     }
     else {
         $value = getEnvironmentValue -Name $switchName
+    }
+    #'true ' would pass here but not the condition of the later step (it compares the value as is)
+    if ("$value" -cne "$value".Trim()) {
+        stopWithError "Variable '$($switchName)' = '$($value)' - remove the spaces around the value"
     }
     $value = "$value".Trim()
     if ($value -eq '') {
@@ -550,6 +609,13 @@ foreach ($noPlaceholderName in $noPlaceholderParameters) {
     }
 }
 
+#parameters that contradict a workflow switch or another parameter
+foreach ($conflict in $conflicts.GetEnumerator()) {
+    if ($params.ContainsKey($conflict.Key) -and ($workflowSwitchValues[$conflict.Value] -eq 'true' -or $params.ContainsKey($conflict.Value))) {
+        stopWithError "Variable '$($conflict.Key)' and '$($conflict.Value)' cannot both be set"
+    }
+}
+
 #parameters that have no effect without another one - a note, the value is passed anyway
 foreach ($dependency in $dependencies.GetEnumerator()) {
     if ($params.ContainsKey($dependency.Key) -and -not $params.ContainsKey($dependency.Value)) {
@@ -566,7 +632,8 @@ foreach ($key in ($params.Keys | Sort-Object)) {
 
 Write-Host 'Arguments:'
 foreach ($entry in $sortedParams.GetEnumerator()) {
-    Write-Host "  -$($entry.Key) $(ConvertTo-Json -InputObject $entry.Value -Compress -Depth 10)"
+    #'##' split: a value must not start a logging command of the Azure DevOps agent
+    Write-Host "  -$($entry.Key) $((ConvertTo-Json -InputObject $entry.Value -Compress -Depth 10) -replace '##', '# #')"
 }
 
 $outputDirectory = Split-Path -Path $OutputFile -Parent

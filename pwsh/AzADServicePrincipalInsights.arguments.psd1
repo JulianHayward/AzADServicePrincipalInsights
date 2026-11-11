@@ -4,8 +4,6 @@
     Internal      = @(
         'Product'
         'ProductVersion'
-        'AzAPICallModuleName'
-        'azAPICallVersion'
         'GitHubRepository'
         'DirectorySeparatorChar'
         'ScriptPath'
@@ -19,4 +17,8 @@
         'ManagementGroupId'
         'SubscriptionId4AzContext'
     )
+    #the ingestion sends the JSON export - a contradiction known before the run
+    Conflicts     = @{
+        NoJsonExport = 'IngestToLogAnalytics'
+    }
 }

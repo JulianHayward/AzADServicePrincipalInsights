@@ -21,7 +21,8 @@ Thank you for helping. Bug reports, fixes and new insights are welcome.
 ## Set up your environment
 
 - PowerShell 7.0.3 or later (the script's minimum). For development the current PowerShell 7 is fine.
-- The modules `Az.Accounts` and `AzAPICall` (the version of the script's `-azAPICallVersion` default) - for a real run.
+- The modules `Az.Accounts` and `AzAPICall` (the version of the script's `-azAPICallVersion` default) - for a real run. The tests need `Az.Accounts` installed too (Pester can only mock a command that exists); CI uses the one of the runner image.
+- A full clone (`git clone`, not a ZIP download or `--depth 1`): some tests compare the script with an earlier commit (`d332d98`).
 - [Pester](https://pester.dev) **6.2.0** (as in CI) and [PSScriptAnalyzer](https://github.com/PowerShell/PSScriptAnalyzer):
 
   ```powershell

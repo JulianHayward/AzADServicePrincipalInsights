@@ -106,7 +106,7 @@ Describe 'Push-AzADSPIOutput.ps1' {
         Set-Content -LiteralPath (Join-Path $repo.Run 'history.jsonl') -Value 'line 1 this'
         $result = Invoke-Push $repo $script:GitHub
         $result.ExitCode | Should -Be 1
-        $result.Output | Should -Match "(?m)^::error::git pull --rebase from 'refs/heads/main' failed: another run changed the same output files at the same time\. Runs of this workflow \(concurrency group\) must not overlap"
+        $result.Output | Should -Match "(?m)^::error::git rebase on 'refs/heads/main' failed: another run changed the same output files at the same time\. Runs of this workflow \(concurrency group\) must not overlap"
         Test-Path -LiteralPath (Join-Path $repo.Run '.git/rebase-merge') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $repo.Run '.git/rebase-apply') | Should -BeFalse
         git -C $repo.Remote rev-parse refs/heads/main | Should -Be $remoteHead
@@ -118,6 +118,7 @@ Describe 'Push-AzADSPIOutput.ps1' {
         Set-Content -LiteralPath (Join-Path $repo.Run 'report.html') -Value 'run 2'
         $result = Invoke-Push $repo $script:Ado
         $result.ExitCode | Should -Be 0 -Because $result.Output
+        $result.Output | Should -Match '(?m)^##vso\[task\.setvariable variable=AzADSPIOutputPushed\]true' -Because 'the condition of the ingestion and the publishing'
         (Get-RemoteLog $repo)[0] | Should -Match "^Pipeline: 'AzADSPI' 'rev 1' \(Project: proj; Repository: repo; Branch: main Commit: abc\)\|AzADServicePrincipalInsightsPipeline@azdo\.com\|wiki "
         $result.Output | Should -Not -Match ([regex]::Escape($script:Token))
         @(git -C $repo.Run config --get-all http.extraheader).Count | Should -Be 0 -Because 'the token is passed per command, not stored'
@@ -129,7 +130,8 @@ Describe 'Push-AzADSPIOutput.ps1' {
         Set-Content -LiteralPath (Join-Path $repo.Run 'history.jsonl') -Value 'line 1 this'
         $result = Invoke-Push $repo $script:Ado
         $result.ExitCode | Should -Be 1
-        $result.Output | Should -Match '(?m)^##vso\[task\.logissue type=error\]git pull --rebase from .refs/heads/main. failed: another run changed the same output files at the same time\. Runs of this pipeline \(schedule, manual runs; optionally an exclusive lock\) must not overlap'
+        $result.Output | Should -Match '(?m)^##vso\[task\.logissue type=error\]git rebase on .refs/heads/main. failed: another run changed the same output files at the same time\. Runs of this pipeline \(schedule, manual runs; optionally an exclusive lock\) must not overlap'
+        $result.Output | Should -Not -Match 'AzADSPIOutputPushed'
         $result.Output | Should -Not -Match ([regex]::Escape($script:Token))
     }
 
@@ -158,15 +160,49 @@ Describe 'Push-AzADSPIOutput.ps1' {
         $result.Output | Should -Match 'runs in a GitHub Actions workflow or an Azure DevOps pipeline'
     }
 
-    It 'the pipelines call the script in their push step and keep the token in the env of the step' {
+    It 'SR-61: only the output folder is committed, a new file in it too; a file outside stays uncommitted' {
+        $repo = New-TestRepo 'outputonly'
+        $null = New-Item -ItemType Directory -Path (Join-Path $repo.Run 'wiki')
+        Set-Content -LiteralPath (Join-Path $repo.Run 'wiki/new.csv') -Value 'new'
+        Set-Content -LiteralPath (Join-Path $repo.Run 'stray.log') -Value 'stray'
+        $result = Invoke-Push $repo $script:GitHub -Arguments '-OutputPath', 'wiki'
+        $result.ExitCode | Should -Be 0 -Because $result.Output
+        git -C $repo.Remote show refs/heads/main:wiki/new.csv | Should -Be 'new'
+        $null = git -C $repo.Remote show refs/heads/main:stray.log 2>&1
+        $LASTEXITCODE | Should -Not -Be 0 -Because 'a file outside the output folder is not committed'
+    }
+
+    It 'SR-15: a failed fetch names git''s reason, not an overlap' {
+        $repo = New-TestRepo 'fetchfail'
+        Set-Content -LiteralPath (Join-Path $repo.Run 'report.html') -Value 'run 2'
+        $environment = $script:GitHub.Clone(); $environment['GITHUB_REF'] = 'refs/heads/deleted'
+        $result = Invoke-Push $repo $environment
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match "::error::git fetch of 'refs/heads/deleted' failed \(see the git output above\)"
+        $result.Output | Should -Not -Match 'another run changed'
+    }
+
+    It 'SR-34: a rejected push fails with the branch protection hint (GitHub) and does not report success' {
+        $repo = New-TestRepo 'rejected'
+        $hook = Join-Path $repo.Remote 'hooks/pre-receive'
+        Set-Content -LiteralPath $hook -Value "#!/bin/sh`necho 'GH006: Protected branch update failed'`nexit 1" -NoNewline
+        if (-not $IsWindows) { chmod +x $hook }
+        Set-Content -LiteralPath (Join-Path $repo.Run 'report.html') -Value 'run 2'
+        $result = Invoke-Push $repo $script:GitHub
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match "::error::git push to 'refs/heads/main' failed - a branch protection rule or ruleset"
+        $result.Output | Should -Not -Match 'Output pushed'
+    }
+
+    It 'the pipelines call the script in their push step with the output folder and keep the token in the env of the step' {
         $repoRoot = Split-Path -Parent $PSScriptRoot
         foreach ($workflow in 'AzADServicePrincipalInsights_OIDC.yml', 'AzADServicePrincipalInsights.yml') {
             $text = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".github/workflows/$workflow")
-            $text | Should -Match '(?m)^      - name: Push AzADServicePrincipalInsights output to repository\r?\n        shell: pwsh\r?\n        run: \|\r?\n          & "\./\$\(\$env:ScriptDir\)/Push-AzADSPIOutput\.ps1" -RepositoryPath \$env:GITHUB_WORKSPACE\r?\n' -Because $workflow
+            $text | Should -Match '(?m)^      - name: Push AzADServicePrincipalInsights output to repository\r?\n        id: push\r?\n        shell: pwsh\r?\n        run: \|\r?\n          \$params = & "\./\$\(\$env:ScriptDir\)/Read-AzADSPIArgumentFile\.ps1" -ArgumentsFile "\$\(\$env:RUNNER_TEMP\)/AzADSPIArguments\.json"\r?\n          & "\./\$\(\$env:ScriptDir\)/Push-AzADSPIOutput\.ps1" -RepositoryPath \$env:GITHUB_WORKSPACE -OutputPath \$params\[''OutputPath''\]\r?\n' -Because $workflow
             ($text -split '\r?\n' | Where-Object { $_ -notmatch '^\s*#' }) -join "`n" | Should -Not -Match 'git (push|commit|pull)' -Because "$workflow - the git logic is in the script"
         }
         $ado = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.azuredevops/pipelines/AzADServicePrincipalInsights.yml')
-        $ado | Should -Match '(?m)^      & "\$\(\$env:SYSTEM_DEFAULTWORKINGDIRECTORY\)/\$\(\$env:SCRIPTDIR\)/Push-AzADSPIOutput\.ps1" -RepositoryPath \$env:SYSTEM_DEFAULTWORKINGDIRECTORY\r?\n    displayName: ''Push AzADServicePrincipalInsights output to repository''\r?\n    env:\r?\n      SYSTEM_ACCESSTOKEN: \$\(System\.AccessToken\)'
+        $ado | Should -Match '(?m)^      & "\$\(\$env:SYSTEM_DEFAULTWORKINGDIRECTORY\)/\$\(\$env:SCRIPTDIR\)/Push-AzADSPIOutput\.ps1" -RepositoryPath \$env:SYSTEM_DEFAULTWORKINGDIRECTORY -OutputPath \$params\[''OutputPath''\]\r?\n    displayName: ''Push AzADServicePrincipalInsights output to repository''\r?\n    env:\r?\n      SYSTEM_ACCESSTOKEN: \$\(System\.AccessToken\)'
         ($ado -split '\r?\n' | Where-Object { $_ -notmatch '^\s*#' }) -join "`n" | Should -Not -Match 'git (push|commit|pull)'
     }
 }

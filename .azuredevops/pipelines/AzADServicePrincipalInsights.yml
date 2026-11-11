@@ -46,14 +46,25 @@ jobs:
 
   # The pipeline variables (variables file, variable groups, pipeline UI) become checked arguments files (agent temp); the later
   # steps splat them, so a value is never part of a script text. WebAppPublish / IngestToLogAnalytics: true or false (checked).
+  # The names in the variables file are checked too: an unknown name (a typo, a v1 name) stops the step.
   - pwsh: |
       $dir = "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)"
-      & "$dir/New-AzADSPIArgumentFile.ps1" -ScriptFile "$dir/AzADServicePrincipalInsights.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" -ScriptPath $env:SCRIPTDIR -WorkflowSwitch WebAppPublish, IngestToLogAnalytics
+      if (-not $env:SCRIPTDIR -or -not (Test-Path -LiteralPath "$dir/New-AzADSPIArgumentFile.ps1" -PathType Leaf)) {
+        Write-Host "##vso[task.logissue type=error]Variable 'ScriptDir' = '$($env:SCRIPTDIR)' - the folder of the AzADServicePrincipalInsights scripts, relative to the repository root (e.g. pwsh)"
+        exit 1
+      }
+      # the variables template: .azuredevops/pipelines in the parent folder of the script folder
+      $common = @{
+        NamesFile       = Join-Path -Path (Split-Path -Path $dir -Parent) -ChildPath '.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml'
+        KnownScriptFile = 'AzADServicePrincipalInsights.ps1', 'Send-AzADSPILogAnalyticsData.ps1', 'Publish-AzADSPIWebApp.ps1' | ForEach-Object { "$dir/$_" }
+        KnownVariable   = 'ServiceConnection', 'WebAppPublish', 'IngestToLogAnalytics'
+      }
+      & "$dir/New-AzADSPIArgumentFile.ps1" @common -ScriptFile "$dir/AzADServicePrincipalInsights.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" -ScriptPath $env:SCRIPTDIR -WorkflowSwitch WebAppPublish, IngestToLogAnalytics
       if ($env:INGESTTOLOGANALYTICS -eq 'true') {
-        & "$dir/New-AzADSPIArgumentFile.ps1" -ScriptFile "$dir/Send-AzADSPILogAnalyticsData.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIIngestArguments.json"
+        & "$dir/New-AzADSPIArgumentFile.ps1" @common -ScriptFile "$dir/Send-AzADSPILogAnalyticsData.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIIngestArguments.json"
       }
       if ($env:WEBAPPPUBLISH -eq 'true') {
-        & "$dir/New-AzADSPIArgumentFile.ps1" -ScriptFile "$dir/Publish-AzADSPIWebApp.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIPublishArguments.json"
+        & "$dir/New-AzADSPIArgumentFile.ps1" @common -ScriptFile "$dir/Publish-AzADSPIWebApp.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIPublishArguments.json"
       }
     displayName: 'Create arguments'
 
@@ -79,15 +90,18 @@ jobs:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
   # the build values and the token are read from the environment, never substituted into a script text with $(...)
+  # sets AzADSPIOutputPushed = true on success: the condition of the ingestion and the publishing
   - pwsh: |
-      & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Push-AzADSPIOutput.ps1" -RepositoryPath $env:SYSTEM_DEFAULTWORKINGDIRECTORY
+      $params = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json"
+      & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Push-AzADSPIOutput.ps1" -RepositoryPath $env:SYSTEM_DEFAULTWORKINGDIRECTORY -OutputPath $params['OutputPath']
     displayName: 'Push AzADServicePrincipalInsights output to repository'
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
-  # after the push: a failing ingestion or publishing does not keep the output from being pushed
+  # after the push: a failing ingestion or publishing does not keep the output from being pushed; they need only the pushed output -
+  # a failure of one does not skip the other
   - task: AzurePowerShell@5
-    condition: and(succeeded(), eq(variables['IngestToLogAnalytics'], 'true'))
+    condition: and(not(canceled()), eq(variables['AzADSPIOutputPushed'], 'true'), eq(variables['IngestToLogAnalytics'], 'true'))
     inputs:
       azureSubscription: '$(ServiceConnection)'
       ScriptType: 'InlineScript'
@@ -103,7 +117,7 @@ jobs:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
   - task: AzurePowerShell@5
-    condition: and(succeeded(), eq(variables['WebAppPublish'], 'true'))
+    condition: and(not(canceled()), eq(variables['AzADSPIOutputPushed'], 'true'), eq(variables['WebAppPublish'], 'true'))
     inputs:
       azureSubscription: '$(ServiceConnection)'
       ScriptType: 'InlineScript'

@@ -135,7 +135,15 @@ Describe 'R-16 private use characters in the data are not expanded into markup' 
         [System.IO.File]::WriteAllText($file, $script)
         $tableFile = Join-Path $TestDrive 'table.json'
         [System.IO.File]::WriteAllText($tableFile, $tableJson, [System.Text.UTF8Encoding]::new($false))
-        $strings = (& $node.Source $file $tableFile) | ConvertFrom-Json
+        #node writes UTF-8; Windows decodes native output with the console code page (OEM) unless set - the characters became '?'
+        $savedEncoding = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+            $strings = (& $node.Source $file $tableFile) | ConvertFrom-Json
+        }
+        finally {
+            [Console]::OutputEncoding = $savedEncoding
+        }
         @($strings) | Should -Contain $script:Pua
         @($strings.where({ $_ -like '<b>*' }))[0] | Should -BeExactly "<b>$($script:Pua)</b><br><a class=`"externallink`" href=`"https://www.azadvertizer.net/azrolesadvertizer/8e3af657.html`" target=`"_blank`">Owner</a>"
     }

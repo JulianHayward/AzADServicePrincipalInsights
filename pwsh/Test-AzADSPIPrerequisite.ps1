@@ -17,12 +17,43 @@ else {
 
 Write-Host 'CodeRunPlatform:' $codeRunPlatform
 
+#an error annotation in the run summary (not only 'exit code 1'), then stop
+function stopWithError([string]$Message) {
+    switch ($codeRunPlatform) {
+        'GitHubActions' { Write-Host "::error::$Message" }
+        'AzureDevOps' { Write-Host "##vso[task.logissue type=error]$Message" }
+    }
+    throw $Message
+}
+
 #the output path as the main script gets it (-OutputPath): relative to the working directory of the pipeline/workflow
 #(Azure DevOps: SYSTEM_DEFAULTWORKINGDIRECTORY, GitHub: GITHUB_WORKSPACE), a rooted path as is
 function resolveOutputPath([string]$Path, [string]$BasePath) {
     if ([System.IO.Path]::IsPathRooted($Path)) { return $Path }
     if (-not $BasePath) { $BasePath = (Get-Location).Path }
     return (Join-Path -Path $BasePath -ChildPath $Path)
+}
+
+#the push step commits the output folder: it must be inside the checkout and not ignored by git - else the run would end green
+#without any output in the repository
+function testOutputPathInRepository([string]$Resolved, [string]$Repository) {
+    if (-not $Repository) { return }
+    $fullPath = [System.IO.Path]::GetFullPath($Resolved).TrimEnd('/', '\')
+    $root = [System.IO.Path]::GetFullPath($Repository).TrimEnd('/', '\')
+    if (-not $fullPath.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        stopWithError "OutputPath '$($OutputPath)' ($($fullPath)) is not inside the repository ($($root)) - the output is pushed to the repository; use a folder inside it, e.g. wiki"
+    }
+    #trailing '/': a pattern for a folder ('out/') matches a folder that does not exist yet
+    $null = git -C $root check-ignore -q -- "$($fullPath)/" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        stopWithError "OutputPath '$($OutputPath)' is ignored by git (.gitignore) - the output would not be pushed; use another folder, e.g. wiki"
+    }
+}
+
+#the push step pushes to the branch of the run - a tag or a pull request ref would fail only after the whole collection
+$runRef = $(if ($codeRunPlatform -eq 'AzureDevOps') { $env:BUILD_SOURCEBRANCH } elseif ($codeRunPlatform -eq 'GitHubActions') { $env:GITHUB_REF })
+if ($runRef -and $runRef -notlike 'refs/heads/*') {
+    stopWithError "The run is not on a branch ('$($runRef)') - the output is pushed to the branch of the run; run it on a branch"
 }
 
 if ($codeRunPlatform -eq 'GitHubActions') {
@@ -56,13 +87,13 @@ if ($codeRunPlatform -eq 'GitHubActions') {
 
     if ($visibility -eq 'public') {
         Write-Host "Test returned visibility '$visibility' - '$($repoUri)' is accessible from the public!"
-        throw "Repository '$($repoUri)' is accessible from the public - assuming and insisting that you do not want to publish your tenant insights to the public"
+        stopWithError "Repository '$($repoUri)' is accessible from the public - assuming and insisting that you do not want to publish your tenant insights to the public"
     }
     elseif ($visibility) {
         Write-Host "Test returned visibility '$visibility' - '$($repoUri)' is not accessible from the public - proceed"
     }
     else {
-        throw "The visibility of repository '$($repoUri)' could not be determined (statusCode: '$statusCode') - stopping, the tenant insights must not be pushed to a public repository; run it again"
+        stopWithError "The visibility of repository '$($repoUri)' could not be determined (statusCode: '$statusCode') - stopping, the tenant insights must not be pushed to a public repository; run it again"
     }
 
     $outputPathResolved = resolveOutputPath -Path $OutputPath -BasePath $env:GITHUB_WORKSPACE
@@ -79,12 +110,50 @@ if ($codeRunPlatform -eq 'GitHubActions') {
     else {
         Write-Host "outputpath dir '$OutputPath' already exists"
     }
+    testOutputPathInRepository -Resolved $outputPathResolved -Repository $env:GITHUB_WORKSPACE
 }
 
 if ($codeRunPlatform -eq 'AzureDevOps') {
+    $collectionUri = "$($env:SYSTEM_COLLECTIONURI)".TrimEnd('/') #$(System.CollectionUri)
+    $project = $env:SYSTEM_TEAMPROJECT #$(System.TeamProject)
+    if (-not $env:SYSTEM_ACCESSTOKEN) {
+        stopWithError "SYSTEM_ACCESSTOKEN is empty - the step 'Check prerequisites' needs 'env: SYSTEM_ACCESSTOKEN: `$(System.AccessToken)' (project visibility check)"
+    }
+    #createHeader
+    $pat = $env:SYSTEM_ACCESSTOKEN #$(System.AccessToken)
+    $token = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(":$($pat)"))
+    $header = @{authorization = "Basic $token" }
+
+    #region project visibility - the same rule as the GitHub repository: public stops, an unclear answer stops too
+    Write-Host "Testing if project '$($project)' is public"
+    $projectVisibility = $null
+    $projectError = $null
+    for ($try = 1; $try -le 3 -and -not $projectVisibility; $try++) {
+        try {
+            $projectInfo = Invoke-RestMethod -Uri "$($collectionUri)/_apis/projects/$($env:SYSTEM_TEAMPROJECTID)?api-version=7.1" -Method 'GET' -Headers $header -ContentType 'application/json' -ErrorAction Stop
+            $projectVisibility = [string]$projectInfo.visibility
+            if (-not $projectVisibility) { $projectError = 'no visibility in the answer' }
+        }
+        catch {
+            $projectError = $(if ($_.Exception.Response) { "status code $([int]$_.Exception.Response.StatusCode)" } else { $_.Exception.Message })
+        }
+        if (-not $projectVisibility -and $try -lt 3) { Start-Sleep -Seconds (5 * $try) }
+    }
+    if ($projectVisibility -eq 'public') {
+        stopWithError "Project '$($project)' is public - the repository with the output and the run logs are readable by anyone. Assuming and insisting that you do not want to publish your tenant insights to the public - make the project private"
+    }
+    elseif ($projectVisibility) {
+        Write-Host "Project '$($project)' visibility: $($projectVisibility) - proceed"
+    }
+    else {
+        stopWithError "The visibility of project '$($project)' could not be determined ($($projectError)) - stopping, the tenant insights must not be pushed to a public project; run it again"
+    }
+    #endregion project visibility
+
     #was: $env:WIKIDIR (no longer set since the pipeline variables file; -OutputPath was ignored and the folder never created)
     $outputPathResolved = resolveOutputPath -Path $OutputPath -BasePath $env:SYSTEM_DEFAULTWORKINGDIRECTORY
     Write-Host "outputpath is '$OutputPath' ($outputPathResolved)"
+    testOutputPathInRepository -Resolved $outputPathResolved -Repository $env:SYSTEM_DEFAULTWORKINGDIRECTORY
     if (-not (Test-Path -LiteralPath $outputPathResolved)) {
         #Assuming this is the initial run
 
@@ -94,14 +163,6 @@ if ($codeRunPlatform -eq 'AzureDevOps') {
 
         #Repository permission check
         Write-Host 'Repository access check'
-
-        #createHeader
-        $pat = $env:SYSTEM_ACCESSTOKEN #$(System.AccessToken)
-        $token = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(":$($pat)"))
-        $header = @{authorization = "Basic $token" }
-
-        $collectionUri = $env:SYSTEM_COLLECTIONURI.TrimEnd('/') #$(System.CollectionUri)
-        $project = $env:SYSTEM_TEAMPROJECT #$(System.TeamProject)
 
         #region listRepos
         $uri = "$($collectionUri)/$($project)/_apis/git/repositories?api-version=7.1"
@@ -236,7 +297,8 @@ if ($codeRunPlatform -eq 'AzureDevOps') {
         Build Account: '$($buildAccount)' ($buildServiceAccountId)
         Permission 'Contribute' for Repository '$($repositoryName) ($repositoryId)': $($contributePermissionState)
 "@
-                    $fileContent | Set-Content -Path "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/AzADServicePrincipalInsights_RepositoryPermissionCheck.log" -Encoding utf8 -Force
+                    #the agent temp folder, not the checkout (the push step would commit it)
+                    $fileContent | Set-Content -Path "$($env:AGENT_TEMPDIRECTORY)/AzADServicePrincipalInsights_RepositoryPermissionCheck.log" -Encoding utf8 -Force
                 }
                 #endregion gettingPermissions
             }

@@ -5,7 +5,9 @@
 # Variable name = parameter name of the script; empty value = not set (the script default applies).
 # Values are plain text (no PowerShell code): a switch is true/false, a list is comma separated.
 # The step 'Create arguments' (pwsh/New-AzADSPIArgumentFile.ps1) converts and checks them; the script gets them as parameters.
-# Variables from variable groups or the pipeline UI with the name of a parameter are used too (secret variables are not visible to the step).
+# An entry of this file wins over a pipeline UI or queue-time variable of the same name. To set a value there or in a variable group,
+# remove its entry here (a variable group: add '- group: <name>' to 'variables:' of AzADServicePrincipalInsights.yml, after the
+# template line); secret variables are not visible to the step. An unknown name in this file stops the step 'Create arguments'.
 
 variables:
 
@@ -141,6 +143,16 @@ variables:
     # Switch | example: value: true
     value:
 
+  # The AzAPICall module to use (installed by the run)
+  - name: AzAPICallModuleName
+    # String | default = AzAPICall | allowed: AzAPICall, AzAPICallBeta | example: value: AzAPICallBeta
+    value:
+
+  # The AzAPICall version to use (default: the tested version)
+  - name: azAPICallVersion
+    # String | default = 1.4.2 | example: value: 1.4.2
+    value:
+
   # Write a transcript of the console output to the output folder
   - name: DoTranscript
     # Switch | example: value: true
@@ -185,7 +197,7 @@ variables:
 
   # Parallel Logs ingestion API requests
   - name: ThrottleLimitMonitor
-    # Integer | default = 5 | example: value: 10
+    # Integer | default = 5 | range 1-100 | example: value: 10
     value:
 
   # Maximum size (bytes) of one Logs ingestion API request (the API limit is 1 MB)

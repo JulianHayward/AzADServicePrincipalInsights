@@ -183,7 +183,41 @@ if (-not $Location) { $Location = $resourceGroup.location }
 $reportReference = getReportReference -ManagementGroupId $ManagementGroupId -TenantId $tenantId
 $defaultDocument = "AzADServicePrincipalInsights_$($reportReference).html"
 Write-Host "Report: $($defaultDocument)"
+#the audience of the token exchange differs per cloud (Microsoft Learn: workload identity federation - a wrong audience is accepted
+#by Microsoft Entra when the credential is created, the sign-in fails later)
+$tokenExchangeAudience = switch ($context.Environment.Name) {
+    'AzureUSGovernment' { 'api://AzureADTokenExchangeUSGov' }
+    'AzureChinaCloud' { 'api://AzureADTokenExchangeChina' }
+    default { 'api://AzureADTokenExchange' }
+}
 #endregion context
+
+#region existing web app and plan, the name - before anything is created
+#web app names are unique worldwide: a taken name is found here, not after the Microsoft Entra objects and a billed plan exist.
+#A second run keeps the region and the SKU of what exists unless -Location / -Sku are given.
+$sitePath = "$($resourceGroupPath)/providers/Microsoft.Web/sites/$($WebAppName)"
+$planName = "asp-$($WebAppName)"
+$planPath = "$($resourceGroupPath)/providers/Microsoft.Web/serverfarms/$($planName)"
+$existingSite = invokeRest -Method GET -Path "$($sitePath)?api-version=$($webApiVersion)" -AllowedStatus 404
+if ($existingSite) {
+    if ($existingSite.location -and -not $PSBoundParameters.ContainsKey('Location')) { $Location = $existingSite.location }
+}
+else {
+    $nameCheck = invokeRest -Method POST -Path "/subscriptions/$($SubscriptionId)/providers/Microsoft.Web/checkNameAvailability?api-version=$($webApiVersion)" -Body @{ name = $WebAppName; type = 'Microsoft.Web/sites' }
+    if ($nameCheck -and $nameCheck.nameAvailable -eq $false) {
+        throw "The web app name '$($WebAppName)' is not available ($($nameCheck.reason): $($nameCheck.message)) - web app names are unique worldwide, choose another -WebAppName. Nothing was created."
+    }
+}
+$planSku = $Sku
+$existingPlan = invokeRest -Method GET -Path "$($planPath)?api-version=$($webApiVersion)" -AllowedStatus 404
+if ($existingPlan) {
+    if ($existingPlan.location -and -not $PSBoundParameters.ContainsKey('Location')) { $Location = $existingPlan.location }
+    if ($existingPlan.sku.name -and -not $PSBoundParameters.ContainsKey('Sku')) {
+        $planSku = $existingPlan.sku.name
+        Write-Host "App Service plan '$($planName)' exists: keeping its SKU $($planSku) (-Sku changes it)"
+    }
+}
+#endregion existing web app and plan, the name - before anything is created
 
 #region the pipeline identity, before anything is created
 #the role needs the object ID of a service principal (enterprise application or managed identity). The object ID of the app
@@ -301,11 +335,9 @@ $managedIdentityPath = "$($resourceGroupPath)/providers/Microsoft.ManagedIdentit
 Write-Host "Azure: managed identity '$($managedIdentityName)' (only for the sign-in of the web app - assign it to nothing else)"
 $managedIdentity = invokeRest -Method PUT -Path "$($managedIdentityPath)?api-version=$($managedIdentityApiVersion)" -Body @{ location = $Location }
 
-$planName = "asp-$($WebAppName)"
-Write-Host "Azure: App Service plan '$($planName)' ($($Sku))"
-$plan = invokeRest -Method PUT -Path "$($resourceGroupPath)/providers/Microsoft.Web/serverfarms/$($planName)?api-version=$($webApiVersion)" -Body @{ location = $Location; sku = @{ name = $Sku } }
+Write-Host "Azure: App Service plan '$($planName)' ($($planSku))"
+$plan = invokeRest -Method PUT -Path "$($planPath)?api-version=$($webApiVersion)" -Body @{ location = $Location; sku = @{ name = $planSku } }
 
-$sitePath = "$($resourceGroupPath)/providers/Microsoft.Web/sites/$($WebAppName)"
 Write-Host "Azure: web app '$($WebAppName)'"
 $siteBody = @{
     location   = $Location
@@ -373,26 +405,39 @@ if ($PublisherPrincipalObjectId) {
 #the host name of the web app as Azure set it (<name>.azurewebsites.net, or another domain in other clouds)
 $hostName = $site.properties.defaultHostName
 $redirectUri = "https://$($hostName)/.auth/login/aad/callback"
-$federatedCredential = [ordered]@{ name = "AzADSPIWebApp-$($WebAppName)"; issuer = $issuer; subject = $managedIdentity.properties.principalId; audiences = @('api://AzureADTokenExchange') }
+$federatedCredential = [ordered]@{ name = "AzADSPIWebApp-$($WebAppName)"; issuer = $issuer; subject = $managedIdentity.properties.principalId; audiences = @($tokenExchangeAudience) }
 if ($SkipEntra) {
     Write-Host ''
     Write-Host "Microsoft Entra steps (not done, -SkipEntra) for the app registration $($EntraClientId) - in this order:" -ForegroundColor Yellow
     Write-Host ' 1. delegated Microsoft Graph permissions openid, profile, email, offline_access with admin consent'
     if ($AccessControl -eq 'Assignment') { Write-Host " 2. enterprise application: 'Assignment required?' Yes; assign the group $($AuthorizedGroupObjectId)" }
     else { Write-Host " 2. app registration: groupMembershipClaims 'SecurityGroup' (Token configuration > Add groups claim > Security groups)" }
-    Write-Host " 3. redirect URI (platform Web): $($redirectUri)"
-    Write-Host " 4. last - until then nobody can sign in: federated credential (scenario 'Managed identity' > $($managedIdentityName), or 'Other issuer'): issuer $($federatedCredential.issuer); subject $($federatedCredential.subject); audience api://AzureADTokenExchange"
+    Write-Host " 3. redirect URI (platform Web): $($redirectUri) - and tick 'ID tokens (used for implicit and hybrid flows)'"
+    Write-Host " 4. last - until then nobody can sign in: federated credential (scenario 'Managed identity' > $($managedIdentityName), or 'Other issuer'): issuer $($federatedCredential.issuer); subject $($federatedCredential.subject); audience $($tokenExchangeAudience)"
 }
 else {
+    #App Service Authentication signs in with the hybrid flow (response_type 'code id_token'): Microsoft Entra serves it only with
+    #ID tokens enabled (else AADSTS700054). Access tokens from the authorize endpoint are not needed
     $redirectUris = [System.Collections.Generic.List[string]]::new()
     foreach ($uri in @($application.web.redirectUris)) { if ($uri) { $redirectUris.Add($uri) } }
-    if (-not $redirectUris.Contains($redirectUri)) {
-        $redirectUris.Add($redirectUri)
-        $null = invokeRest -Method PATCH -Uri "$($graph)/applications/$($application.id)" -Body @{ web = @{ redirectUris = $redirectUris; implicitGrantSettings = @{ enableIdTokenIssuance = $false; enableAccessTokenIssuance = $false } } } -Retries 6
+    $idTokens = [bool]$application.web.implicitGrantSettings.enableIdTokenIssuance
+    $accessTokens = [bool]$application.web.implicitGrantSettings.enableAccessTokenIssuance
+    if (-not $redirectUris.Contains($redirectUri) -or -not $idTokens -or $accessTokens) {
+        if (-not $redirectUris.Contains($redirectUri)) { $redirectUris.Add($redirectUri) }
+        $null = invokeRest -Method PATCH -Uri "$($graph)/applications/$($application.id)" -Body @{ web = @{ redirectUris = $redirectUris; implicitGrantSettings = @{ enableIdTokenIssuance = $true; enableAccessTokenIssuance = $false } } } -Retries 6
     }
-    Write-Host "Microsoft Entra: redirect URI $($redirectUri)"
+    Write-Host "Microsoft Entra: redirect URI $($redirectUri); ID tokens on"
     $credentials = @(getAll -Uri "$($graph)/applications/$($application.id)/federatedIdentityCredentials")
-    if (-not ($credentials | Where-Object { $_.issuer -eq $federatedCredential.issuer -and $_.subject -eq $federatedCredential.subject })) {
+    $sameName = @($credentials | Where-Object { $_.name -eq $federatedCredential.name })[0]
+    if ($credentials | Where-Object { $_.issuer -eq $federatedCredential.issuer -and $_.subject -eq $federatedCredential.subject }) {
+        Write-Host 'Microsoft Entra: federated credential for the managed identity exists'
+    }
+    elseif ($sameName) {
+        #the name is unique and cannot be changed: the managed identity was re-created (new principal ID) - point the credential at it
+        Write-Host 'Microsoft Entra: federated credential updated for the re-created managed identity'
+        $null = invokeRest -Method PATCH -Uri "$($graph)/applications/$($application.id)/federatedIdentityCredentials/$($sameName.id)" -Body ([ordered]@{ issuer = $federatedCredential.issuer; subject = $federatedCredential.subject; audiences = $federatedCredential.audiences }) -Retries 6
+    }
+    else {
         Write-Host 'Microsoft Entra: federated credential for the managed identity (no client secret)'
         $null = invokeRest -Method POST -Uri "$($graph)/applications/$($application.id)/federatedIdentityCredentials" -Body $federatedCredential -Retries 6
     }

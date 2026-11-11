@@ -1,3 +1,5 @@
+#Requires -Version 7.5
+#7.5: ConvertFrom-Json -DateKind
 <#
 Compares two AzADServicePrincipalInsights runs in one output folder (CSV, JSON, HTML tables).
 Prints a summary to the console and writes details (examples of differing rows) to a report file.
@@ -65,10 +67,14 @@ function Get-Canon($x) {
 }
 
 function Get-RunFiles([string]$ts) {
+    #the management group reference of the run (a GUID, 'mg-prod', 'mgA_mgB'): from the name of its report
+    $report = Get-ChildItem -LiteralPath $OutputDir -File -Filter "*_${ts}_*.html" | Select-Object -First 1
+    if (-not $report) { throw "No report AzADServicePrincipalInsights_*_${ts}_<reference>.html in '$OutputDir'" }
+    $reference = $report.Name.Substring($report.Name.IndexOf("_${ts}_") + "_${ts}_".Length) -replace '\.html$', ''
     $map = @{}
     foreach ($f in Get-ChildItem -LiteralPath $OutputDir -File) {
         if ($f.Name -like '*_Log.txt') { continue }   # transcript carries a different timestamp
-        if ($f.Name -match "_${ts}_[0-9a-fA-F-]{36}(.*)$") { $map[$Matches[1]] = $f.FullName }
+        if ($f.Name -match "_${ts}_$([regex]::Escape($reference))(.*)$") { $map[$Matches[1]] = $f.FullName }
     }
     $json = Get-ChildItem -LiteralPath $OutputDir -Directory -Filter "JSON_SP_*_$ts" | Select-Object -First 1
     @{ Files = $map; JsonDir = $json.FullName }

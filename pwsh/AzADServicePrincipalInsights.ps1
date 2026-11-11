@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+#Windows PowerShell 5.1 cannot parse this script (e.g. '??'): #Requires gives a clear message instead of a parse error
 [CmdletBinding()]
 param
 (
@@ -3036,7 +3038,14 @@ function buildSpiGrid {
 
     #one definition per column signature
     #SHA-1 only derives a cache key from the column definitions (no security use)
-    $keyBytes = [System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::UTF8.GetBytes($columnDefsJs)) # DevSkim: ignore DS126858
+    #SHA1.Create().ComputeHash, not the static SHA1.HashData (.NET 5+): PowerShell 7.0 runs on .NET Core 3.1
+    $sha1 = [System.Security.Cryptography.SHA1]::Create() # DevSkim: ignore DS126858
+    try {
+        $keyBytes = $sha1.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($columnDefsJs)) # DevSkim: ignore DS126858
+    }
+    finally {
+        $sha1.Dispose() # DevSkim: ignore DS126858
+    }
     $key = ([System.BitConverter]::ToString($keyBytes, 0, 8)).Replace('-', '').ToLowerInvariant()
     if (-not $script:htSpiGrid.definitions.Contains($key)) {
         $script:htSpiGrid.definitions[$key] = @"

@@ -362,9 +362,15 @@ Describe 'wiring' {
         $script:Source | Should -Match '_\$\(\$fileNameMGRef\)_ChangeHistoryState\.json"'
     }
     It 'compares after the JSON export and before the report; incomplete = collection errors; never fails the run' {
-        $iJson = $script:Source.IndexOf('$entry | ConvertTo-Json -Depth 99 | Set-Content')
+        #the JSON export (its failure list - the former marker '$entry | ConvertTo-Json -Depth 99 | Set-Content' no longer exists)
+        $iJson = $script:Source.IndexOf('$jsonExportFailures = [System.Collections.ArrayList]::Synchronized(')
         $iHistory = $script:Source.IndexOf('$changeHistoryRunRecords = @(updateChangeHistory')
-        $iSummary = $script:Source.IndexOf("`nsummary`r")
+        #LF or CRLF: the line endings depend on the checkout (CI: LF)
+        $summaryMatch = [regex]::Match($script:Source, '(?m)^summary\r?$')
+        $summaryMatch.Success | Should -BeTrue
+        $iSummary = $summaryMatch.Index
+        $iJson | Should -Not -Be -1
+        $iHistory | Should -Not -Be -1
         $iJson | Should -BeLessThan $iHistory
         $iHistory | Should -BeLessThan $iSummary
         $script:Source | Should -Match '-CarryForwardObjects \$changeHistoryCarryForwardObjects -CarryForwardRelations \$changeHistoryCarryForwardRelations'

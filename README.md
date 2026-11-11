@@ -7,6 +7,9 @@
 [![PowerShell 7.0.3+](https://img.shields.io/badge/PowerShell-7.0.3%2B-blue)](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
 [![License: MIT](https://img.shields.io/github/license/JulianHayward/AzADServicePrincipalInsights)](LICENSE)
 
+> [!IMPORTANT]
+> **Already using AzADServicePrincipalInsights? Version 2 (`v2_20261111_0`) changes a lot.** The pipeline and workflow files are new (all settings are in a variables file), helper scripts were renamed, three parameters were removed, and the report and some output values changed. Before you update, read [Upgrading from v1](#upgrading-from-v1) and the [changelog](CHANGELOG.md).
+
 Insights and change tracking for Microsoft Entra ID service principals: enterprise applications, app registrations and managed identities.
 
 AzADServicePrincipalInsights is a PowerShell script. It reads Microsoft Graph and Azure Resource Manager and shows, for every service principal:
@@ -31,7 +34,7 @@ Short links: [aka.ms/AzADSPI](https://aka.ms/AzADSPI) · [aka.ms/AzADServicePrin
 - [Permission classification](#permission-classification)
 - [Telemetry](#telemetry)
 - [Security](#security)
-- [Updates](#updates)
+- [Updates](#updates) - [Upgrading from v1](#upgrading-from-v1)
 - [Contributing](#contributing)
 - [Related projects](#related-projects)
 - [License and disclaimer](#license-and-disclaimer)
@@ -88,17 +91,20 @@ Set-Location "$HOME/AzADSPI"
 foreach ($file in 'AzADServicePrincipalInsights.ps1', 'permissionClassification.json') {
     Invoke-WebRequest -Uri "https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/pwsh/$file" -OutFile $file
 }
-./AzADServicePrincipalInsights.ps1 -ManagementGroupId <managementGroupId> -OutputPath ./output
+#the output folder must exist
+New-Item -ItemType Directory -Force -Path "$HOME/AzADSPI-Output" | Out-Null
+./AzADServicePrincipalInsights.ps1 -ManagementGroupId <managementGroupId> -OutputPath "$HOME/AzADSPI-Output"
 ```
 
-Or clone the repository (`git clone https://github.com/JulianHayward/AzADServicePrincipalInsights.git`) and run `./pwsh/AzADServicePrincipalInsights.ps1`. Open the `.html` file in the output folder. The script offers to install the AzAPICall module if it is missing. Step by step, with checks and troubleshooting: [setup/console.md](setup/console.md).
+Replace the values in `<...>` (the angle brackets too). Or clone the repository (`git clone https://github.com/JulianHayward/AzADServicePrincipalInsights.git`, then `cd AzADServicePrincipalInsights`) and run `./pwsh/AzADServicePrincipalInsights.ps1` with the same parameters. Open the `.html` file in the output folder. The script offers to install the AzAPICall module if it is missing. Step by step, with checks and troubleshooting: [setup/console.md](setup/console.md).
 
 As a service principal (USER: the Application (client) ID, PASSWORD: the client secret):
 
 ```powershell
 $credential = Get-Credential
 Connect-AzAccount -ServicePrincipal -TenantId <tenantId> -Credential $credential
-./AzADServicePrincipalInsights.ps1 -ManagementGroupId <managementGroupId> -OutputPath ./output
+New-Item -ItemType Directory -Force -Path "$HOME/AzADSPI-Output" | Out-Null
+./AzADServicePrincipalInsights.ps1 -ManagementGroupId <managementGroupId> -OutputPath "$HOME/AzADSPI-Output"
 ```
 
 ## Setup
@@ -184,7 +190,7 @@ The build service account (**&lt;project&gt; Build Service (&lt;organization&gt;
 | `ScriptPath` | string (`pwsh`) | Folder of the script, relative to the working directory (pipelines/workflows; also where `permissionClassification.json` is looked for) |
 | `DirectorySeparatorChar` | string (OS default) | Directory separator |
 
-Pipelines and workflows set the parameters in a variables file: see [Azure DevOps and GitHub Actions](#azure-devops-and-github-actions).
+Pipelines and workflows set the parameters in a variables file (except `ScriptPath`, `DirectorySeparatorChar` and the internal `Product`, `ProductVersion`, `GitHubRepository` - set by the pipeline/workflow or the script): see [Azure DevOps and GitHub Actions](#azure-devops-and-github-actions).
 
 ## Output
 
@@ -213,7 +219,7 @@ The column, property and file names are stable. New versions add columns and fil
 ## Azure DevOps and GitHub Actions
 
 The script parameters are set in a variables file, one entry per parameter, with the same names and layout on both platforms:
-- Azure DevOps: [.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml](.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml). This is the variables template of the pipeline. Variables from variable groups or the pipeline UI with the name of a parameter are used too; secret variables are not visible to the step.
+- Azure DevOps: [.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml](.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml). This is the variables template of the pipeline. Its entries win over pipeline UI and queue-time variables of the same name. To set a value in the pipeline UI or a variable group instead, remove its entry from the file (a variable group: add `- group: <name>` to `variables:` in the pipeline file, after the template line). Secret variables are not visible to the step.
 - GitHub Actions: [.github/AzADServicePrincipalInsights.variables.yml](.github/AzADServicePrincipalInsights.variables.yml).
 
 Both files start with the settings of the pipeline/workflow - Azure DevOps: section 'Pipeline' (`ServiceConnection`, `ScriptDir`); GitHub: section 'Workflow' (`ScriptDir`). From there on they have the same content: the required parameters, the optional ones (grouped), then the optional features with their switch first - sections 'Log Analytics ingestion' and 'Web App publishing'. The pipeline/workflow file keeps the schedule; on GitHub also the sign-in and the path of the variables file (`env`).
@@ -225,22 +231,23 @@ Both files start with the settings of the pipeline/workflow - Azure DevOps: sect
 - `ManagementGroupId` and `OutputPath` are required. An empty `ManagementGroupId` means the Tenant Root Group.
 
 **How the values reach the scripts**
-- The step 'Create arguments' ([pwsh/New-AzADSPIArgumentFile.ps1](pwsh/New-AzADSPIArgumentFile.ps1)) converts the values to the parameter types and checks them: template placeholders, switch values, integers, allowed values and ranges, unknown variables. The rules per script are in `pwsh/<script>.arguments.psd1`.
+- The step 'Create arguments' ([pwsh/New-AzADSPIArgumentFile.ps1](pwsh/New-AzADSPIArgumentFile.ps1)) converts the values to the parameter types and checks them: template placeholders, switch values, integers, allowed values and ranges, contradicting settings (`NoJsonExport` with `IngestToLogAnalytics`). An unknown name in the variables file stops the step (a v1 name: the message names the new one). The rules per script are in `pwsh/<script>.arguments.psd1`.
 - The run steps read the arguments file ([pwsh/Read-AzADSPIArgumentFile.ps1](pwsh/Read-AzADSPIArgumentFile.ps1)) and pass the parameters to the script by splatting, so a value is never part of a script text.
 - The same mechanism provides the arguments of the Log Analytics ingestion ([pwsh/Send-AzADSPILogAnalyticsData.ps1](pwsh/Send-AzADSPILogAnalyticsData.ps1)). The pipeline or workflow sets the JSON folder of the run.
 
-**Pushing the output:** the step 'Push AzADServicePrincipalInsights output to repository' ([pwsh/Push-AzADSPIOutput.ps1](pwsh/Push-AzADSPIOutput.ps1), the same script on both platforms) commits only when the output changed, sets the git identity for the repository only, rebases on a run that pushed in the meantime, and then pushes to the branch of the run.
+**Pushing the output:** the step 'Push AzADServicePrincipalInsights output to repository' ([pwsh/Push-AzADSPIOutput.ps1](pwsh/Push-AzADSPIOutput.ps1), the same script on both platforms) commits the output folder only, and only when it changed; it sets the git identity for the repository only, rebases on a run that pushed in the meantime, and then pushes to the branch of the run. The output folder must be inside the repository and not ignored by `.gitignore` - 'Check prerequisites' stops otherwise. On Azure DevOps, other pipelines of the repository with a CI trigger run on every push of the output - give them a path filter.
+
+**Ingestion and publishing** run after the push, each only when the push succeeded - a failure of one does not skip the other.
 
 **Web App publishing:** [pwsh/Publish-AzADSPIWebApp.ps1](pwsh/Publish-AzADSPIWebApp.ps1) publishes only to a Web App that requires a login (App Service Authentication v1 or v2, unauthenticated requests not allowed).
 
 **Runs must not overlap.** They change the same output files (report, CSVs, change history), so a second run could not push its output.
-- **GitHub:** the workflows of a branch wait for each other (`concurrency` group). A waiting run is not cancelled; GitHub keeps one waiting run, and a newer one replaces it. A waiting run checks out the head of the branch when it starts.
+- **GitHub:** the workflows of a branch wait for each other (`concurrency` group). The running run is never cancelled; of several waiting runs GitHub keeps only the newest (the others are cancelled). A waiting run checks out the head of the branch when it starts.
 - **Azure DevOps:** a pipeline has no such setting. Keep the schedule and manual runs apart, or add an exclusive lock check to a resource of the pipeline. The pipeline fetches the current head of the branch before the run, so a run that waited works on the output of the previous one.
 - **Either way,** an overlapping run stops in the push step with a clear message. Run it again.
+- **Only on a branch:** the output is pushed to the branch of the run - a run for a tag or a pull request stops in 'Check prerequisites'.
 
-**Migrating from an earlier pipeline/workflow:** move your values into the variables file. Parameters that were added to the run line by hand are set in the variables file now.
-- **Azure DevOps:** the `managementGroupIds` / `subscriptionQuotaIdWhitelistParameters` parameters and the `variables` block of the pipeline become `ManagementGroupId` / `SubscriptionQuotaIdWhitelist` (comma separated) and the other entries of `AzADServicePrincipalInsights.variables.yml`; `ServiceConnection` and `ScriptDir` are in its section 'Pipeline'.
-- **GitHub:** `ManagementGroups_s` / `OutputPath` / `WebAppPublish`, `IngestToLogAnalytics` and the `WebApp*` values / the Data Collection Rule values of the workflow `env` become `ManagementGroupId` / `OutputPath` / the entries of the sections 'Web App publishing' and 'Log Analytics ingestion' of `.github/AzADServicePrincipalInsights.variables.yml`. `ScriptDir` moves to its section 'Workflow'; the workflow's `env` keeps only `VariablesFile`.
+**Migrating from an earlier pipeline/workflow:** see [Upgrading from v1](#upgrading-from-v1).
 
 ## Change history
 
@@ -306,7 +313,7 @@ The only thing someone with access to the statistics (the maintainer) could do i
 ## Security
 
 The output describes who can do what in your tenant: privileged service principals, their owners and their credentials (not the secrets themselves). The automation protects it:
-- **GitHub repository:** the workflows stop when the repository is public.
+- **GitHub repository / Azure DevOps project:** the workflows stop when the repository is public, the pipeline when the project is public (also when the visibility cannot be determined).
 - **Web App:** the publishing step stops when the Web App can be opened without a login.
 - **Identity:** it only reads Azure and Microsoft Graph.
 
@@ -316,7 +323,59 @@ Please report a vulnerability in AzADServicePrincipalInsights privately, not in 
 
 ## Updates
 
-See [CHANGELOG.md](CHANGELOG.md). Version 2 (`v2_20261111_0`) changes the setup of the Azure DevOps pipeline and the GitHub workflows (variables file): see [Migrating](#azure-devops-and-github-actions).
+See [CHANGELOG.md](CHANGELOG.md).
+
+### Upgrading from v1
+
+v1 means every version before `v2_20261111_0` (the last one: `20260803`). Go through these points before the first v2 run.
+
+**1. Update all files, not only the script.** Take over the folder `pwsh`, and of `.azuredevops/pipelines` or `.github` the files of your platform: `.azuredevops/pipelines/AzADServicePrincipalInsights.yml` and `AzADServicePrincipalInsights.variables.yml`, or `.github/workflows/AzADServicePrincipalInsights*.yml` and `.github/AzADServicePrincipalInsights.variables.yml`. The other files in `.github` (CI workflows, Dependabot, issue templates) are for this repository only - leave them out. Keep your output folder.
+- The pipeline and workflow files keep their names and paths: an existing Azure DevOps pipeline and the GitHub workflows keep pointing at them.
+- A `git merge` of the new version conflicts in the pipeline/workflow files (they were rewritten): take the new files (`git checkout --theirs -- <file>`) and move your values to the variables file (point 2).
+- New in `pwsh`: `New-AzADSPIArgumentFile.ps1`, `Read-AzADSPIArgumentFile.ps1`, `Get-AzADSPIOutputPath.ps1`, `Push-AzADSPIOutput.ps1`, `Publish-AzADSPIWebApp.ps1` and the `*.arguments.psd1` files - the pipelines need them.
+- Renamed: `prerequisites.ps1` → `Test-AzADSPIPrerequisite.ps1`, `AzADSPIDataCollectionIngest.ps1` → `Send-AzADSPILogAnalyticsData.ps1`. Update your own automation if it calls them.
+- An adapted `pwsh/permissionClassification.json`: keep your copy (copying the folder overwrites it).
+- Console runs without a prompt (scheduled tasks): install AzAPICall 1.4.2 first (`Install-Module AzAPICall -RequiredVersion 1.4.2`).
+
+**2. Move your settings into the variables file** - `.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml` or `.github/AzADServicePrincipalInsights.variables.yml`. Take the new pipeline or workflow file as it is; your values go into the variables file only.
+
+| v1 | v2: entry of the variables file |
+|---|---|
+| Azure DevOps: the parameters `managementGroupIds` / `subscriptionQuotaIdWhitelistParameters` | `ManagementGroupId` / `SubscriptionQuotaIdWhitelist` (comma separated) - the pipeline has no runtime parameters any more |
+| Azure DevOps: `ServiceConnection`, `ScriptDir` | the same names, section 'Pipeline' |
+| Azure DevOps: `WikiDir` | `OutputPath` - use the same folder (default `wiki`); a new folder starts the change history again |
+| GitHub: `ManagementGroups_s` | `ManagementGroupId` |
+| GitHub: `ManagementGroupId` (the file name of the Web App report, e.g. `mgA_mgB`) | gone - the name is derived; don't copy its value into the v2 `ManagementGroupId` |
+| GitHub: `OutputPath`; `ScriptDir` | the same names; `ScriptDir` in the section 'Workflow' |
+| `WebAppPublish`, `WebAppSubscriptionId`, `WebAppResourceGroup`, `WebAppName` | the same names, section 'Web App publishing' |
+| `IngestToLogAnalytics`, `DataCollectionRuleSubscriptionId`, `DataCollectionRuleResourceGroup`, `DataCollectionRuleName`, `LogAnalyticsCustomLogTableName`, `ThrottleLimitMonitor` | the same names, section 'Log Analytics ingestion' |
+| `CsvDelimiter` and parameters you added to the run line by hand (also `AzAPICallModuleName`, `azAPICallVersion`) | an entry with the name of the parameter |
+| Azure DevOps `Script`, `IngestScriptFile`; GitHub `ScriptFile`, `ScriptPrereqFile`, `IngestScriptFile` | gone - the pipeline names the scripts |
+
+The step 'Create arguments' checks the file: a placeholder, an unknown name or a wrong value stops the run with a message that names the entry (a v1 name: with its new name).
+
+**The schedule stays in the pipeline/workflow file** - the new file has the default schedule:
+- GitHub: the schedule is commented out - remove the `#` in front of `schedule:` and the `- cron:` line again.
+- Azure DevOps: set your cron and branch (`schedules`) again.
+
+Without this the runs don't start any more, and the report, the Web App and Log Analytics go stale without an error.
+
+**3. Removed parameters** - remove them from your run line or settings, the script doesn't accept them:
+- `-AzureDevOpsWikiAsCode`: the platform is detected (it was deprecated).
+- `-HtmlTableRowsLimit`: the report tables have no row limit any more.
+- `-AADGroupMembersLimit`: was not used.
+
+**4. Web App publishing:** v2 publishes only to a Web App that requires a login - App Service Authentication on **and** unauthenticated requests not allowed (v1 checked only that authentication is on). In the Azure portal: the Web App > **Authentication** > **Restrict access**: **Require authentication**. Or set up a new one: [Web App guide](setup/azure-web-app.md).
+
+**5. Log Analytics ingestion:** v2 writes new JSON properties, and a table or Data Collection Rule without them drops them (the sending step warns `has no column for: ...`). A v1 rule (with a Data Collection Endpoint) can't be updated by the template: deploy [setup/log-analytics-dcr.json](setup/log-analytics-dcr.json) with your table name and a **new** rule name, `createWorkspace` = `false`, `location` = the region of the workspace and `principalId`; set `DataCollectionRuleName` / `DataCollectionRuleResourceGroup` to the new rule; delete the old rule and its endpoint after the first successful run ([guide](setup/log-analytics.md#step-1---deploy-the-table-and-the-data-collection-rule)). The pipeline identity now also needs '**Monitoring Reader**' on the rule (the template assigns it). Lists in the JSON are always arrays now (were an object for one entry) - adjust KQL queries that expected an object.
+
+**6. If you process the CSV or JSON files:** no column, property or file was renamed or removed, but some values changed - CSV values are quoted, values starting with `= + - @` get a leading `'`, the owner CSVs have one row per owner, credential end dates are `yyyy-MM-dd HH:mm:ss UTC`. Details: 'Output changes' in the [changelog](CHANGELOG.md).
+
+**7. The first v2 run** writes over the v1 files of the same names - its commit is large (every CSV changes).
+
+**8. After the first v2 run:**
+- The change history starts: the output folder gets `*_ChangeHistory.jsonl` and `*_ChangeHistoryState.json` (pushed with the report). The first run has nothing to compare with. Turn it off with `NoChangeHistory`. See [Change history](#change-history).
+- The required permissions are the same as in v1. New optional permissions add data or speed: see [Permissions](#permissions).
 
 ## Contributing
 

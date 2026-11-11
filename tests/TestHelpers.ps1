@@ -16,8 +16,8 @@ function Get-MainScriptAtCommit {
     param([Parameter(Mandatory)][string]$Commit)
     $out = Join-Path ([IO.Path]::GetTempPath()) "AzADSPI_$($Commit).ps1"
     if (-not (Test-Path -LiteralPath $out)) {
-        $content = git -C $script:RepoRoot show "$($Commit):pwsh/AzADServicePrincipalInsights.ps1"
-        if ($LASTEXITCODE -ne 0) { throw "git show $Commit failed" }
+        $content = git -C $script:RepoRoot show "$($Commit):pwsh/AzADServicePrincipalInsights.ps1" 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "git show $Commit failed - the comparison with an earlier version needs a full clone with this commit (a ZIP download or a shallow clone has it not: git fetch --unshallow)" }
         $content | Set-Content -LiteralPath $out -Encoding utf8
     }
     $out

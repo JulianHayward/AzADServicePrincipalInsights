@@ -34,12 +34,12 @@
     "location": {
       "type": "string",
       "defaultValue": "[resourceGroup().location]",
-      "metadata": { "description": "Region of the Data Collection Rule (the region of the workspace)" }
+      "metadata": { "description": "Region of the Data Collection Rule and of a new workspace - an existing workspace: its region (the rule must be in the region of the workspace; the default is the region of the resource group)" }
     },
     "principalId": {
       "type": "string",
       "defaultValue": "",
-      "metadata": { "description": "Optional: object ID of the enterprise application (service principal) of the pipeline identity, or the object (principal) ID of its managed identity - not the object ID of the app registration; gets the role Monitoring Metrics Publisher on the Data Collection Rule" }
+      "metadata": { "description": "Optional: object ID of the enterprise application (service principal) of the pipeline identity, or the object (principal) ID of its managed identity - not the object ID of the app registration; gets the roles Monitoring Metrics Publisher (send) and Monitoring Reader (read the rule) on the Data Collection Rule" }
     },
     "principalType": {
       "type": "string",
@@ -51,6 +51,7 @@
   "variables": {
     "streamName": "[format('Custom-{0}', parameters('tableName'))]",
     "monitoringMetricsPublisherRoleId": "3913510d-42f4-4e42-8a64-420c390055eb",
+    "monitoringReaderRoleId": "43d0d8ad-25c7-4714-9337-8ba259a9fe05",
     "columns": [
       { "name": "TimeGenerated", "type": "datetime" },
       { "name": "RunId", "type": "string" },
@@ -150,6 +151,21 @@
       ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringMetricsPublisherRoleId'))]",
+        "principalId": "[parameters('principalId')]",
+        "principalType": "[parameters('principalType')]"
+      }
+    },
+    {
+      "condition": "[not(empty(parameters('principalId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.Insights/dataCollectionRules/{0}', parameters('dataCollectionRuleName'))]",
+      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), parameters('principalId'), variables('monitoringReaderRoleId'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringReaderRoleId'))]",
         "principalId": "[parameters('principalId')]",
         "principalType": "[parameters('principalType')]"
       }

@@ -57,7 +57,8 @@ if ($AzADSPInsightsJsonFilesCount -eq 0) {
     throw "No JSON files in '$($ImportPath)' - the ingestion needs the JSON export of AzADServicePrincipalInsights (parameter NoJsonExport not set)"
 }
 else {
-    $azAPICallConf = initAzAPICall
+    #the subscription of the Data Collection Rule as context: no check of the default subscription of the sign-in (it may have none)
+    $azAPICallConf = initAzAPICall -SubscriptionId4AzContext $DataCollectionRuleSubscriptionId
 
     $UTC = (Get-Date).ToUniversalTime()
     $logTimeGenerated = $UTC.ToString('o')
@@ -68,7 +69,33 @@ else {
     #a Data Collection Endpoint ('kind: Direct'); 2022-06-01 does not return it
     $currentTask = "Get Data Collection Rule $($DataCollectionRuleName)"
     $uriDCR = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$($DataCollectionRuleSubscriptionId)/resourceGroups/$($DataCollectionRuleResourceGroup)/providers/Microsoft.Insights/dataCollectionRules/$($DataCollectionRuleName)?api-version=2024-03-11"
-    $DCR = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uriDCR -method 'Get' -listenOn Content -currentTask $currentTask
+    try {
+        $DCR = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uriDCR -method 'Get' -listenOn Content -currentTask $currentTask
+    }
+    catch {
+        #reading the rule needs Microsoft.Insights/dataCollectionRules/read - 'Monitoring Metrics Publisher' has no read permission
+        throw "The Data Collection Rule '$($DataCollectionRuleName)' (subscription '$($DataCollectionRuleSubscriptionId)', resource group '$($DataCollectionRuleResourceGroup)') could not be read ($($_.Exception.Message)). Check the three values in the variables file; on 403 / AuthorizationFailed: the identity '$($azAPICallConf['checkContext'].Account.Id)' needs the role 'Monitoring Reader' on the rule (the template assigns it with principalId) - a new role assignment can take up to about 30 minutes to work. Guide: https://github.com/JulianHayward/AzADServicePrincipalInsights/blob/main/setup/log-analytics.md#if-something-doesnt-work"
+    }
+    if (-not $DCR.properties) {
+        throw "The Data Collection Rule '$($DataCollectionRuleName)' could not be read (empty response) - check DataCollectionRuleSubscriptionId, DataCollectionRuleResourceGroup and DataCollectionRuleName"
+    }
+
+    #the stream of the table and its columns: a property without a column is dropped by the rule without an error (e.g. a rule of an
+    #earlier version)
+    $streamName = "Custom-$($LogAnalyticsCustomLogTableName)"
+    $streamDeclaration = $DCR.properties.streamDeclarations.$streamName
+    if (-not $streamDeclaration) {
+        throw "The Data Collection Rule '$($DataCollectionRuleName)' has no stream '$($streamName)' (streams: $(@($DCR.properties.streamDeclarations.PSObject.Properties.Name) -join ', ')) - LogAnalyticsCustomLogTableName must be the tableName of the template deployment"
+    }
+    $streamColumns = @($streamDeclaration.columns.name)
+    #the properties of the first record (an unreadable file is reported by the batches below)
+    $recordProperties = try { @((Get-Content -LiteralPath $AzADSPInsightsJsonFiles[0] -Raw | ConvertFrom-Json).PSObject.Properties.Name) + 'TimeGenerated', 'RunId' } catch { @() }
+    $missingColumns = @($recordProperties.where({ $_ -cnotin $streamColumns }))
+    if ($missingColumns.Count -gt 0) {
+        Write-Warning "The Data Collection Rule '$($DataCollectionRuleName)' has no column for: $($missingColumns -join ', ') - these values are dropped. Deploy setup/log-analytics-dcr.json of this version (setup/log-analytics.md)"
+        if ($env:GITHUB_ACTIONS -eq 'true') { Write-Host "::warning::Data Collection Rule '$($DataCollectionRuleName)': no column for $($missingColumns -join ', ') - deploy setup/log-analytics-dcr.json of this version" }
+        elseif ($env:TF_BUILD -eq 'True') { Write-Host "##vso[task.logissue type=warning]Data Collection Rule '$($DataCollectionRuleName)': no column for $($missingColumns -join ', ') - deploy setup/log-analytics-dcr.json of this version" }
+    }
 
     if ($DCR.properties.endpoints.logsIngestion) {
         $dceIngestEndpointUrl = $DCR.properties.endpoints.logsIngestion
@@ -87,14 +114,15 @@ else {
         throw "Data Collection Rule '$($DataCollectionRuleName)' has neither a logs ingestion endpoint nor a Data Collection Endpoint"
     }
 
-    $postUri = "$dceIngestEndpointUrl/dataCollectionRules/$($DCR.properties.immutableId)/streams/Custom-$($LogAnalyticsCustomLogTableName)?api-version=2023-01-01"
+    $postUri = "$dceIngestEndpointUrl/dataCollectionRules/$($DCR.properties.immutableId)/streams/$($streamName)?api-version=2023-01-01"
 
     createBearerToken -targetEndPoint 'MonitorIngest' -AzAPICallConfiguration $azAPICallConf
 
     $batchSize = [math]::ceiling($AzADSPInsightsJsonFilesCount / $ThrottleLimitMonitor)
     Write-Host "Optimal batch size: $($batchSize)"
     $counterBatch = [PSCustomObject] @{ Value = 0 }
-    $filesBatch = ($AzADSPInsightsJsonFiles) | Group-Object -Property { [math]::Floor($counterBatch.Value++ / $batchSize) }
+    #@(): a single group has a Count of its own (the number of files)
+    $filesBatch = @($AzADSPInsightsJsonFiles | Group-Object -Property { [math]::Floor($counterBatch.Value++ / $batchSize) })
     Write-Host "Ingesting data in $($filesBatch.Count) batches"
 
     #results per batch (summed at the end: '+=' on a shared counter is not atomic across runspaces)
@@ -142,7 +170,8 @@ else {
                 $jsonObject | Add-Member -NotePropertyName TimeGenerated -NotePropertyValue $logTimeGenerated -Force
                 $jsonObject | Add-Member -NotePropertyName RunId -NotePropertyValue $runId -Force
                 #-Depth 100: the main script writes the JSON with -Depth 99 (-Depth 10 would cut deeper objects to type names)
-                $record = $jsonObject | ConvertTo-Json -Compress -Depth 100
+                #ASCII only (\uXXXX): the request has no charset - PowerShell before 7.4 does not send UTF-8 by default
+                $record = $jsonObject | ConvertTo-Json -Compress -Depth 100 -EscapeHandling EscapeNonAscii
             }
             catch {
                 #review F-65: recorded (the throw ended the batch silently with ErrorActionPreference Continue: its unsent records were
