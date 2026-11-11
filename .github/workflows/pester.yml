@@ -1,0 +1,50 @@
+# Runs the Pester tests (tests/*.Tests.ps1): static checks and stand-in tests of the script's code regions against fake
+# API responses - no Azure or Microsoft Graph access. Some tests compare with the original code (git history), hence fetch-depth 0.
+
+name: Pester
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pester:
+    if: github.repository == 'JulianHayward/AzADServicePrincipalInsights'
+    name: Pester tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Pester
+        shell: pwsh
+        run: Install-Module -Name Pester -RequiredVersion 6.2.0 -Repository PSGallery -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: Run Pester
+        shell: pwsh
+        run: |
+          Import-Module -Name Pester -RequiredVersion 6.2.0
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'testResults.xml'
+          Invoke-Pester -Configuration $config
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Pester test results
+          path: testResults.xml
+          retention-days: 14

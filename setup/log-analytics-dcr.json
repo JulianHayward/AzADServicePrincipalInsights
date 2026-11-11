@@ -1,0 +1,148 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "AzADServicePrincipalInsights: Log Analytics custom table and Data Collection Rule for Send-AzADSPILogAnalyticsData.ps1 (Logs Ingestion API). Deploy into the resource group of the Log Analytics workspace. See setup/log-analytics.md."
+  },
+  "parameters": {
+    "workspaceName": {
+      "type": "string",
+      "metadata": { "description": "Name of the existing Log Analytics workspace (in the resource group of the deployment)" }
+    },
+    "tableName": {
+      "type": "string",
+      "defaultValue": "AzADSPI_CL",
+      "metadata": { "description": "Name of the custom table, ending with _CL. Set the same value as LogAnalyticsCustomLogTableName in the variables file" }
+    },
+    "dataCollectionRuleName": {
+      "type": "string",
+      "defaultValue": "dcr-azadspi",
+      "metadata": { "description": "Name of the Data Collection Rule. Set the same value as DataCollectionRuleName in the variables file" }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": { "description": "Region of the Data Collection Rule (the region of the workspace)" }
+    },
+    "principalId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": { "description": "Optional: object ID of the identity of the pipeline/workflow; gets the role Monitoring Metrics Publisher on the Data Collection Rule" }
+    },
+    "principalType": {
+      "type": "string",
+      "defaultValue": "ServicePrincipal",
+      "allowedValues": [ "ServicePrincipal", "User", "Group" ],
+      "metadata": { "description": "Type of principalId" }
+    }
+  },
+  "variables": {
+    "streamName": "[format('Custom-{0}', parameters('tableName'))]",
+    "monitoringMetricsPublisherRoleId": "3913510d-42f4-4e42-8a64-420c390055eb",
+    "columns": [
+      { "name": "TimeGenerated", "type": "datetime" },
+      { "name": "RunId", "type": "string" },
+      { "name": "ObjectId", "type": "string" },
+      { "name": "ObjectType", "type": "string" },
+      { "name": "AgentType", "type": "string" },
+      { "name": "SP", "type": "dynamic" },
+      { "name": "SPOwners", "type": "dynamic" },
+      { "name": "SPOwnedObjects", "type": "dynamic" },
+      { "name": "SPAADRoleAssignments", "type": "dynamic" },
+      { "name": "SPAAADRoleAssignedOn", "type": "dynamic" },
+      { "name": "SPOauth2PermissionGrants", "type": "dynamic" },
+      { "name": "SPOauth2PermissionGrantedTo", "type": "dynamic" },
+      { "name": "SPAppRoleAssignments", "type": "dynamic" },
+      { "name": "SPAppRoleAssignedTo", "type": "dynamic" },
+      { "name": "SPGroupMemberships", "type": "dynamic" },
+      { "name": "SPAzureRoleAssignments", "type": "dynamic" },
+      { "name": "SPPasswordCredentials", "type": "dynamic" },
+      { "name": "SPKeyCredentials", "type": "dynamic" },
+      { "name": "SPEffectivePrivilege", "type": "dynamic" },
+      { "name": "SPEntraRecommendations", "type": "dynamic" },
+      { "name": "SPCustomSecurityAttributes", "type": "dynamic" },
+      { "name": "APP", "type": "dynamic" },
+      { "name": "APPAAADRoleAssignedOn", "type": "dynamic" },
+      { "name": "APPAppOwners", "type": "dynamic" },
+      { "name": "APPPasswordCredentials", "type": "dynamic" },
+      { "name": "APPKeyCredentials", "type": "dynamic" },
+      { "name": "APPFederatedIdentityCredentials", "type": "dynamic" },
+      { "name": "ManagedIdentity", "type": "dynamic" },
+      { "name": "ManagedIdentityAssociatedAzureResources", "type": "dynamic" },
+      { "name": "ManagedIdentityFederatedIdentityCredentials", "type": "dynamic" }
+    ]
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[format('{0}/{1}', parameters('workspaceName'), parameters('tableName'))]",
+      "properties": {
+        "plan": "Analytics",
+        "schema": {
+          "name": "[parameters('tableName')]",
+          "columns": "[variables('columns')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2023-03-11",
+      "name": "[parameters('dataCollectionRuleName')]",
+      "location": "[parameters('location')]",
+      "kind": "Direct",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('workspaceName'), parameters('tableName'))]"
+      ],
+      "properties": {
+        "description": "AzADServicePrincipalInsights: JSON output of AzADServicePrincipalInsights.ps1, sent by Send-AzADSPILogAnalyticsData.ps1",
+        "streamDeclarations": "[createObject(variables('streamName'), createObject('columns', variables('columns')))]",
+        "destinations": {
+          "logAnalytics": [
+            {
+              "name": "workspace",
+              "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('workspaceName'))]"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [ "[variables('streamName')]" ],
+            "destinations": [ "workspace" ],
+            "transformKql": "source",
+            "outputStream": "[variables('streamName')]"
+          }
+        ]
+      }
+    },
+    {
+      "condition": "[not(empty(parameters('principalId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.Insights/dataCollectionRules/{0}', parameters('dataCollectionRuleName'))]",
+      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), parameters('principalId'), variables('monitoringMetricsPublisherRoleId'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringMetricsPublisherRoleId'))]",
+        "principalId": "[parameters('principalId')]",
+        "principalType": "[parameters('principalType')]"
+      }
+    }
+  ],
+  "outputs": {
+    "dataCollectionRuleId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName'))]"
+    },
+    "dataCollectionRuleImmutableId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), '2023-03-11').immutableId]"
+    },
+    "logsIngestionEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', parameters('dataCollectionRuleName')), '2023-03-11').endpoints.logsIngestion]"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+    // suggested when the repository is opened in VS Code (the dev container installs the same)
+    "recommendations": [
+        // editing, formatting and PSScriptAnalyzer (PSScriptAnalyzerSettings.psd1)
+        "ms-vscode.powershell",
+        // the mermaid diagrams of the setup guides in the Markdown preview
+        "bierner.markdown-mermaid",
+        // the HTML report inside VS Code: right-click the file > Show Preview (Live Preview, Microsoft)
+        "ms-vscode.live-server",
+        // checks the workflows in .github/workflows
+        "github.vscode-github-actions"
+    ]
+}
