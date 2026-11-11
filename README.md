@@ -18,8 +18,6 @@ It writes an HTML report, CSV and JSON files. Run on a schedule in Azure DevOps 
 
 Short links: [aka.ms/AzADSPI](https://aka.ms/AzADSPI) · [aka.ms/AzADServicePrincipalInsights](https://aka.ms/AzADServicePrincipalInsights)
 
-![AzADServicePrincipalInsights report](img/azadserviceprincipalinsights_preview_entra-id.png)
-
 ## Contents
 
 - [Features](#features)
