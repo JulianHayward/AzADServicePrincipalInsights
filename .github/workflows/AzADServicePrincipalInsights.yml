@@ -1,27 +1,16 @@
-#change line 8 accordingly
-#if you want to leverage parameters, add them in line 66
+# AzADServicePrincipalInsights
+# First things first:
+# 1. Mandatory: set ManagementGroupId in .github/AzADServicePrincipalInsights.variables.yml (all script parameters are set in that file)
+# 2. Mandatory: create the secret CREDS (see step 'Connect Azure')
+# 3. Optional: enable the schedule (on: schedule); Log Analytics ingestion and WebApp publishing: variables file, their own sections
+# Documentation: https://github.com/JulianHayward/AzADServicePrincipalInsights/blob/main/setup/github.md
 
 name: AzADServicePrincipalInsights
 
 env:
-  OutputPath: wiki
-  ManagementGroups_s: managementGroupId #example multiple ManagementGroups: 'mgId0,mgId1'
-  ScriptDir: pwsh #example: 'my folder\pwsh' or 'my folder/pwsh'
-  ScriptPrereqFile: prerequisites.ps1
-  ScriptFile: AzADServicePrincipalInsights.ps1
-  #optional
-  WebAppPublish: false #set to true and define the Web App details in the next 3 lines
-  #WebAppSubscriptionId: ''
-  #WebAppResourceGroup: ''
-  #WebAppName: ''
-  #ManagementGroupId: '' #used for finding the correct name to publish to website
-  IngestToLogAnalytics: false #set to true and define the details in the next lines
-  # IngestScriptFile: AzADSPIDataCollectionIngest.ps1
-  # DataCollectionRuleSubscriptionId: ''
-  # DataCollectionRuleResourceGroup: ''
-  # DataCollectionRuleName: ''
-  # LogAnalyticsCustomLogTableName: ''
-  # ThrottleLimitMonitor: 10
+  #all settings: the script folder (ScriptDir), the script parameters (ManagementGroupId, OutputPath, ...) and the optional
+  #features (Log Analytics ingestion, WebApp publishing) - same names as the Azure DevOps AzADServicePrincipalInsights.variables.yml
+  VariablesFile: .github/AzADServicePrincipalInsights.variables.yml
 
 on:
   #schedule:
@@ -30,99 +19,130 @@ on:
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
+#the push step commits the output to the repository (a read-only default GITHUB_TOKEN could not push)
+permissions:
+  contents: write
+
+#runs of this branch wait for each other (they change the same output files); the running run is never cancelled - of several
+#waiting runs GitHub keeps only the newest (the others are cancelled)
+concurrency:
+  group: AzADServicePrincipalInsights-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   AzADServicePrincipalInsights:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+      - name: Checkout # zizmor: ignore[artipacked] the credentials stay persisted: the push step commits the report to this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # the head of the branch, not the commit of the trigger: a run that waited continues on the output of the previous run
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+
+      # ScriptDir from the variables file, for the later steps (GITHUB_ENV: folder name characters only); New-AzADSPIArgumentFile.ps1
+      # reads it again with the full parser and stops if the values differ
+      - name: Script directory
+        shell: pwsh
+        run: |
+          $match = [regex]::Match((Get-Content -LiteralPath $env:VariablesFile -Raw), '(?m)^[ \t]*-[ \t]+name:[ \t]*ScriptDir[ \t]*\r?\n(?:[ \t]*#.*\n)*[ \t]*value:[ \t]*(?<value>.*?)[ \t]*\r?$')
+          $dir = ($match.Groups['value'].Value -replace '[ \t]+#.*$', '') -replace "^'(.*)'$", '$1' -replace '^"(.*)"$', '$1'
+          if (-not $match.Success -or $dir -notmatch '^[\w.\- /]+$' -or $dir -match '(^|/)\.\.(/|$)' -or -not (Test-Path -LiteralPath "$dir/New-AzADSPIArgumentFile.ps1" -PathType Leaf)) {
+            Write-Host "::error::Variable 'ScriptDir' in '$($env:VariablesFile)' = '$dir' - the folder of the AzADServicePrincipalInsights scripts, relative to the repository root (e.g. pwsh)"
+            exit 1
+          }
+          Write-Host "Script directory: '$dir'"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "ScriptDir=$dir"
+
+      # The variables file becomes checked arguments files (runner temp); the later steps splat them, so a value is never part of a
+      # script text. The switches WebAppPublish / IngestToLogAnalytics become step outputs for the 'if:' of the later steps.
+      - name: Create arguments
+        id: arguments
+        shell: pwsh
+        run: |
+          & "./$($env:ScriptDir)/New-AzADSPIArgumentFile.ps1" `
+            -ScriptFile "./$($env:ScriptDir)/AzADServicePrincipalInsights.ps1" `
+            -VariablesFile $env:VariablesFile `
+            -KnownScriptFile "./$($env:ScriptDir)/Send-AzADSPILogAnalyticsData.ps1", "./$($env:ScriptDir)/Publish-AzADSPIWebApp.ps1" `
+            -WorkflowSwitch WebAppPublish, IngestToLogAnalytics `
+            -OutputFile "$($env:RUNNER_TEMP)/AzADSPIArguments.json" `
+            -ScriptPath $env:ScriptDir
+
+      - name: Create arguments (Log Analytics ingestion)
+        if: steps.arguments.outputs.IngestToLogAnalytics == 'true'
+        shell: pwsh
+        run: |
+          & "./$($env:ScriptDir)/New-AzADSPIArgumentFile.ps1" `
+            -ScriptFile "./$($env:ScriptDir)/Send-AzADSPILogAnalyticsData.ps1" `
+            -VariablesFile $env:VariablesFile `
+            -KnownScriptFile "./$($env:ScriptDir)/AzADServicePrincipalInsights.ps1", "./$($env:ScriptDir)/Publish-AzADSPIWebApp.ps1" `
+            -KnownVariable WebAppPublish, IngestToLogAnalytics `
+            -OutputFile "$($env:RUNNER_TEMP)/AzADSPIIngestArguments.json"
+
+      - name: Create arguments (WebApp publishing)
+        if: steps.arguments.outputs.WebAppPublish == 'true'
+        shell: pwsh
+        run: |
+          & "./$($env:ScriptDir)/New-AzADSPIArgumentFile.ps1" `
+            -ScriptFile "./$($env:ScriptDir)/Publish-AzADSPIWebApp.ps1" `
+            -VariablesFile $env:VariablesFile `
+            -KnownScriptFile "./$($env:ScriptDir)/AzADServicePrincipalInsights.ps1", "./$($env:ScriptDir)/Send-AzADSPILogAnalyticsData.ps1" `
+            -KnownVariable WebAppPublish, IngestToLogAnalytics `
+            -OutputFile "$($env:RUNNER_TEMP)/AzADSPIPublishArguments.json"
+
+      # no Azure login needed: the repository visibility (with the workflow token) and the output folder
+      - name: Check prerequisites
+        shell: pwsh
+        run: |
+          $params = & "./$($env:ScriptDir)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:RUNNER_TEMP)/AzADSPIArguments.json"
+          . "./$($env:ScriptDir)/Test-AzADSPIPrerequisite.ps1" -OutputPath $params['OutputPath']
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Connect Azure
-        uses: azure/login@v2
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           creds: ${{secrets.CREDS}}
           enable-AzPSSession: true
-          # CREDS looks like this:
-          # {
-          #   "tenantId": "<GUID>",
-          #   "subscriptionId": "<GUID>",
-          #   "clientId": "<GUID>",
-          #   "clientSecret": "<GUID>"
-          # }
-
-      - name: Check prerequisites
-        uses: azure/powershell@v1
-        with:
-          inlineScript: |
-            . .\$($env:ScriptDir)\$($env:ScriptPrereqFile) -OutputPath ${env:OutputPath}
-          azPSVersion: "latest"
+          # CREDS looks like this - on one line (each line of a secret is masked in the logs on its own), clientSecret is the Value of
+          # the client secret, not its Secret ID:
+          # {"tenantId": "<Directory (tenant) ID>", "subscriptionId": "<subscription ID>", "clientId": "<Application (client) ID>", "clientSecret": "<client secret value>"}
 
       - name: Run AzADServicePrincipalInsights
-        uses: azure/powershell@v1
+        uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3.0.0
         with:
           inlineScript: |
-            $ManagementGroupId = (${env:ManagementGroups_s}).split(',')
-            . .\$($env:ScriptDir)\$($env:ScriptFile) -ScriptPath ${env:ScriptDir} -OutputPath ${env:OutputPath} -ManagementGroupId $ManagementGroupId
+            $params = & "./$($env:ScriptDir)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:RUNNER_TEMP)/AzADSPIArguments.json"
+            . "./$($env:ScriptDir)/AzADServicePrincipalInsights.ps1" @params
           azPSVersion: "latest"
 
       - name: Push AzADServicePrincipalInsights output to repository
+        id: push
+        shell: pwsh
         run: |
-          git config --global user.email "AzADServicePrincipalInsightsGHActions@ghActions.com"
-          git config --global user.name "$GITHUB_ACTOR"
-          git config pull.rebase false
-          git add --all
-          git commit -m "$GITHUB_WORKFLOW $GITHUB_JOB"
-          git push
+          $params = & "./$($env:ScriptDir)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:RUNNER_TEMP)/AzADSPIArguments.json"
+          & "./$($env:ScriptDir)/Push-AzADSPIOutput.ps1" -RepositoryPath $env:GITHUB_WORKSPACE -OutputPath $params['OutputPath']
 
-      - name: Upload Data to Log Analytics via Logs ingestion API
-        if: env.IngestToLogAnalytics == 'true'
-        uses: azure/powershell@v1
+      # ingestion and publishing need only the pushed output - a failure of one does not skip the other
+      - name: Upload data to Log Analytics via Logs ingestion API
+        if: ${{ !cancelled() && steps.push.outcome == 'success' && steps.arguments.outputs.IngestToLogAnalytics == 'true' }}
+        uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3.0.0
         with:
           inlineScript: |
-            $ManagementGroupId = (${env:ManagementGroups_s}).replace(',','_')
-            . .\$($env:ScriptDir)\$($env:IngestScriptFile) -ImportPath "${env:OutputPath}/JSON_SP_$ManagementGroupId" -DataCollectionRuleSubscriptionId ${env:DataCollectionRuleSubscriptionId} -DataCollectionRuleResourceGroup ${env:DataCollectionRuleResourceGroup} -DataCollectionRuleName ${env:DataCollectionRuleName} -LogAnalyticsCustomLogTableName ${env:LogAnalyticsCustomLogTableName} -ThrottleLimitMonitor ${env:ThrottleLimitMonitor}
+            $output = & "./$($env:ScriptDir)/Get-AzADSPIOutputPath.ps1" -ArgumentsFile "$($env:RUNNER_TEMP)/AzADSPIArguments.json"
+            $params = & "./$($env:ScriptDir)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:RUNNER_TEMP)/AzADSPIIngestArguments.json"
+            $params['ImportPath'] = $output.JsonPath
+            . "./$($env:ScriptDir)/Send-AzADSPILogAnalyticsData.ps1" @params
           azPSVersion: "latest"
 
       - name: Publish HTML to WebApp
-        if: env.WebAppPublish == 'true'
-        uses: azure/powershell@v1
+        if: ${{ !cancelled() && steps.push.outcome == 'success' && steps.arguments.outputs.WebAppPublish == 'true' }}
+        uses: azure/powershell@f5b8adcfff1904872c7b98d4012d4914d74b1a82 # v3.0.0
         with:
           inlineScript: |
-            $azAPICallConf = initAzAPICall -DebugAzAPICall $true
-            $currentTask = "AzAPICall - Check if WebApp ($($env:WebAppName)) has Authentication enabled"
-            $uri = "$($azAPICallConf['azAPIEndpointUrls'].ARM)/subscriptions/$($env:WebAppSubscriptionId)/resourceGroups/$($env:WebAppResourceGroup)/providers/Microsoft.Web/sites/$($env:WebAppName)/config/authsettings/list?api-version=2021-02-01"
-            $method = 'POST'
-            $request = AzAPICall -AzAPICallConfiguration $azAPICallConf -uri $uri -method $method -currentTask $currentTask -listenOn 'Content'
-
-            $authStatus = $request.properties.enabled
-            Write-Host "WebApp ($($env:WebAppName)) has Authentication enabled: $authStatus"
-            if ($authStatus) {
-              try {
-                if (Test-Path -Path "$($env:OutputPath)/AzADServicePrincipalInsights_$($env:ManagementGroupId).html") {
-                  try {
-                    Compress-Archive -Path "$($env:OutputPath)/AzADServicePrincipalInsights_$($env:ManagementGroupId).html" -DestinationPath "$($env:OutputPath)/AzADServicePrincipalInsights_$($env:ManagementGroupId).zip" -Force -ErrorAction Stop
-                  }
-                  catch {
-                    throw 'Make sure that the ManagementGroupId variable in the AzADServicePrincipalInsights*.yml has correct casing (Linux!=linuX)'
-                  }
-                }
-
-                $null = Select-AzSubscription -SubscriptionId $($env:WebAppSubscriptionId)
-                if (Publish-AzWebApp -ResourceGroupName $($env:WebAppResourceGroup) -Name $($env:WebAppName) -ArchivePath "$($env:OutputPath)/AzADServicePrincipalInsights_$($env:ManagementGroupId).zip" -Force) {
-                  Write-Host 'HTML published'
-                }
-              }
-              catch {
-                $_
-                Write-Host 'HTML NOT published'
-                Write-Host "RBAC Role 'Website Contributor' is required"
-                exit 1
-              }
-            }
-            else {
-              Write-Host 'Assuming and insisting that you do not want to publish your tenant insights to the public'
-              Write-Host "HTML NOT published. Please configure authentication on the webApp ($($env:WebAppName))"
-              exit 1
-            }
+            $publish = & "./$($env:ScriptDir)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:RUNNER_TEMP)/AzADSPIPublishArguments.json"
+            & "./$($env:ScriptDir)/Publish-AzADSPIWebApp.ps1" @publish `
+              -ArgumentsFile "$($env:RUNNER_TEMP)/AzADSPIArguments.json" `
+              -ZipDirectory $env:RUNNER_TEMP
           azPSVersion: "latest"

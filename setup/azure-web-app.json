@@ -1,0 +1,299 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "AzADServicePrincipalInsights - Azure Web App that shows the HTML report to signed-in users only. App Service Authentication (Microsoft Entra, login required) authenticates the app registration with a user-assigned managed identity (federated identity credential) instead of a client secret; basic authentication (FTP/SCM) is disabled. The Microsoft Entra steps (app registration, federated credential, assignment of the group) are not part of this template - see setup/azure-web-app.md. pwsh/New-AzADSPIWebApp.ps1 creates the same resources with REST calls: keep both in sync (tests/WebAppSetup.Tests.ps1)."
+  },
+  "parameters": {
+    "webAppName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60,
+      "metadata": {
+        "description": "Name of the web app (globally unique); the report is shown at https://<name>.azurewebsites.net"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location of the resources"
+      }
+    },
+    "sku": {
+      "type": "string",
+      "defaultValue": "B1",
+      "allowedValues": [
+        "F1",
+        "B1",
+        "B2",
+        "S1",
+        "P0v3",
+        "P1v3"
+      ],
+      "metadata": {
+        "description": "App Service plan SKU (F1: free, no SLA)"
+      }
+    },
+    "managementGroupId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "The ManagementGroupId of the pipeline (several: comma separated; empty: the Tenant Root Group) - the report AzADServicePrincipalInsights_<reference>.html becomes the default document"
+      }
+    },
+    "entraClientId": {
+      "type": "string",
+      "metadata": {
+        "description": "Application (client) ID of the app registration that signs the users in"
+      }
+    },
+    "accessControl": {
+      "type": "string",
+      "defaultValue": "Assignment",
+      "allowedValues": [
+        "Assignment",
+        "GroupClaim"
+      ],
+      "metadata": {
+        "description": "Access control: Assignment - only users and groups assigned to the enterprise application can sign in (set up in Microsoft Entra); GroupClaim - the web app accepts only tokens with the authorized group in the groups claim (the app registration must emit security groups)"
+      }
+    },
+    "authorizedGroupObjectId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "metadata": {
+        "description": "Object ID of the security group whose members may view the report (checked by the web app for GroupClaim; for Assignment the group the Entra admin assigns)"
+      }
+    },
+    "publisherPrincipalObjectId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional: object ID of the enterprise application (service principal) of the pipeline identity that publishes the report, or the object (principal) ID of its managed identity - not the object ID of the app registration - gets the role Website Contributor on the web app (requires Owner, User Access Administrator or Role Based Access Control Administrator)"
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags of the resources"
+      }
+    }
+  },
+  "variables": {
+    "tenantId": "[subscription().tenantId]",
+    "appServicePlanName": "[format('asp-{0}', parameters('webAppName'))]",
+    "managedIdentityName": "[format('id-{0}-auth', parameters('webAppName'))]",
+    "managementGroupIds": "[filter(split(replace(parameters('managementGroupId'), ' ', ''), ','), lambda('id', not(empty(lambdaVariables('id')))))]",
+    "reportReference": "[if(or(empty(variables('managementGroupIds')), contains(variables('managementGroupIds'), variables('tenantId'))), variables('tenantId'), join(variables('managementGroupIds'), '_'))]",
+    "tokenExchangeAudience": "[if(equals(environment().name, 'AzureUSGovernment'), 'api://AzureADTokenExchangeUSGov', if(equals(environment().name, 'AzureChinaCloud'), 'api://AzureADTokenExchangeChina', 'api://AzureADTokenExchange'))]",
+    "defaultDocument": "[format('AzADServicePrincipalInsights_{0}.html', variables('reportReference'))]",
+    "assertionSettingName": "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID",
+    "websiteContributorRoleId": "de139f84-1756-47ae-9be6-808fbbe84772",
+    "groupClaimValidation": {
+      "jwtClaimChecks": {
+        "allowedGroups": [
+          "[parameters('authorizedGroupObjectId')]"
+        ]
+      },
+      "defaultAuthorizationPolicy": {
+        "allowedPrincipals": {
+          "groups": [
+            "[parameters('authorizedGroupObjectId')]"
+          ]
+        }
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[variables('managedIdentityName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]"
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2024-04-01",
+      "name": "[variables('appServicePlanName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "sku": {
+        "name": "[parameters('sku')]"
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2024-04-01",
+      "name": "[parameters('webAppName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')))]": {}
+        }
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "httpsOnly": true,
+        "publicNetworkAccess": "Enabled",
+        "siteConfig": {
+          "minTlsVersion": "1.2",
+          "scmMinTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "http20Enabled": true,
+          "defaultDocuments": [
+            "[variables('defaultDocument')]"
+          ],
+          "appSettings": [
+            {
+              "name": "[variables('assertionSettingName')]",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').clientId]"
+            },
+            {
+              "name": "WEBSITE_AUTH_AAD_ALLOWED_TENANTS",
+              "value": "[variables('tenantId')]"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2024-04-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'authsettingsV2')]",
+      "properties": {
+        "platform": {
+          "enabled": true
+        },
+        "globalValidation": {
+          "requireAuthentication": true,
+          "unauthenticatedClientAction": "RedirectToLoginPage",
+          "redirectToProvider": "azureactivedirectory"
+        },
+        "httpSettings": {
+          "requireHttps": true
+        },
+        "login": {
+          "tokenStore": {
+            "enabled": true
+          }
+        },
+        "identityProviders": {
+          "azureActiveDirectory": {
+            "enabled": true,
+            "registration": {
+              "openIdIssuer": "[format('{0}{1}/v2.0', environment().authentication.loginEndpoint, variables('tenantId'))]",
+              "clientId": "[parameters('entraClientId')]",
+              "clientSecretSettingName": "[variables('assertionSettingName')]"
+            },
+            "validation": "[if(equals(parameters('accessControl'), 'GroupClaim'), variables('groupClaimValidation'), createObject())]"
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+      "apiVersion": "2024-04-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'ftp')]",
+      "properties": {
+        "allow": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/basicPublishingCredentialsPolicies",
+      "apiVersion": "2024-04-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'scm')]",
+      "properties": {
+        "allow": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2024-04-01",
+      "name": "[format('{0}/{1}', parameters('webAppName'), 'slotConfigNames')]",
+      "properties": {
+        "appSettingNames": [
+          "[variables('assertionSettingName')]"
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('publisherPrincipalObjectId')))]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]",
+      "name": "[guid(resourceId('Microsoft.Web/sites', parameters('webAppName')), parameters('publisherPrincipalObjectId'), variables('websiteContributorRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('websiteContributorRoleId'))]",
+        "principalId": "[parameters('publisherPrincipalObjectId')]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('webAppName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "webAppName": {
+      "type": "string",
+      "value": "[parameters('webAppName')]"
+    },
+    "url": {
+      "type": "string",
+      "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2024-04-01').defaultHostName)]"
+    },
+    "defaultDocument": {
+      "type": "string",
+      "value": "[variables('defaultDocument')]"
+    },
+    "redirectUri": {
+      "type": "string",
+      "value": "[format('https://{0}/.auth/login/aad/callback', reference(resourceId('Microsoft.Web/sites', parameters('webAppName')), '2024-04-01').defaultHostName)]"
+    },
+    "managedIdentityName": {
+      "type": "string",
+      "value": "[variables('managedIdentityName')]"
+    },
+    "managedIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').principalId]"
+    },
+    "managedIdentityClientId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').clientId]"
+    },
+    "federatedCredentialIssuer": {
+      "type": "string",
+      "value": "[format('{0}{1}/v2.0', environment().authentication.loginEndpoint, variables('tenantId'))]"
+    },
+    "federatedCredentialSubject": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('managedIdentityName')), '2023-01-31').principalId]"
+    },
+    "federatedCredentialAudience": {
+      "type": "string",
+      "value": "[variables('tokenExchangeAudience')]"
+    }
+  }
+}

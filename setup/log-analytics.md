@@ -1,0 +1,158 @@
+# Send the output to Log Analytics
+
+After every run, your pipeline or workflow can send the JSON output to a Log Analytics table: one record per service principal, application or managed identity. Then you can query and alert on it in Log Analytics or Microsoft Sentinel. Background: [Microsoft Entra Workload ID - Advanced Detections and Enrichment in Microsoft Sentinel](https://www.cloud-architekt.net/entra-workload-id-advanced-detection-enrichment/) (Thomas Naunheim).
+
+**Before this guide:** your pipeline or workflow runs successfully - [GitHub](github.md) or [Azure DevOps](azure-devops.md).
+
+## What you will end up with
+
+```mermaid
+flowchart LR
+    pipeline["Your pipeline or workflow<br/>(GitHub or Azure DevOps)"] -- "sends the JSON output<br/>after every run" --> dcr["Data Collection Rule<br/>dcr-azadspi"]
+    dcr -- "writes" --> table["Table AzADSPI_CL<br/>in your Log Analytics workspace"]
+    you["You, Microsoft Sentinel"] -- "query, alert" --> table
+```
+
+| Component | What it is for |
+|---|---|
+| **Table** `AzADSPI_CL` | One column per top-level property of the JSON output. |
+| **Data Collection Rule** `dcr-azadspi` | Receives the records (stream `Custom-AzADSPI_CL`) and writes them to the table. Kind `Direct`: it has its own logs ingestion endpoint, no Data Collection Endpoint needed. |
+| **Your pipeline identity** | The account your pipeline or workflow already uses. It gets permission to read the Data Collection Rule ('**Monitoring Reader**') and to send to it ('**Monitoring Metrics Publisher**'). |
+
+A template creates all of it (step 1). The sending step ([pwsh/Send-AzADSPILogAnalyticsData.ps1](../pwsh/Send-AzADSPILogAnalyticsData.ps1)) runs after the output was saved in the repository: if it fails, the report and the change history are saved anyway.
+
+## Before you start
+
+The Microsoft Entra steps are described in the [Azure portal](https://portal.azure.com) (**Microsoft Entra ID**). The [Microsoft Entra admin center](https://entra.microsoft.com/) has the same pages, if you prefer it.
+
+### Who you need
+
+| Steps | Role |
+|---|---|
+| 1 | '**Contributor**' or '**Owner**' of the resource group of the Log Analytics workspace |
+| 1 (with `principalId`) or 2 | '**Owner**', '**User Access Administrator**' or '**Role Based Access Control Administrator**' of the resource group - for the role assignment |
+| 3 | Permission to change the variables file of your pipeline or workflow |
+
+You need a Log Analytics workspace: an existing one, or the template of step 1 creates a new one (`createWorkspace`).
+
+**Who can read the table:** the table holds the same data as the report - every service principal with its permissions, roles, owners and credential details. Everybody with read access to the workspace (for example '**Reader**' or '**Log Analytics Reader**' on the workspace, its resource group or subscription) can query it. A shared central workspace gives all of them this data. Use a dedicated workspace (`createWorkspace`), or check who can read the workspace and consider table-level access.
+
+Note the **object ID** of your pipeline identity: [Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **Enterprise applications** (not **App registrations** - that object ID is a different one, and the role assignment fails with `PrincipalTypeNotSupported`) > your pipeline identity (a managed identity: filter **Application type** = **Managed Identities**) > **Object ID** - not the application ID.
+
+## Step 1 - Deploy the table and the Data Collection Rule
+
+Deploy the template [log-analytics-dcr.json](log-analytics-dcr.json) into the **resource group of the Log Analytics workspace** (for a new workspace: the resource group it shall be in). Parameters:
+
+| Parameter | Default | Value |
+|---|---|---|
+| `workspaceName` | | the name of the existing workspace - or of the new one (`createWorkspace`) |
+| `createWorkspace` | `false` | `true` only if there is no workspace yet: the template creates it (pricing tier pay-as-you-go). For an existing workspace keep `false` - `true` would overwrite its settings, e.g. the retention |
+| `workspaceRetentionInDays` | `30` | only with `createWorkspace`: how long the new workspace keeps the data (30 to 730 days; 30 are included in the price) |
+| `tableName` | `AzADSPI_CL` | the name of the table, ending with `_CL` |
+| `dataCollectionRuleName` | `dcr-azadspi` | the name of the Data Collection Rule |
+| `location` | region of the resource group | **the region of the workspace** - the Data Collection Rule must be in the same region. Check it: the workspace > **Overview** > **Location**. Set it when the resource group is in another region |
+| `principalId` | empty | optional: the object ID of your pipeline identity's **enterprise application** (not of the app registration - see [Which ID is which?](README.md#which-id-is-which)). It gets '**Monitoring Metrics Publisher**' and '**Monitoring Reader**' on the Data Collection Rule. Leave it empty if you may not assign roles - then step 2. |
+| `principalType` | `ServicePrincipal` | the type of `principalId`: keep `ServicePrincipal` for a pipeline identity |
+
+Choose one way:
+
+- **Azure portal** - the template of the `main` branch:
+
+  [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FJulianHayward%2FAzADServicePrincipalInsights%2Fmain%2Fsetup%2Flog-analytics-dcr.json)
+
+  Select the subscription and the resource group of the workspace, fill in the parameters > **Review + create** > **Create**. The button works for the Azure public cloud. For Azure Government or Azure operated by 21Vianet, or for your own copy of the template: search the portal for **Deploy a custom template** > **Build your own template in the editor**, paste the content of [log-analytics-dcr.json](log-analytics-dcr.json) > **Save**.
+
+- **Azure PowerShell:**
+
+  ```powershell
+  Connect-AzAccount -TenantId <tenant ID> -Subscription <subscription ID of the workspace>
+  New-AzResourceGroupDeployment -ResourceGroupName <resource group of the workspace> -TemplateUri 'https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/setup/log-analytics-dcr.json' -workspaceName <workspace name> -location <region of the workspace> -principalId <object ID>
+  ```
+
+- **Azure CLI:**
+
+  ```bash
+  az deployment group create --subscription <subscription ID of the workspace> --resource-group <resource group of the workspace> --template-uri 'https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/setup/log-analytics-dcr.json' --parameters workspaceName=<workspace name> location=<region of the workspace> principalId=<object ID>
+  ```
+
+The template has a column for every property the script writes (a test makes sure of it). If a new version adds JSON properties ([changelog](../CHANGELOG.md)), deploy the template of that version again with the same names: that adds the new columns. The sending step warns `has no column for: ...` when the rule misses columns.
+
+**A rule of an earlier version (v1)** - created with a Data Collection Endpoint, often in another resource group: the template cannot update it (its kind can't change, and the template puts the rule into the resource group of the workspace). Deploy the template with your `tableName` and a **new** `dataCollectionRuleName` (and `principalId`), set `DataCollectionRuleName` and `DataCollectionRuleResourceGroup` in the variables file to the new rule, and delete the old rule and its Data Collection Endpoint after the first successful run. The table keeps its data.
+
+No workspace yet: add `-createWorkspace $true` (Azure CLI: `createWorkspace=true`). The commands load the template from GitHub - no clone needed; with a clone, `-TemplateFile ./setup/log-analytics-dcr.json` works too.
+
+> **Checkpoint 1:** the workspace > **Tables** lists `AzADSPI_CL`, and **Monitor** > **Data Collection Rules** lists `dcr-azadspi`.
+
+### Without the template
+
+Create the table and the Data Collection Rule with the columns of the template (`variables.columns`). `TimeGenerated` is datetime; `RunId`, `ObjectId`, `ObjectType` and `AgentType` are string; all other columns are dynamic. The stream of the rule is `Custom-<table name>`, with the transformation `source` and the same columns.
+
+Don't create the table from one sample JSON file (portal: **New custom log (DCR-based)** > sample file). No output file contains all properties - for example, a managed identity has no `APP*` properties and an application has no `ManagedIdentity*` properties. The missing columns would be dropped for every record, without an error.
+
+## Step 2 - Allow your pipeline identity to send
+
+Skip this step if you passed `principalId` in step 1. (Assigned the roles here? Then deploy the template again without `principalId` - with it, the deployment stops with `RoleAssignmentExists`.)
+
+[Azure portal](https://portal.azure.com) > **Monitor** > **Data Collection Rules** > `dcr-azadspi` > **Access control (IAM)** > **Add** > **Add role assignment** > '**Monitoring Metrics Publisher**' > **Next** > **Select members** > your pipeline identity > **Review + assign**. Then the same for '**Monitoring Reader**' (the sending step reads the rule first).
+
+> **Checkpoint 2:** **Access control (IAM)** > **Role assignments** of the Data Collection Rule lists '**Monitoring Metrics Publisher**' and '**Monitoring Reader**' for your pipeline identity.
+
+A new role assignment can take up to about 30 minutes before the ingestion accepts it (`403`, `does not have access to ingest data` until then). This applies to step 1 with `principalId` too.
+
+## Step 3 - Turn it on
+
+**Tell the pipeline where to send, and switch it on**
+
+In the variables file, section 'Log Analytics ingestion' - GitHub: `.github/AzADServicePrincipalInsights.variables.yml`; Azure DevOps: `.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml`:
+
+| Variable | Value |
+|---|---|
+| `IngestToLogAnalytics` | `true` (switches the ingestion on) |
+| `DataCollectionRuleSubscriptionId` | the subscription of the Data Collection Rule |
+| `DataCollectionRuleResourceGroup` | the resource group of the Data Collection Rule |
+| `DataCollectionRuleName` | `dcr-azadspi` (or your name) |
+| `LogAnalyticsCustomLogTableName` | `AzADSPI_CL` (or your name, with `_CL`) |
+
+`ThrottleLimitMonitor` and `MaxRequestBytes` are optional. Don't set `NoJsonExport` - the JSON output is what gets sent.
+
+Then run the pipeline or workflow.
+
+> **Checkpoint 3:** in the run, the step **Upload data to Log Analytics via Logs ingestion API** shows `Ingested <n> of <n> records in <m> requests`.
+
+## Step 4 - Query the data
+
+The first records of a new table can take several minutes to appear. Then, in the workspace > **Logs**:
+
+```kusto
+AzADSPI_CL
+| where TimeGenerated > ago(1d)
+| summarize arg_max(TimeGenerated, *) by ObjectId
+| where tostring(SPEffectivePrivilege.level) == 'critical'
+| project TimeGenerated, ObjectType, DisplayName = tostring(SP[0].SPDisplayName), Reasons = SPEffectivePrivilege.reasons
+```
+
+All records of a run share the same `RunId` (the start time of the sending step, `yyyyMMddHHmmss` UTC).
+
+> **Checkpoint 4:** `AzADSPI_CL | summarize count() by RunId` shows one row per run - you're done.
+
+## If something doesn't work
+
+| What you see in the step **Upload data to Log Analytics via Logs ingestion API** | Why | What to do |
+|---|---|---|
+| Step **Create arguments**: `Variable(s) not set: DataCollectionRuleName, ... - '...Send-AzADSPILogAnalyticsData.ps1' requires them`, or `Variable 'DataCollectionRuleName' = '<...>' - provide the value ...` | `IngestToLogAnalytics` is `true`, but a value of the section 'Log Analytics ingestion' is empty or still a placeholder. | Step 3. |
+| Deployment of step 1 fails at the Data Collection Rule with a message about its location or region | The rule is not in the region of the workspace. | Step 1 with `location` = the region of the workspace. |
+| Deployment of step 1: `RoleAssignmentExists` | The roles were assigned by hand before. | Deploy again without `principalId`. |
+| `The Data Collection Rule '...' could not be read (...)` | A wrong `DataCollectionRule*` value in the variables file, or (with `403` / `AuthorizationFailed`) your pipeline identity has no '**Monitoring Reader**' on the rule yet. | Check the three values; step 2 (both roles). A new role assignment takes up to about 30 minutes. |
+| `The Data Collection Rule '...' has no stream 'Custom-...'` | `LogAnalyticsCustomLogTableName` is not the table name of the deployment. | Use the `tableName` of step 1. |
+| Warning `The Data Collection Rule '...' has no column for: ...` | The rule is from an earlier version, or was created without the template. | Step 1 again - with an earlier version's rule, see 'A rule of an earlier version' there. |
+| `ImportPath '...' does not exist - the ingestion needs the JSON export ...` | `NoJsonExport` is set. | Remove `NoJsonExport` from the variables file. |
+| `Data Collection Rule '...' has neither a logs ingestion endpoint nor a Data Collection Endpoint` | The rule was created without the template and without a Data Collection Endpoint. | Step 1 (template). |
+| `403` / `Forbidden` / `does not have access to ingest data for the data collection rule ...`, then `... ingestion requests or files failed` | The role assignment is not active yet, your pipeline identity has no '**Monitoring Metrics Publisher**' role on the Data Collection Rule, or the role belongs to another identity. | A new role assignment takes up to about 30 minutes - run it again later. Otherwise step 2: the hint in the output names the signed-in identity; its Application ID must be the one of the enterprise application that has the role. |
+| `Skipping ...: ... KB exceeds the maximum request size` | One record is larger than `MaxRequestBytes`. | See [Limits](#limits). The other records are sent. |
+| The run succeeded, but some columns stay empty | The table or the Data Collection Rule misses columns (e.g. created from a sample file). | Step 1: deploy the template - it adds the missing columns. |
+
+## Limits
+
+- **Record size:** one request to the Logs Ingestion API is at most 1 MB. A record (the compressed JSON of one object) larger than `MaxRequestBytes` (default 900 KB) is skipped. The step lists the skipped records in a warning, and the run continues. In a test tenant, the largest record (the Microsoft Graph service principal) was about 840 KB - in larger tenants it can pass the limit and is then skipped in every run.
+- **Large values:** dynamic columns keep large values complete. In a test (2026-11-10), values up to 785 KB (`SP` of Microsoft Graph, `SPAzureRoleAssignments` of a service principal with many role assignments) arrived complete.
+- **Columns:** only properties with a column in the table and in the stream of the Data Collection Rule are stored. The template has all of them; see [Without the template](#without-the-template).

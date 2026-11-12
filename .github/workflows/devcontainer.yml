@@ -1,0 +1,47 @@
+# Builds the dev container (.devcontainer/devcontainer.json - the GitHub Codespace of this repository) and checks inside it
+# that a Codespace can run AzADServicePrincipalInsights without installing anything (tests/Test-DevContainer.ps1):
+# PowerShell in the version of the feature, AzAPICall in the version of the script's -azAPICallVersion default, Az.Accounts, git.
+# Runs when the dev container, the script (its AzAPICall default) or the check change, and once a month (the base image and
+# the PowerShell feature change without a commit here). The image is not pushed anywhere.
+
+name: Dev container
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".devcontainer/**"
+      - "pwsh/AzADServicePrincipalInsights.ps1"
+      - "tests/Test-DevContainer.ps1"
+      - ".github/workflows/devcontainer.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - ".devcontainer/**"
+      - "pwsh/AzADServicePrincipalInsights.ps1"
+      - "tests/Test-DevContainer.ps1"
+      - ".github/workflows/devcontainer.yml"
+  schedule:
+    - cron: "17 5 3 * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  devcontainer:
+    if: github.repository == 'JulianHayward/AzADServicePrincipalInsights'
+    name: Build the dev container and check it
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # for actions/checkout to fetch code
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and check
+        uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
+        with:
+          push: never
+          runCmd: pwsh -NoProfile -File tests/Test-DevContainer.ps1

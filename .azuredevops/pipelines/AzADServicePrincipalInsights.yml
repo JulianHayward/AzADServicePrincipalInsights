@@ -1,37 +1,16 @@
-#change parameter managementGroupIds from line 13 accordingly / single or multiple managementGroupIds
-#check line 35 branch match master/main
-#if you want to leverage parameters, add them in line 68
+# AzADServicePrincipalInsights
+# First things first:
+# 1. Mandatory: in AzADServicePrincipalInsights.variables.yml set 'ServiceConnection' and 'ManagementGroupId' (the script folder,
+#    all script parameters and the optional features are set in that file)
+# 2. Mandatory: check the branch of the schedule ('schedules' below)
+# Documentation: https://github.com/JulianHayward/AzADServicePrincipalInsights/blob/main/setup/azure-devops.md
 
 trigger: none
 
 pr: none
 
-parameters:
-- name: managementGroupIds
-  type: object
-  default:
-    - '<yourManagementGroupId_0>' #e.g. 55ca6640-f705-4a6d-8574-549c57acf4ed (can be Tenant Root Group Management Group Id or child Management Group Id)
-    #- '<yourManagementGroupId_1>' #use this (and you may create more lines) if you want to run against multiple Management Groups
-- name: subscriptionQuotaIdWhitelistParameters
-  type: object
-  default:
-    - undefined
-
 variables:
-  ServiceConnection: AzAdServicePrincipalInsights
-  ManagementGroupId: ${{ join(',',parameters.managementGroupIds) }}
-  SubscriptionQuotaIdWhitelist: ${{ join(',',parameters.subscriptionQuotaIdWhitelistParameters) }}
-  WikiDir: wiki
-  CsvDelimiter: ;
-  ScriptDir: pwsh #e.g. myFolder/pwsh
-  Script: AzADServicePrincipalInsights.ps1
-  IngestToLogAnalytics: false #set to true and define the details in the next lines
-  # IngestScriptFile: AzADSPIDataCollectionIngest.ps1
-  # DataCollectionRuleSubscriptionId: ''
-  # DataCollectionRuleResourceGroup: ''
-  # DataCollectionRuleName: ''
-  # LogAnalyticsCustomLogTableName: ''
-  # ThrottleLimitMonitor: 10
+  - template: 'AzADServicePrincipalInsights.variables.yml'
 
 schedules:
 - cron: "0 6,16 * * *"
@@ -46,53 +25,108 @@ jobs:
   timeoutInMinutes: 0
 
   pool:
-    vmImage: 'ubuntu-22.04'
+    vmImage: 'ubuntu-latest'
 
   steps:
   - checkout: self
     fetchDepth: 1
-  - task: PowerShell@2
-    inputs:
-      targetType: 'filePath'
-      filePath: $(System.DefaultWorkingDirectory)/$(ScriptDir)/prerequisites.ps1
-    displayName: 'Prerequisites check'
+
+  # the head of the branch, not the commit the run was queued with: a run that waited continues on the output of the previous run
+  - pwsh: |
+      $branch = $env:BUILD_SOURCEBRANCH
+      if ($branch -like 'refs/heads/*') {
+        git -c http.extraheader="AUTHORIZATION: bearer $($env:SYSTEM_ACCESSTOKEN)" fetch --depth 1 origin $branch
+        if ($LASTEXITCODE -ne 0) { Write-Host "##vso[task.logissue type=error]git fetch of '$branch' failed"; exit 1 }
+        git checkout --detach FETCH_HEAD
+        if ($LASTEXITCODE -ne 0) { Write-Host "##vso[task.logissue type=error]git checkout of the current head of '$branch' failed"; exit 1 }
+      }
+    displayName: 'Checkout the current head of the branch'
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  # The pipeline variables (variables file, variable groups, pipeline UI) become checked arguments files (agent temp); the later
+  # steps splat them, so a value is never part of a script text. WebAppPublish / IngestToLogAnalytics: true or false (checked).
+  # The names in the variables file are checked too: an unknown name (a typo, a v1 name) stops the step.
+  - pwsh: |
+      $dir = "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)"
+      if (-not $env:SCRIPTDIR -or -not (Test-Path -LiteralPath "$dir/New-AzADSPIArgumentFile.ps1" -PathType Leaf)) {
+        Write-Host "##vso[task.logissue type=error]Variable 'ScriptDir' = '$($env:SCRIPTDIR)' - the folder of the AzADServicePrincipalInsights scripts, relative to the repository root (e.g. pwsh)"
+        exit 1
+      }
+      # the variables template: .azuredevops/pipelines in the parent folder of the script folder
+      $common = @{
+        NamesFile       = Join-Path -Path (Split-Path -Path $dir -Parent) -ChildPath '.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml'
+        KnownScriptFile = 'AzADServicePrincipalInsights.ps1', 'Send-AzADSPILogAnalyticsData.ps1', 'Publish-AzADSPIWebApp.ps1' | ForEach-Object { "$dir/$_" }
+        KnownVariable   = 'ServiceConnection', 'WebAppPublish', 'IngestToLogAnalytics'
+      }
+      & "$dir/New-AzADSPIArgumentFile.ps1" @common -ScriptFile "$dir/AzADServicePrincipalInsights.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" -ScriptPath $env:SCRIPTDIR -WorkflowSwitch WebAppPublish, IngestToLogAnalytics
+      if ($env:INGESTTOLOGANALYTICS -eq 'true') {
+        & "$dir/New-AzADSPIArgumentFile.ps1" @common -ScriptFile "$dir/Send-AzADSPILogAnalyticsData.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIIngestArguments.json"
+      }
+      if ($env:WEBAPPPUBLISH -eq 'true') {
+        & "$dir/New-AzADSPIArgumentFile.ps1" @common -ScriptFile "$dir/Publish-AzADSPIWebApp.ps1" -OutputFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIPublishArguments.json"
+      }
+    displayName: 'Create arguments'
+
+  - pwsh: |
+      $params = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json"
+      & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Test-AzADSPIPrerequisite.ps1" -OutputPath $params['OutputPath']
+    displayName: 'Check prerequisites'
     env:
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
   - task: AzurePowerShell@5
     inputs:
       azureSubscription: '$(ServiceConnection)'
-      scriptType: filePath
+      ScriptType: 'InlineScript'
       pwsh: true
-      scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(Script)'
-      scriptArguments: '-OutputPath $(WikiDir) -ScriptPath $(ScriptDir) -ManagementGroupId $(ManagementGroupId)'
+      Inline: |
+        $params = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json"
+        . "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/AzADServicePrincipalInsights.ps1" @params
       azurePowerShellVersion: latestVersion
-    displayName: 'Run AzADServicePrincipalInsights v1'
+    displayName: 'Run AzADServicePrincipalInsights'
+    env:
+      # AzAPICall renews an expired workload identity federation login with it (runs longer than about an hour)
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
+  # the build values and the token are read from the environment, never substituted into a script text with $(...)
+  # sets AzADSPIOutputPushed = true on success: the condition of the ingestion and the publishing
+  - pwsh: |
+      $params = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json"
+      & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Push-AzADSPIOutput.ps1" -RepositoryPath $env:SYSTEM_DEFAULTWORKINGDIRECTORY -OutputPath $params['OutputPath']
+    displayName: 'Push AzADServicePrincipalInsights output to repository'
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  # after the push: a failing ingestion or publishing does not keep the output from being pushed; they need only the pushed output -
+  # a failure of one does not skip the other
   - task: AzurePowerShell@5
-    condition: and(succeeded(), eq(variables['IngestToLogAnalytics'], 'true'))
+    condition: and(not(canceled()), eq(variables['AzADSPIOutputPushed'], 'true'), eq(variables['IngestToLogAnalytics'], 'true'))
     inputs:
       azureSubscription: '$(ServiceConnection)'
-      scriptType: filePath
+      ScriptType: 'InlineScript'
       pwsh: true
-      scriptPath: '$(System.DefaultWorkingDirectory)/$(ScriptDir)/$(IngestScriptFile)'
-      scriptArguments: '-ImportPath "$(WikiDir)/JSON_SP_$(ManagementGroupId)" -DataCollectionRuleSubscriptionId $(DataCollectionRuleSubscriptionId) -DataCollectionRuleResourceGroup $(DataCollectionRuleResourceGroup) -DataCollectionRuleName $(DataCollectionRuleName) -LogAnalyticsCustomLogTableName $(LogAnalyticsCustomLogTableName) -ThrottleLimitMonitor $(ThrottleLimitMonitor)'
+      Inline: |
+        $output = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Get-AzADSPIOutputPath.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" -BasePath $env:SYSTEM_DEFAULTWORKINGDIRECTORY
+        $params = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIIngestArguments.json"
+        $params['ImportPath'] = $output.JsonPath
+        . "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Send-AzADSPILogAnalyticsData.ps1" @params
       azurePowerShellVersion: latestVersion
-    displayName: 'Upload Data to Log Analytics via Logs ingestion API'
+    displayName: 'Upload data to Log Analytics via Logs ingestion API'
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
-  #webAppPublish missing
-
-  - powershell: |
-      write-host "#################################"
-      write-host "Push AzADServicePrincipalInsights output to repository"
-      write-host "#################################"
-      $executionDateTimeInternationalReadable = get-date -format "dd-MMM-yyyy HH:mm:ss"
-      $currentTimeZone = (Get-TimeZone).Id
-      git config --global user.email "AzADServicePrincipalInsightsPipeline@azdo.com"
-      $PipelineInfo = "Pipeline: '$(Build.DefinitionName)' 'rev $(Build.BuildNumber)' (Project: $([uri]::EscapeDataString("$(System.TeamProject)")); Repository: $(Build.Repository.Name); Branch: $(Build.SourceBranchName) Commit: $(Build.SourceVersion))"
-      git config --global user.name "$PipelineInfo"
-      git config pull.rebase false
-      git add --all
-      git commit -m "wiki $executionDateTimeInternationalReadable ($currentTimeZone)"
-      git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin HEAD:$(Build.SourceBranchName)
-    displayName: 'Push AzADServicePrincipalInsights v1 output to repository'
+  - task: AzurePowerShell@5
+    condition: and(not(canceled()), eq(variables['AzADSPIOutputPushed'], 'true'), eq(variables['WebAppPublish'], 'true'))
+    inputs:
+      azureSubscription: '$(ServiceConnection)'
+      ScriptType: 'InlineScript'
+      pwsh: true
+      Inline: |
+        $publish = & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Read-AzADSPIArgumentFile.ps1" -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIPublishArguments.json"
+        & "$($env:SYSTEM_DEFAULTWORKINGDIRECTORY)/$($env:SCRIPTDIR)/Publish-AzADSPIWebApp.ps1" @publish `
+          -ArgumentsFile "$($env:AGENT_TEMPDIRECTORY)/AzADSPIArguments.json" `
+          -BasePath $env:SYSTEM_DEFAULTWORKINGDIRECTORY `
+          -ZipDirectory $env:AGENT_TEMPDIRECTORY
+      azurePowerShellVersion: latestVersion
+    displayName: 'Publish HTML to WebApp'

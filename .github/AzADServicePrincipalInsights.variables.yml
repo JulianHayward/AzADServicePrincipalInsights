@@ -1,0 +1,221 @@
+# AzADServicePrincipalInsights - GitHub Actions variables (.github/workflows/AzADServicePrincipalInsights*.yml)
+# The section 'Workflow' (script folder), then the parameters of the scripts and the optional features (Log Analytics
+# ingestion, Web App publishing). The sign-in and the schedule are set in the workflow file.
+# From the section 'Required' on the same content as the Azure DevOps variables template (.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml).
+# Variable name = parameter name of the script; empty value = not set (the script default applies).
+# Values are plain text (no PowerShell code): a switch is true/false, a list is comma separated.
+# The step 'Create arguments' (pwsh/New-AzADSPIArgumentFile.ps1) converts and checks them; the script gets them as parameters.
+# Secrets do not belong here: the workflow adds them in the run step (OIDC: SUBSCRIPTION_ID).
+
+variables:
+
+### Workflow
+
+  # Folder of the AzADServicePrincipalInsights scripts, relative to the repository root - adjust if AzADServicePrincipalInsights is part of an existing repository
+  - name: ScriptDir
+    # String | example: value: my folder/pwsh
+    value: pwsh
+
+### Required
+
+  # The Management Group ID(s) to process - the ID, not the display name; casing matters (Linux!=linuX). Empty: the Tenant Root Group
+  - name: ManagementGroupId
+    # List (comma separated) | empty = Tenant Root Group | example: value: mgId0,mgId1
+    value: '<YourManagementGroupId>'
+
+  # Folder of the output (report, CSV, JSON), relative to the repository root - pushed to the repository
+  - name: OutputPath
+    # String | example: value: wiki
+    value: wiki
+
+### Optional: scope of the data collection
+
+  # Process only Subscriptions whose QuotaId starts with one of the values
+  - name: SubscriptionQuotaIdWhitelist
+    # List (comma separated) | default = undefined (all) | example: value: MSDN_,EnterpriseAgreement_
+    value:
+
+  # Do not process the Azure resource side relations (managed identities of resources, Azure RBAC)
+  - name: NoAzureResourceSideRelations
+    # Switch | example: value: true
+    value:
+
+  # Report only Service Principals that have a role assignment within the scope of the data collection
+  - name: OnlyProcessSPsThatHaveARoleAssignmentInTheRelevantMGScopes
+    # Switch | example: value: true
+    value:
+
+### Optional: classification and thresholds
+
+  # Microsoft Entra ID roles (role definition IDs) treated as critical in addition to the roles Microsoft marks as privileged
+  - name: CriticalAADRoles
+    # List (comma separated) | default = 62e90394-69f5-4237-9190-012177145e10,e8611ab8-c189-46e8-94e1-60213ab1f814,7be44c8a-adaf-4e2a-84d6-ab2649e08a13 | example: value: 62e90394-69f5-4237-9190-012177145e10,<roleDefinitionId>
+    value:
+
+  # Warning period (days) for application secret expiry
+  - name: ApplicationSecretExpiryWarning
+    # Integer | default = 14 | example: value: 30
+    value:
+
+  # Maximum expiry period (days) for application secrets
+  - name: ApplicationSecretExpiryMax
+    # Integer | default = 730 | example: value: 365
+    value:
+
+  # Warning period (days) for application certificate expiry
+  - name: ApplicationCertificateExpiryWarning
+    # Integer | default = 14 | example: value: 30
+    value:
+
+  # Maximum expiry period (days) for application certificates
+  - name: ApplicationCertificateExpiryMax
+    # Integer | default = 730 | example: value: 365
+    value:
+
+### Optional: output
+
+  # Do not export the enriched data as CSV
+  - name: NoCsvExport
+    # Switch | example: value: true
+    value:
+
+  # CSV delimiter
+  - name: CsvDelimiter
+    # String | default = ';' | allowed: ';' ',' | example: value: ','
+    value:
+
+  # Quote CSV values only where needed (default: all values are quoted)
+  - name: CsvExportUseQuotesAsNeeded
+    # Switch | example: value: true
+    value:
+
+  # Do not export the enriched data as JSON (the JSON is needed for the Log Analytics ingestion)
+  - name: NoJsonExport
+    # Switch | example: value: true
+    value:
+
+  # Time format of the output file names (local runs; pipelines/workflows write the names without timestamp)
+  - name: FileTimeStampFormat
+    # String | default = yyyyMMdd_HHmmss | example: value: yyyyMMdd_HHmm
+    value:
+
+  # Do not record the change history (on by default: the changes since the previous run are appended to a file in the output folder, README: Change history)
+  - name: NoChangeHistory
+    # Switch | example: value: true
+    value:
+
+  # Period (days) of the report section 'Changes' - the history file itself is kept without time limit
+  - name: ChangeHistoryDays
+    # Integer | default = 30 | range 1-3650 | example: value: 90
+    value:
+
+### Optional: performance, troubleshooting, telemetry
+
+  # Parallel Azure Resource Manager API requests
+  - name: ThrottleLimitARM
+    # Integer | default = 10 | range 1-1000 | example: value: 5
+    value:
+
+  # Parallel Microsoft Graph API requests
+  - name: ThrottleLimitGraph
+    # Integer | default = 25 | range 1-1000 | example: value: 10
+    value:
+
+  # Parallelism of the local processing
+  - name: ThrottleLimitLocal
+    # Integer | default = 100 | range 1-1000 | example: value: 50
+    value:
+
+  # Subscription ID used as Azure context by the AzAPICall module (GitHub OIDC workflow: set from the secret SUBSCRIPTION_ID)
+  - name: SubscriptionId4AzContext
+    # String | default = undefined | example: value: 2674403a-4acd-40e6-a694-2ac7b968761e
+    value:
+
+  # AzAPICall debug output for troubleshooting API calls
+  - name: DebugAzAPICall
+    # Switch | example: value: true
+    value:
+
+  # The AzAPICall module to use (installed by the run)
+  - name: AzAPICallModuleName
+    # String | default = AzAPICall | allowed: AzAPICall, AzAPICallBeta | example: value: AzAPICallBeta
+    value:
+
+  # The AzAPICall version to use (default: the tested version)
+  - name: azAPICallVersion
+    # String | default = 1.4.2 | example: value: 1.4.2
+    value:
+
+  # Write a transcript of the console output to the output folder
+  - name: DoTranscript
+    # Switch | example: value: true
+    value:
+
+  # Track processing times (console totals and a _perf.csv file in the output folder)
+  - name: PerfTracking
+    # Switch | example: value: true
+    value:
+
+  # Send only an anonymous run count instead of the usage statistics (README: Telemetry)
+  - name: StatsOptOut
+    # Switch | example: value: true
+    value:
+
+### Log Analytics ingestion (Send-AzADSPILogAnalyticsData.ps1) - optional, guide: setup/log-analytics.md
+
+  # Upload the JSON output to Log Analytics (Logs ingestion API) - set the variables below
+  - name: IngestToLogAnalytics
+    # Switch | example: value: true
+    value: false
+
+  # Subscription ID of the Data Collection Rule
+  - name: DataCollectionRuleSubscriptionId
+    # String | example: value: 2674403a-4acd-40e6-a694-2ac7b968761e
+    value:
+
+  # Resource group of the Data Collection Rule
+  - name: DataCollectionRuleResourceGroup
+    # String | example: value: rg-monitoring
+    value:
+
+  # Name of the Data Collection Rule
+  - name: DataCollectionRuleName
+    # String | example: value: dcr-azadspi
+    value:
+
+  # Name of the Log Analytics custom log table
+  - name: LogAnalyticsCustomLogTableName
+    # String | example: value: AzADSPI_CL
+    value:
+
+  # Parallel Logs ingestion API requests
+  - name: ThrottleLimitMonitor
+    # Integer | default = 5 | range 1-100 | example: value: 10
+    value:
+
+  # Maximum size (bytes) of one Logs ingestion API request (the API limit is 1 MB)
+  - name: MaxRequestBytes
+    # Integer | default = 921600 | range 10240-1048576 | example: value: 524288
+    value:
+
+### Web App publishing (Publish-AzADSPIWebApp.ps1) - optional, guide: setup/azure-web-app.md
+
+  # Publish the HTML report to an Azure Web App that requires a login (App Service Authentication) - set the variables below
+  - name: WebAppPublish
+    # Switch | example: value: true
+    value: false
+
+  # Subscription ID of the Web App
+  - name: WebAppSubscriptionId
+    # String | example: value: 2674403a-4acd-40e6-a694-2ac7b968761e
+    value: '<YourWebAppSubscriptionId>'
+
+  # Resource group of the Web App
+  - name: WebAppResourceGroup
+    # String | example: value: rg-webapp
+    value: '<YourWebAppResourceGroup>'
+
+  # Name of the Web App
+  - name: WebAppName
+    # String | example: value: azadspi-report
+    value: '<YourWebAppName>'

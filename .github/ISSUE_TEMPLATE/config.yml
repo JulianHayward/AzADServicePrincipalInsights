@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/JulianHayward/AzADServicePrincipalInsights/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue (see SECURITY.md).
+  - name: Setup guides
+    url: https://github.com/JulianHayward/AzADServicePrincipalInsights/blob/main/setup/README.md
+    about: Setup questions - the guides have a troubleshooting table with the messages of the scripts.

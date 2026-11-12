@@ -1,0 +1,26 @@
+# Keeps the GitHub Actions of the workflows (.github/workflows) current: pinned SHAs are updated together with their
+# version comment. Also the features of the dev container (.devcontainer/devcontainer.json); the workflow 'Dev container'
+# builds and checks a proposed update. A release is only proposed when it is at least 14 days old (cooldown).
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 14
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: "devcontainer"

@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- nothing leaves this page: no requests, no storage of the values you type -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>AzADSPI setup assistant</title>
+<style>
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --text: #1b1f24; --muted: #57606a; --border: #d0d7de;
+  --accent: #0f6cbd; --accent-text: #ffffff; --accent-soft: #e6f0fa; --ok: #1a7f37; --ok-soft: #e7f5ea; --warn: #9a6700; --warn-soft: #fff6dd;
+  --code-bg: #f6f8fa; --focus: #0f6cbd;
+  --brand: #0078d4;
+  --place-github: #24292f; --place-entra: #6b3fb5; --place-azure: #0f6cbd; --place-devops: #1a7f37; --place-shell: #9a6700; --place-other: #57606a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418; --surface: #1a1e24; --surface-2: #232830; --text: #e6e9ee; --muted: #9aa4b1; --border: #343b45;
+    --accent: #4aa3f0; --accent-text: #0b1520; --accent-soft: #16283a; --ok: #4fbf6b; --ok-soft: #15291b; --warn: #e0b34c; --warn-soft: #2d2510;
+    --code-bg: #12161b; --focus: #4aa3f0;
+    --brand: #2899f5;
+    --place-github: #d0d7de; --place-entra: #b48cf2; --place-azure: #4aa3f0; --place-devops: #4fbf6b; --place-shell: #e0b34c; --place-other: #9aa4b1;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif; }
+a { color: var(--accent); }
+.wrap { max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; }
+header h1 { margin: 0 0 4px; font-weight: normal; line-height: 1.15; }
+/* the AzAdvertizer wordmark (azadvertizer.net): Georgia, letter-spacing -0.075em, brand blue #0078d4 / dark #2899f5; at least
+   24px: large text, #0078d4 on the page background is 4.2:1 (large text needs 3:1) */
+.wordmark { font: normal clamp(24px, 6.4vw, 36px)/1.15 Georgia, "Times New Roman", Times, serif; letter-spacing: -0.075em; padding-right: .075em; color: var(--brand); }
+.subtitle { font-size: 1.15rem; color: var(--muted); white-space: nowrap; }
+header p { margin: 0; color: var(--muted); }
+.privacy { margin-top: 10px; font-size: .85rem; color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 22px; margin-top: 18px; }
+.progress { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; padding: 0; list-style: none; }
+.progress li { font-size: .82rem; }
+.progress button { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 3px 10px; cursor: pointer; font: inherit; text-align: left; }
+.progress button:hover { border-color: var(--accent); }
+.progress .q { color: var(--muted); }
+fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+legend { font-size: 1.2rem; font-weight: 600; padding: 0; margin-bottom: 6px; }
+.help { color: var(--muted); margin: 0 0 14px; }
+.options { display: grid; gap: 10px; }
+.option { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; cursor: pointer; background: var(--surface); }
+.option:hover { border-color: var(--accent); }
+.option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.option input { margin-top: 4px; accent-color: var(--accent); flex: none; }
+.option .label { font-weight: 600; }
+.option .desc { display: block; color: var(--muted); font-size: .92rem; }
+.badge { display: inline-block; font-size: .72rem; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); margin-left: 6px; vertical-align: 1px; }
+.fields { display: grid; gap: 14px; }
+.field label { display: block; font-weight: 600; }
+.field .desc { display: block; color: var(--muted); font-size: .88rem; margin-bottom: 4px; }
+.field input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: 14px/1.4 Consolas, "Cascadia Mono", Menlo, monospace; }
+.field .hint { color: var(--warn); font-size: .85rem; min-height: 1em; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+button.primary, button.secondary { font: inherit; border-radius: 6px; padding: 8px 18px; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-text); border: 1px solid var(--accent); font-weight: 600; }
+button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+button:focus-visible, .option:has(input:focus-visible), input:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.error { color: var(--warn); margin-top: 10px; min-height: 1em; }
+.plan h2 { font-size: 1.3rem; margin: 0 0 4px; }
+.plan .summary { color: var(--muted); margin: 0 0 6px; }
+.plan h3 { font-size: 1.08rem; margin: 26px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.step { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 0 12px; margin: 14px 0; }
+.step > div { min-width: 0; }
+.num { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-text); display: grid; place-items: center; font-weight: 700; font-size: .9rem; }
+.step h4 { margin: 2px 0 4px; font-size: 1rem; }
+.step p, .step ul, .step ol { margin: 4px 0; }
+.step ul, .step ol { padding-left: 20px; }
+.step code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font: 13px Consolas, "Cascadia Mono", Menlo, monospace; overflow-wrap: anywhere; }
+.codeblock { position: relative; margin: 8px 0; }
+.codeblock pre { margin: 0; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font: 13px/1.5 Consolas, "Cascadia Mono", Menlo, monospace; }
+.codeblock pre code { background: none; border: 0; padding: 0; font: inherit; overflow-wrap: normal; }
+.codeblock button { display: block; margin: 0 0 4px auto; font: 12px inherit; padding: 3px 9px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+.where { display: inline-block; margin-left: 8px; padding: 0 8px; border: 1px solid var(--border); border-radius: 999px; font-size: .74rem; font-weight: 600; color: var(--muted); vertical-align: 2px; white-space: nowrap; }
+.where::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 5px; vertical-align: 1px; }
+.where-github { color: var(--place-github); border-color: var(--place-github); }
+.where-entra { color: var(--place-entra); border-color: var(--place-entra); }
+.where-azure-portal { color: var(--place-azure); border-color: var(--place-azure); }
+.where-azure-devops { color: var(--place-devops); border-color: var(--place-devops); }
+.where-powershell { color: var(--place-shell); border-color: var(--place-shell); }
+.where-your-computer, .where-browser { color: var(--place-other); border-color: var(--place-other); }
+.route { margin: 4px 0 8px; font-size: .92rem; }
+.route .where { margin: 0 2px; }
+.copylist { margin: 8px 0; }
+.copylist ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; }
+.copylist li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.copylist li code { font-size: 13.5px; }
+.copylist button { font: 12px inherit; padding: 2px 9px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
+.check { margin-top: 6px; padding: 7px 10px; border-left: 3px solid var(--ok); background: var(--ok-soft); border-radius: 0 6px 6px 0; font-size: .93rem; }
+.note { margin-top: 6px; padding: 7px 10px; border-left: 3px solid var(--warn); background: var(--warn-soft); border-radius: 0 6px 6px 0; font-size: .93rem; }
+.more { font-size: .9rem; color: var(--muted); margin-top: 4px; }
+.status { color: var(--ok); font-size: .9rem; min-height: 1em; }
+@media (max-width: 560px) {
+  .card { padding: 16px; }
+  .step { grid-template-columns: minmax(0, 1fr); }
+  .num { margin-bottom: 4px; }
+}
+@media print {
+  body { background: #fff; color: #000; }
+  .no-print, .codeblock button, .copylist button, .progress { display: none !important; }
+  .card { border: 0; padding: 0; }
+  /* paper does not scroll: long commands wrap */
+  .codeblock pre, .codeblock pre code { white-space: pre-wrap; overflow-wrap: anywhere; overflow: visible; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="wordmark">AzADServicePrincipalInsights</span> <span class="subtitle">setup assistant</span></h1>
+    <p>Answer a few questions - you get the steps for your setup, with the commands filled in.</p>
+    <p class="privacy">Everything stays in this page: it sends nothing and stores nothing. Reloading the page starts over.</p>
+  </header>
+  <ol class="progress no-print" id="progress" aria-label="Your answers"></ol>
+  <main class="card" id="main" aria-live="polite"></main>
+</div>
+<noscript><p style="text-align:center">This page needs JavaScript. The guides: setup/README.md in the repository.</p></noscript>
+<script>
+'use strict';
+(function () {
+  var GUIDE = 'https://github.com/JulianHayward/AzADServicePrincipalInsights/blob/main/setup/';
+  var REPO = 'https://github.com/JulianHayward/AzADServicePrincipalInsights';
+  var GUID = /^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$/;
+
+  var REQUIRED_PERMISSIONS = ['Application.Read.All', 'Group.Read.All', 'RoleManagement.Read.Directory', 'User.Read.All'];
+  var OPTIONAL_PERMISSIONS = [
+    { v: 'DelegatedPermissionGrant.Read.All', label: 'DelegatedPermissionGrant.Read.All', desc: 'Faster: reads the delegated permission grants once for the tenant instead of once per service principal (same output).', recommended: true },
+    { v: 'DirectoryRecommendations.Read.All', label: 'DirectoryRecommendations.Read.All', desc: 'Microsoft Entra recommendations for applications.' },
+    { v: 'CustomSecAttributeAssignment.Read.All', label: 'CustomSecAttributeAssignment.Read.All', desc: 'Custom security attributes of service principals.' },
+    { v: 'Policy', label: 'Policy.Read.All and Policy.Read.PermissionGrant', desc: 'Tenant consent settings (who may consent to which apps).' }
+  ];
+
+  // ---------- state ----------
+  var answers = {};   // question id -> value (string, array, or object for fields)
+  var history = [];   // ids of the answered questions, in order
+  var current = null; // id of the shown question, or 'plan'
+
+  function platform() {
+    if (answers.platform === 'unsure') {
+      if (answers.regular === 'once') return 'console';
+      return answers.repoHost || null;
+    }
+    return answers.platform || null;
+  }
+  function pipeline() { var p = platform(); return p === 'github' || p === 'ado'; }
+  function servicePrincipalRun() { return pipeline() || (platform() === 'console' && answers.account === 'sp'); }
+  function adoNew() { return platform() === 'ado' && answers.adoExisting === 'new'; }
+  function adoOption() {
+    if (answers.adoCanCreate === 'no') return 'C';
+    if (answers.adoCanCreate === 'yes' && answers.adoAuto === 'yes') return 'B';
+    return 'A';
+  }
+  function managedIdentityPipeline() { return adoNew() && adoOption() === 'C'; }
+  function features() { return pipeline() ? (answers.features || []) : []; }
+  function has(feature) { return features().indexOf(feature) >= 0; }
+
+  // ---------- questions ----------
+  var QUESTIONS = [
+    { id: 'platform', title: 'Where do you want to run AzADServicePrincipalInsights?', type: 'single',
+      options: [
+        { v: 'console', label: 'On my computer, or in a GitHub Codespace', desc: 'A report now - good for trying it out or a one-time report. You sign in as yourself.' },
+        { v: 'github', label: 'GitHub Actions', desc: 'Regular reports, saved in a private GitHub repository.' },
+        { v: 'ado', label: 'Azure DevOps', desc: 'Regular reports, saved in a private Azure DevOps repository.' },
+        { v: 'unsure', label: 'Not sure - help me choose' }
+      ] },
+    { id: 'regular', when: function () { return answers.platform === 'unsure'; }, title: 'Do you need the report once, or regularly?', type: 'single',
+      help: 'All ways produce the same report. If in doubt, start with once: you have a report within minutes and can set up a pipeline later.',
+      options: [
+        { v: 'once', label: 'Once, or now and then', desc: 'Run it from your computer or a Codespace.' },
+        { v: 'regular', label: 'Regularly, e.g. twice a day', desc: 'A pipeline or workflow runs it and keeps the history of changes.' }
+      ] },
+    { id: 'repoHost', when: function () { return answers.platform === 'unsure' && answers.regular === 'regular'; }, title: 'Where does your team keep its code?', type: 'single',
+      options: [
+        { v: 'github', label: 'GitHub', desc: 'The workflow runs in a private GitHub repository.' },
+        { v: 'ado', label: 'Azure DevOps', desc: 'The pipeline runs in a private Azure DevOps project.' }
+      ] },
+    { id: 'account', when: function () { return platform() === 'console'; }, title: 'Which account will run it?', type: 'single',
+      options: [
+        { v: 'member', label: 'My normal user account', desc: 'A member of the tenant. The most common case.' },
+        { v: 'guest', label: 'A guest account', desc: 'Invited from another tenant.' },
+        { v: 'sp', label: 'A service principal', desc: 'An app registration with a client secret.' }
+      ] },
+    { id: 'where', when: function () { return platform() === 'console'; }, title: 'Where do you run it?', type: 'single',
+      options: [
+        { v: 'computer', label: 'On my computer', desc: 'Windows, Linux or macOS with PowerShell 7.' },
+        { v: 'codespace', label: 'In a GitHub Codespace', desc: 'Nothing to install - PowerShell and the modules are included.' }
+      ] },
+    { id: 'getCode', when: function () { return platform() === 'console' && answers.where === 'computer'; }, title: 'How do you get the script?', type: 'single',
+      options: [
+        { v: 'download', label: 'Download two files', badge: 'recommended', desc: 'No Git needed: the script and its permission classification file, in one folder.' },
+        { v: 'git', label: 'Clone the repository with Git', desc: 'Also gets the setup files and the tests; update with git pull.' }
+      ] },
+    { id: 'ghSignin', when: function () { return platform() === 'github'; }, title: 'How should the workflow sign in?', type: 'single',
+      options: [
+        { v: 'oidc', label: 'Federated credential', badge: 'recommended', desc: 'No secret to store or renew.' },
+        { v: 'secret', label: 'Client secret', desc: 'The secret expires - you must renew it.' }
+      ] },
+    { id: 'adoExisting', when: function () { return platform() === 'ado'; }, title: 'Is this a new setup?', type: 'single',
+      options: [
+        { v: 'new', label: 'Yes, a new setup' },
+        { v: 'existing', label: 'No - AzADServicePrincipalInsights already runs in Azure DevOps', desc: 'You want to convert the service connection to the new issuer, update to a new version, or add a feature.' }
+      ] },
+    { id: 'adoCanCreate', when: adoNew, title: 'May you create app registrations in Microsoft Entra ID?', type: 'single',
+      help: 'The pipeline signs in as an app registration or a managed identity.',
+      options: [
+        { v: 'yes', label: 'Yes' },
+        { v: 'no', label: 'No', desc: 'The pipeline uses a managed identity instead.' },
+        { v: 'unsure', label: 'I don’t know', desc: 'The plan shows how to find out.' }
+      ] },
+    { id: 'adoAuto', when: function () { return adoNew() && answers.adoCanCreate === 'yes'; }, title: 'Who should create the app registration?', type: 'single',
+      options: [
+        { v: 'no', label: 'I create it myself', badge: 'recommended', desc: 'You control its name and its rights.' },
+        { v: 'yes', label: 'Azure DevOps creates it', desc: 'Quicker. You must be ‘Owner’ of the management group, and you reduce its rights to ‘Reader’ afterwards.' }
+      ] },
+    { id: 'optionalPermissions', when: function () { return servicePrincipalRun() && answers.adoExisting !== 'existing'; }, title: 'Which optional data do you want?', type: 'multi',
+      help: 'Each needs one more Microsoft Graph permission. Without it, the run works and the report says the data was not collected.',
+      options: OPTIONAL_PERMISSIONS, defaults: ['DelegatedPermissionGrant.Read.All'] },
+    { id: 'features', when: pipeline, title: 'Do you want any of these optional features?', type: 'multi',
+      help: 'You can add them later too.',
+      options: [
+        { v: 'webapp', label: 'Publish the report to a website', desc: 'An Azure Web App that only the members of a group can open.' },
+        { v: 'la', label: 'Send the data to Log Analytics', desc: 'Query and alert on it in Log Analytics or Microsoft Sentinel.' }
+      ] },
+    { id: 'webLicense', when: function () { return has('webapp'); }, title: 'Does your tenant have Microsoft Entra ID P1 or P2?', type: 'single',
+      help: 'Azure portal > Microsoft Entra ID > Overview > field License.',
+      options: [
+        { v: 'p1', label: 'P1 or P2', desc: 'Only the group members can sign in to the web app.' },
+        { v: 'free', label: 'Free, or I don’t know', desc: 'Everybody in the tenant can sign in, but the web app only shows the report to the group members.' }
+      ] },
+    { id: 'webTeams', when: function () { return has('webapp'); }, title: 'Who sets up the web app?', type: 'single',
+      options: [
+        { v: 'one', label: 'One person with both roles', desc: '‘Cloud Application Administrator’ (or ‘Application Administrator’) in Microsoft Entra ID and ‘Owner’ of the Azure resource group. One script does it all.' },
+        { v: 'two', label: 'Two teams', desc: 'An Entra admin and an Azure admin each do their part.' }
+      ] },
+    { id: 'laWorkspace', when: function () { return has('la'); }, title: 'Do you already have a Log Analytics workspace?', type: 'single',
+      options: [
+        { v: 'existing', label: 'Yes', desc: 'The table and the Data Collection Rule go into it.' },
+        { v: 'new', label: 'No', desc: 'The same template creates it (pricing tier pay-as-you-go, 30 days retention).' }
+      ] },
+    { id: 'laAssign', when: function () { return has('la'); }, title: 'May you assign roles on the resource group of the Log Analytics workspace?', type: 'single',
+      help: '‘Owner’, ‘User Access Administrator’ or ‘Role Based Access Control Administrator’.',
+      options: [
+        { v: 'yes', label: 'Yes', desc: 'The template gives your pipeline identity its role in the same step.' },
+        { v: 'no', label: 'No', desc: 'Somebody else assigns the role afterwards.' }
+      ] },
+    { id: 'values', when: function () { return !(platform() === 'ado' && answers.adoExisting === 'existing' && !features().length); }, title: 'Fill in your values (optional)', type: 'fields',
+      help: 'They are only used to fill in the commands of your plan. Leave a field empty to keep the placeholder.',
+      fields: function () {
+        var f = [
+          { id: 'tenantId', label: 'Tenant ID', desc: 'Azure portal > Microsoft Entra ID > Overview > Tenant ID', guid: true },
+          { id: 'mgId', label: 'Management group ID', desc: 'Azure portal > Management groups > your management group > ID (not the display name); several: comma separated. Usually the Tenant Root Group, whose ID is the tenant ID - leave empty for the Tenant Root Group: the plan then uses the tenant ID.' }
+        ];
+        if (managedIdentityPipeline()) {
+          f.push({ id: 'pipelineObjectId', label: 'Object (principal) ID of the managed identity', desc: 'Azure portal > Managed Identities > your identity > Overview > Object (principal) ID - not the client ID. Leave empty if it does not exist yet.', guid: true });
+        } else if (has('webapp') || has('la')) {
+          f.push({ id: 'pipelineObjectId', label: 'Object ID of the pipeline identity\u2019s enterprise application', desc: 'Azure portal > Microsoft Entra ID > Enterprise applications > your pipeline identity > Object ID - not the application ID, and not the object ID shown under App registrations. Leave empty if it does not exist yet.', guid: true });
+        }
+        if (has('webapp')) {
+          f.push({ id: 'webSubscriptionId', label: 'Web app: subscription ID', guid: true });
+          f.push({ id: 'webResourceGroup', label: 'Web app: resource group', desc: 'An existing resource group, e.g. rg-azadspi' });
+          f.push({ id: 'webAppName', label: 'Web app: name', desc: 'Unique worldwide - it becomes https://<name>.azurewebsites.net', pattern: /^[a-zA-Z0-9][a-zA-Z0-9-]{0,58}[a-zA-Z0-9]$/, patternHint: '2-60 characters: letters, digits and hyphens, not starting or ending with a hyphen' });
+          f.push({ id: 'webGroupId', label: 'Web app: object ID of the viewer group', desc: 'Azure portal > Microsoft Entra ID > Groups > your security group > Object ID', guid: true });
+        }
+        if (has('la')) {
+          f.push({ id: 'laSubscriptionId', label: 'Log Analytics: subscription ID of the workspace', guid: true });
+          f.push({ id: 'laResourceGroup', label: 'Log Analytics: resource group of the workspace', desc: answers.laWorkspace === 'new' ? 'An existing resource group - the new workspace goes into it.' : null });
+          f.push({ id: 'laWorkspaceName', label: 'Log Analytics: workspace name', desc: answers.laWorkspace === 'new' ? 'The name of the new workspace.' : null });
+        }
+        return f;
+      } }
+  ];
+  function question(id) { for (var i = 0; i < QUESTIONS.length; i++) { if (QUESTIONS[i].id === id) return QUESTIONS[i]; } return null; }
+  function applies(q) { return !q.when || q.when(); }
+  function nextQuestion() {
+    for (var i = 0; i < QUESTIONS.length; i++) {
+      var q = QUESTIONS[i];
+      if (applies(q) && history.indexOf(q.id) < 0) return q.id;
+    }
+    return 'plan';
+  }
+
+  // ---------- DOM helpers ----------
+  function el(tag, attrs, children) {
+    var e = document.createElement(tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (k === 'text') e.textContent = attrs[k];
+        else if (k === 'className') e.className = attrs[k];
+        else if (k.indexOf('on') === 0) e.addEventListener(k.slice(2), attrs[k]);
+        else e.setAttribute(k, attrs[k]);
+      }
+    }
+    (children || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return e;
+  }
+  // inline markup for the fixed texts of this page (never for typed values): `code`, **bold**, [text](https://...)
+  // Typed values go in as tokens ({report}, {webApp}): they are replaced after the markup is parsed, as plain text
+  function rich(text) {
+    var span = document.createElement('span');
+    var re = /`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g;
+    var last = 0, m;
+    while ((m = re.exec(text))) {
+      if (m.index > last) span.appendChild(document.createTextNode(typed(text.slice(last, m.index))));
+      if (m[1] !== undefined) span.appendChild(el('code', { text: typed(m[1]) }));
+      else if (m[2] !== undefined) span.appendChild(el('strong', { text: typed(m[2]) }));
+      else span.appendChild(el('a', { href: m[4], target: '_blank', rel: 'noopener noreferrer', text: typed(m[3]) }));
+      last = re.lastIndex;
+    }
+    if (last < text.length) span.appendChild(document.createTextNode(typed(text.slice(last))));
+    return span;
+  }
+  function typed(s) {
+    return s.replace(/\{(report|webApp)\}/g, function (all, k) { return k === 'report' ? mgReference() : plain('webAppName', 'web app name'); });
+  }
+  function copyText(text, button) {
+    function done(ok) { var t = button.textContent; button.textContent = ok ? 'Copied' : 'Copy failed'; setTimeout(function () { button.textContent = t; }, 1500); }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(fallback()); });
+    } else { done(fallback()); }
+    function fallback() {
+      var ta = el('textarea', { style: 'position:fixed;left:-9999px;top:0' }); ta.value = text; document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta); return ok;
+    }
+  }
+
+  // ---------- values in commands ----------
+  function fieldDef(id) { var q = question('values'); return applies(q) ? q.fields().filter(function (f) { return f.id === id; })[0] : null; }
+  // false: the typed value does not fit the field (the plan keeps the placeholder)
+  function fits(f, v) { return !(f.guid && !GUID.test(v)) && !(f.pattern && !f.pattern.test(v)); }
+  // the typed value of a field that is offered for the current answers and fits it, else ''
+  function value(id) {
+    var f = fieldDef(id), v = answers.values && answers.values[id];
+    v = v ? String(v).trim() : '';
+    return f && v && fits(f, v) ? v : '';
+  }
+  // a PowerShell string literal: PowerShell ends a single-quoted string at any of ' ‘ ’ ‚ ‛ - each is doubled
+  function psQuote(v) { return "'" + v.replace(/['‘’‚‛]/g, '$&$&') + "'"; }
+  // a PowerShell argument: the typed value (quoted when needed) or the placeholder
+  function psArg(v) { return /^[A-Za-z0-9._-]+$/.test(v) ? v : psQuote(v); }
+  function ps(id, placeholder) { var v = value(id); return v ? psArg(v) : '<' + placeholder + '>'; }
+  function plain(id, placeholder) { return value(id) || '<' + placeholder + '>'; }
+  // the management group IDs: typed (comma separated), else the tenant ID (= the Tenant Root Group), else none
+  function mgIds() {
+    var mg = value('mgId');
+    if (!mg) return value('tenantId') ? [value('tenantId')] : [];
+    return mg.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+  // -ManagementGroupId of a command: [string[]], one argument per ID ('mg1', 'mg2')
+  function psMg(placeholder) {
+    var ids = mgIds();
+    if (!ids.length) return '<' + placeholder + '>';
+    return ids.length === 1 ? psArg(ids[0]) : ids.map(psQuote).join(', ');
+  }
+  // the variables file takes the IDs comma separated
+  function mgYaml(placeholder) { var ids = mgIds(); return yamlQuote(ids.length ? ids.join(',') : placeholder); }
+  function mgReference() {
+    var ids = mgIds(); if (!ids.length) return '<management group ID>';
+    var tid = value('tenantId');
+    if (ids.length > 1 && tid && ids.indexOf(tid) >= 0) return tid;
+    return ids.join('_');
+  }
+  // the plan says which management group it uses when none was typed
+  function mgNote() {
+    if (value('mgId') || !answers.values) return null;
+    return value('tenantId')
+      ? 'No management group ID typed: the plan uses the tenant ID - the ID of the **Tenant Root Group**, the whole tenant.'
+      : 'No management group ID typed: replace the placeholder with the ID of your management group, or with the tenant ID for the **Tenant Root Group** (the whole tenant).';
+  }
+  function selectedPermissions() {
+    var list = REQUIRED_PERMISSIONS.slice();
+    (answers.optionalPermissions || []).forEach(function (p) {
+      if (p === 'Policy') { list.push('Policy.Read.All'); list.push('Policy.Read.PermissionGrant'); } else list.push(p);
+    });
+    return list;
+  }
+
+  // ---------- plan ----------
+  //where a step is done: the badge of the step and the route at the top of the plan (fewer switches between screens)
+  var W = { gh: 'GitHub', entra: 'Entra', azure: 'Azure portal', ado: 'Azure DevOps', ps: 'PowerShell', pc: 'Your computer', browser: 'Browser' };
+  //the badge of a place: class where-<place in lower case, hyphens>, colored by the stylesheet
+  function whereBadge(where) { return el('span', { className: 'where where-' + where.toLowerCase().replace(/[^a-z0-9]+/g, '-'), text: where }); }
+  function pipelineWhere() { return platform() === 'github' ? W.gh : W.ado; }
+  function link(file, anchor, text) { return '[' + text + '](' + GUIDE + file + (anchor ? '#' + anchor : '') + ')'; }
+
+  function graphPortalStep(where) {
+    return { where: W.entra, title: 'Allow ' + where + ' to read Microsoft Entra ID',
+      text: ['In the app registration (**Microsoft Entra ID** > **App registrations** > **All applications** > your app registration): **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions** (not Delegated) > search and select each of these > **Add permissions** > **Grant admin consent for <tenant>** > **Yes**.'],
+      list: selectedPermissions(),
+      note: 'The admin consent needs a ‘**Privileged Role Administrator**’ or ‘**Global Administrator**’. Not one yourself? Add the permissions, then send your admin the name of the app registration and this list (**Copy all**).',
+      check: '**API permissions** shows each of them with type **Application** and status **Granted for <tenant>**. A missing required one (the first four) stops the run, and the message names it; without an optional one the run continues and the report says the data was not collected.' };
+  }
+  // the grant part of the PowerShell block of setup/README.md ('Managed identity or app registration, with PowerShell'),
+  // line by line - tests/Setup.Tests.ps1 keeps both equal
+  var GRANT_SCRIPT = [
+    '$graphUrl = \'https://graph.microsoft.com\' # Azure Government: https://graph.microsoft.us; Azure operated by 21Vianet: https://microsoftgraph.chinacloudapi.cn',
+    '',
+    '$response = Invoke-AzRestMethod -Uri "$graphUrl/v1.0/servicePrincipals(appId=\'00000003-0000-0000-c000-000000000000\')"',
+    'if ($response.StatusCode -ne 200) { throw "Microsoft Graph could not be read: $($response.Content)" }',
+    '$graph = $response.Content | ConvertFrom-Json',
+    '$response = Invoke-AzRestMethod -Uri "$graphUrl/v1.0/servicePrincipals/$principalId/appRoleAssignments"',
+    'if ($response.StatusCode -ne 200) { throw "The permissions of $principalId could not be read: $($response.Content)" }',
+    '$granted = @(($response.Content | ConvertFrom-Json).value.appRoleId)',
+    'foreach ($permission in $permissions) {',
+    '    $appRoleId = ($graph.appRoles | Where-Object { $_.value -eq $permission -and $_.allowedMemberTypes -contains \'Application\' }).id',
+    '    if (-not $appRoleId) { "$permission - not found in Microsoft Graph (check the name)"; continue }',
+    '    if ($appRoleId -in $granted) { "$permission - already granted"; continue }',
+    '    $body = @{ principalId = $principalId; resourceId = $graph.id; appRoleId = $appRoleId } | ConvertTo-Json',
+    '    $result = Invoke-AzRestMethod -Method POST -Uri "$graphUrl/v1.0/servicePrincipals/$principalId/appRoleAssignments" -Payload $body',
+    '    "$permission - $(if ($result.StatusCode -eq 201) { \'granted\' } else { $result.Content })"',
+    '}'
+  ];
+  function graphScriptStep() {
+    var code = [
+      'Connect-AzAccount -TenantId ' + ps('tenantId', 'tenant ID'),
+      '$principalId = ' + psQuote(plain('pipelineObjectId', 'object (principal) ID of the managed identity')),
+      '$permissions = ' + selectedPermissions().map(function (p) { return "'" + p + "'"; }).join(', '),
+      ''
+    ].concat(GRANT_SCRIPT).join('\n');
+    return { where: W.ps, title: 'Allow the managed identity to read Microsoft Entra ID',
+      text: ['A managed identity has no **API permissions** page. A ‘**Privileged Role Administrator**’ or ‘**Global Administrator**’ runs the script below (needs only the module `Az.Accounts`). It grants these Microsoft Graph application permissions:'],
+      list: selectedPermissions(),
+      code: code,
+      check: 'Azure portal > **Microsoft Entra ID** > **Enterprise applications** > filter **Application type** = **Managed Identities** > your identity > **Permissions** lists them.',
+      more: link('README.md', 'microsoft-graph', 'Permissions reference') };
+  }
+
+  function readerStep(who, more, extra) {
+    return { where: W.azure, title: 'Give ' + who + ' the ‘Reader’ role on the management group',
+      text2: extra ? [extra] : null,
+      text: ['Somebody with ‘**Owner**’ or ‘**User Access Administrator**’ on the management group: [Azure portal](https://portal.azure.com) > **Management groups** > your management group (usually the **Tenant Root Group**) > **Access control (IAM)** > **Add** > **Add role assignment** > ‘**Reader**’ > **Next** > **Select members** > ' + who + ' > **Review + assign**.',
+        'Only ‘**Reader**’: AzADServicePrincipalInsights only reads.'],
+      check: '**Access control (IAM)** > **Role assignments** of the management group lists ‘**Reader**’ for ' + who + '.',
+      more: more };
+  }
+
+  function consolePlan() {
+    var steps = [];
+    var account = answers.account, codespace = answers.where === 'codespace', download = !codespace && answers.getCode !== 'git';
+    var reader = account === 'sp'
+      ? { where: W.azure, title: 'Check that the service principal can read the management group',
+        text: ['The service principal needs ‘**Reader**’ (or more) on the management group - usually the **Tenant Root Group**. [Azure portal](https://portal.azure.com) > **Management groups** > your management group > **Access control (IAM)** > **Role assignments** > search the name of the application.',
+          'If it’s missing: somebody with ‘**Owner**’ or ‘**User Access Administrator**’ on the management group: **Add** > **Add role assignment** > ‘**Reader**’ > **Next** > **Select members** > the application (its **enterprise application** - **Enterprise applications** > the application > **Object ID**, not the object ID under **App registrations**) > **Review + assign**.'],
+        check: '**Role assignments** lists ‘**Reader**’ (or more) for the service principal - your own access doesn’t count - and you know the **management group ID** (overview page of the management group).',
+        more: link('console.md', 'run-as-a-service-principal-instead', 'Run as a service principal') }
+      : { where: W.azure, title: 'Check that you can read the management group',
+        text: ['You need ‘**Reader**’ (or more) on the management group - usually the **Tenant Root Group**. [Azure portal](https://portal.azure.com) > **Management groups** > your management group > **Access control (IAM)** > **Check access** > **View my access**.',
+          'If it’s missing: somebody with ‘**Owner**’ or ‘**User Access Administrator**’ on the management group assigns it to you.'],
+        check: '‘**Reader**’ is listed, and you know the **management group ID** (overview page of the management group).',
+        more: link('console.md', 'step-1---check-that-you-can-read-the-management-group', 'Run from the console, step 1') };
+    steps.push(reader);
+    if (account === 'guest') {
+      steps.push({ where: W.entra, title: 'Get read access to Microsoft Entra ID',
+        text: ['As a guest you may not be allowed to read applications. Ask the Microsoft Entra administrator of the tenant to assign you the role ‘**Global Reader**’. Without it, the run continues but marks the affected service principals as incomplete.'],
+        more: link('console.md', 'before-you-start', 'Run from the console, before you start') });
+    }
+    if (account === 'sp') {
+      var g = graphPortalStep('the service principal');
+      g.more = link('console.md', 'run-as-a-service-principal-instead', 'Run as a service principal');
+      steps.push(g);
+    }
+    if (codespace) {
+      steps.push({ where: W.gh, title: 'Create a Codespace',
+        text: ['On the [repository page](' + REPO + '): **Code** > **Codespaces** > **Create codespace on main**. PowerShell 7, Git, `Az.Accounts` and `AzAPICall` are included - continue in its terminal.'],
+        more: link('console.md', 'run-in-a-github-codespace-instead', 'Run in a GitHub Codespace') });
+    } else {
+      steps.push({ where: W.pc, title: 'Install the tools',
+        text: [(download ? '' : '[Git](https://git-scm.com/downloads), ') + '[PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) (7.0.3 or later; Windows PowerShell 5.1 is not supported) and the module `Az.Accounts`:'],
+        code: 'Install-Module -Name Az.Accounts' });
+      if (download) {
+        steps.push({ where: W.ps, title: 'Get the script',
+          text: ['The script needs only two files in one folder: `AzADServicePrincipalInsights.ps1` and `permissionClassification.json`. In PowerShell 7:'],
+          code: 'New-Item -ItemType Directory -Force -Path "$HOME/AzADSPI" | Out-Null\nSet-Location "$HOME/AzADSPI"\nforeach ($file in \'AzADServicePrincipalInsights.ps1\', \'permissionClassification.json\') {\n    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/pwsh/$file" -OutFile $file\n}',
+          text2: ['Downloaded with the browser instead (GitHub > the file > **Download raw file**)? Put both files in one folder; on Windows, run `Unblock-File ./AzADServicePrincipalInsights.ps1` once. For a new version, download both again.'],
+          check: 'The folder contains both files.',
+          more: link('console.md', 'step-2---get-the-code', 'Run from the console, step 2') });
+      } else {
+        steps.push({ where: W.ps, title: 'Get the code',
+          code: "git clone 'https://github.com/JulianHayward/AzADServicePrincipalInsights.git'\nSet-Location 'AzADServicePrincipalInsights'",
+          more: link('console.md', 'step-2---get-the-code', 'Run from the console, step 2') });
+      }
+    }
+    var signIn = account === 'sp'
+      ? '$credential = Get-Credential   # User: the Application (client) ID; Password: a client secret of the app registration\nConnect-AzAccount -ServicePrincipal -TenantId ' + ps('tenantId', 'tenant ID') + ' -Credential $credential'
+      : 'Connect-AzAccount -TenantId ' + ps('tenantId', 'tenant ID') + (codespace ? ' -UseDeviceAuthentication' : '');
+    var outputFolder = codespace ? './AzADSPI-Output' : '"$HOME/AzADSPI-Output"';
+    steps.push({ where: W.ps, title: 'Sign in and run',
+      code: signIn + '\n\nNew-Item -ItemType Directory -Force -Path ' + outputFolder + '\n' + (download ? './AzADServicePrincipalInsights.ps1' : './pwsh/AzADServicePrincipalInsights.ps1') + ' -ManagementGroupId ' + psMg('management group ID') + ' -OutputPath ' + outputFolder,
+      note: mgNote(),
+      text2: [(codespace ? 'The Codespace has the module `AzAPICall` already.' : 'On the first run, the script asks to install the module `AzAPICall` - answer `y`.') + ' The run takes a few minutes; large tenants take longer.']
+        .concat(!codespace && account !== 'sp' ? ['No browser on this computer: add `-UseDeviceAuthentication` to `Connect-AzAccount` (sign in with a code on another device - some tenants block this).'] : [])
+        .concat(['Azure Government or Azure operated by 21Vianet: add `-Environment AzureUSGovernment` or `-Environment AzureChinaCloud` to `Connect-AzAccount`.']),
+      check: 'The script ends with `Completed successful`.',
+      more: link('console.md', 'step-3---sign-in-and-run', 'Run from the console, step 3') });
+    steps.push({ where: W.browser, title: 'Open the report',
+      text: codespace
+        ? ['In the Explorer of the Codespace: folder `AzADSPI-Output` > right-click the HTML file > **Download**, and open it in your browser. Download the output before you delete the Codespace, and don\u2019t commit it - it contains data of your tenant.']
+        : ['The report is `AzADServicePrincipalInsights_<version>_<date and time>_<management group ID>.html`. To open the newest one:'],
+      code: codespace ? null : "Get-ChildItem \"$HOME/AzADSPI-Output\" -Filter 'AzADServicePrincipalInsights_*.html' | Sort-Object LastWriteTime | Select-Object -Last 1 | Invoke-Item",
+      check: 'The report opens in your browser (it loads its styling from azadvertizer.net). Keep the output folder for the next run: the report then shows what changed in between.',
+      more: link('console.md', 'step-4---open-the-report', 'Run from the console, step 4') });
+    return [{ title: 'Run from the console', steps: steps }];
+  }
+
+  function githubPlan() {
+    var oidc = answers.ghSignin !== 'secret';
+    var workflowFile = oidc ? 'AzADServicePrincipalInsights_OIDC.yml' : 'AzADServicePrincipalInsights.yml';
+    var steps = [];
+    steps.push({ where: W.gh, title: 'Create a private repository with the code',
+      text: ['Open [github.com/new/import](https://github.com/new/import) > clone URL `https://github.com/JulianHayward/AzADServicePrincipalInsights.git` > your organization, a repository name, visibility **Private** > **Begin import**. The report contains insights about your tenant - the workflow stops when the repository is public.'].concat(oidc
+        ? ['While you are here, note the two IDs the sign-in needs in the next step: open the repository > **View page source** > search for `octolytics-dimension` - `user_id` is the **organization ID** (also for an organization), `repository_id` the **repository ID**. Or with the GitHub CLI (first the organization ID, then the repository ID):']
+        : []),
+      code: oidc ? 'gh api repos/<organization>/<repository> --jq ".owner.id, .id"' : null,
+      check: 'The repository is private and contains the files of AzADServicePrincipalInsights' + (oidc ? '. You noted the **organization ID** and the **repository ID**.' : '.'),
+      more: link('github.md', 'step-1---create-a-private-repository-with-the-code', 'Run from GitHub, step 1') });
+    steps.push({ where: W.entra, title: 'Create the pipeline identity',
+      text: ['[Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > **New registration** > a name, e.g. `AzADServicePrincipalInsights_GitHub`; keep **Accounts in this organizational directory only** > **Register**. Note the **Application (client) ID** and the **Directory (tenant) ID** of the overview.',
+        oidc
+          ? 'Still in the app registration: **Certificates & secrets** > **Federated credentials** > **Add credential** > scenario **GitHub Actions deploying Azure resources** > **Organization** and **Organization ID**, **Repository** and **Repository ID** (from step 1); **Entity type** **Branch**, branch `main` > a name > **Add**.'
+          : 'Still in the app registration: **Certificates & secrets** > **Client secrets** > **New client secret** > **Add**. Copy the **Value** now - it is shown only once.'],
+      check: oidc
+        ? 'The **Subject identifier** reads `repo:<organization>@<organization ID>/<repository>@<repository ID>:ref:refs/heads/main` - names and IDs exactly as in step 1. Only runs of that branch of exactly this repository can sign in.'
+        : 'You noted the client ID, the tenant ID and the value of the client secret.',
+      more: link('github.md', 'step-2---create-the-pipeline-identity', 'Run from GitHub, step 2') });
+    var g = graphPortalStep('the pipeline identity');
+    g.more = link('github.md', 'step-3---allow-the-pipeline-identity-to-read-microsoft-entra-id', 'Run from GitHub, step 3');
+    steps.push(g);
+    steps.push(readerStep('the app registration', link('github.md', 'step-2---create-the-pipeline-identity', 'Run from GitHub, step 2'),
+      'While you are here: **Subscriptions** > note the ID of any subscription in the management group - you need it when you store the sign-in details.'));
+    steps.push({ where: W.gh, title: 'Store the sign-in details in GitHub',
+      text: [oidc
+        ? 'In the repository > **Settings** > **Secrets and variables** > **Actions** > **New repository secret**, three times: `CLIENT_ID` (the Application (client) ID), `TENANT_ID` (the Directory (tenant) ID), `SUBSCRIPTION_ID` (the subscription ID of step 4).'
+        : 'In the repository > **Settings** > **Secrets and variables** > **Actions** > **New repository secret** `CREDS` with this JSON:'],
+      code: oidc ? null : '{\n  "tenantId": ' + JSON.stringify(plain('tenantId', 'Directory (tenant) ID')) + ',\n  "subscriptionId": "<subscription ID of step 4>",\n  "clientId": "<Application (client) ID>",\n  "clientSecret": "<client secret value>"\n}',
+      check: '**Secrets and variables** > **Actions** lists ' + (oidc ? '`CLIENT_ID`, `TENANT_ID` and `SUBSCRIPTION_ID`.' : '`CREDS`.'),
+      more: link('github.md', 'step-2---create-the-pipeline-identity', 'Run from GitHub, step 2') });
+    steps.push({ where: W.gh, title: 'Set the variables and run the workflow',
+      text: ['In the repository, edit `.github/AzADServicePrincipalInsights.variables.yml`: set `ManagementGroupId` (exact upper and lower case) and commit:'],
+      code: '  - name: ManagementGroupId\n    value: ' + mgYaml('<YourManagementGroupId>'),
+      note: mgNote(),
+      text2: ['**Actions** (enable the workflows if GitHub asks) > **' + (oidc ? 'AzADServicePrincipalInsights_OIDC' : 'AzADServicePrincipalInsights') + '** > **Run workflow**. To run it on a schedule: in `.github/workflows/' + workflowFile + '` remove the `#` in front of `schedule:` and the `- cron:` line (UTC).'],
+      check: 'The run succeeds, and the repository contains the folder `wiki` with the report `AzADServicePrincipalInsights_{report}.html`. If it stops at the permission check, the message names what is missing.',
+      more: link('github.md', 'step-4---set-the-variables-and-run-the-workflow', 'Run from GitHub, step 4') });
+    return [{ title: 'Run from GitHub', steps: steps }];
+  }
+  //entries of a variables file (name and value lines; the comment lines between them are left out)
+  function variableEntries(pairs) { return pairs.map(function (pair) { return '  - name: ' + pair[0] + '\n    value: ' + pair[1]; }).join('\n'); }
+  function yamlQuote(v) { return "'" + v.replace(/'/g, "''") + "'"; }
+  function yamlValue(id, placeholder) { return yamlQuote(value(id) || placeholder); }
+
+  function adoPlan() {
+    if (answers.adoExisting === 'existing') {
+      return [{ title: 'Your existing Azure DevOps setup', steps: [
+        { where: W.ado, title: 'Convert the service connection (before July 1, 2027)',
+          text: ['Service connections set up earlier use the Azure DevOps issuer (`https://vstoken.dev.azure.com/...`), which Azure DevOps retires on **July 1, 2027**. The report flags the federated credentials that still use it.',
+            '**Project settings** > **Service connections** > open yours > **Update** - convert it, don’t create a new one (the pipeline uses it by name). If you created the app registration yourself, add the new **Issuer** and **Subject identifier** it shows as a new federated credential and select **Try again**.',
+            'After the conversion the report marks the old credential as converted: remove it when no other service connection uses it.'],
+          more: link('azure-devops.md', 'convert-an-existing-service-connection', 'Convert an existing service connection') },
+        { where: W.ado, title: 'Update to a new version',
+          text: ['**Upgrading from v1** (any version before `v2_20261111_0`): follow [Upgrading from v1](' + REPO + '/blob/main/README.md#upgrading-from-v1) - v1 has no variables file: your settings move into the new one, and the first run stops at its placeholders until they are set.',
+            '**From v2 on**: import the new version into a branch, or pull it from `https://github.com/JulianHayward/AzADServicePrincipalInsights.git`. Keep your variables file; the [changelog](' + REPO + '/blob/main/CHANGELOG.md) lists new parameters.'],
+          more: link('azure-devops.md', 'updating', 'Updating') }
+      ] }];
+    }
+    var option = adoOption();
+    var steps = [];
+    var importStep = { where: W.ado, title: 'Create the project and import the code',
+      text: ['[Create an Azure DevOps project](https://learn.microsoft.com/azure/devops/organizations/projects/create-project#create-a-project) with visibility **Private** (or use an existing private one). **Repos** > **Import repository** > clone URL `https://github.com/JulianHayward/AzADServicePrincipalInsights.git` > **Import**.'],
+      check: 'The project is private, and **Repos** shows the files of AzADServicePrincipalInsights.',
+      more: link('azure-devops.md', 'step-1---create-the-project-and-import-the-code', 'Run from Azure DevOps, step 1') };
+    var contributeStep = { where: W.ado, title: 'Allow the pipeline to save the output in the repository',
+      text: ['**Project settings** > **Repositories** > the AzADServicePrincipalInsights repository > **Security** > **<project name> Build Service (<organization name>)** > **Contribute**: **Allow**. (If **Limit job authorization scope to current project** is off: **Project Collection Build Service (<organization name>)**.)'],
+      check: '**Contribute** shows **Allow** for the build service account.',
+      more: link('azure-devops.md', 'step-4---allow-the-pipeline-to-save-the-output-in-the-repository', 'Run from Azure DevOps, step 4') };
+    var runStep = { where: W.ado, title: 'Set the variables and run the pipeline',
+      text: ['**Repos** > `.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml` > **Edit**:'],
+      code: '  - name: ServiceConnection\n    value: \'<name of your service connection>\'\n  # (the entries in between keep their values)\n  - name: ManagementGroupId\n    value: ' + mgYaml('<YourManagementGroupId>'),
+      note: mgNote(),
+      text2: ['**Commit**. Then **Pipelines** > **New pipeline** > **Azure Repos Git** > the repository > **Existing Azure Pipelines YAML file** > `/.azuredevops/pipelines/AzADServicePrincipalInsights.yml` > **Continue** > **Run**. On the first run: open it > **View** > **Permit**. The pipeline runs at 6:00 and 16:00 UTC on `main` (`schedules` in the pipeline file).'],
+      check: 'The run succeeds, and the repository contains the folder `wiki` with the report `AzADServicePrincipalInsights_{report}.html`. If it stops at the permission check, the message names what is missing.',
+      more: link('azure-devops.md', 'step-5---set-the-variables-and-run-the-pipeline', 'Run from Azure DevOps, step 5') };
+    var optionA = link('azure-devops.md', 'option-a---app-registration-created-by-you', 'Option A - App registration, created by you');
+    if (option === 'A') {
+      //Entra (app registration + permissions) -> Azure portal -> Azure DevOps (draft) -> Entra (credential) -> Azure DevOps
+      var appStep = { where: W.entra, title: 'Create the app registration',
+        text: ['[Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > **New registration** > e.g. `AzADServicePrincipalInsights_SC`, keep **Accounts in this organizational directory only** (other account types don’t work) > **Register**. Note the **Application (client) ID** and the **Directory (tenant) ID**.'],
+        check: 'You noted the client ID and the tenant ID.',
+        more: optionA };
+      if (answers.adoCanCreate === 'unsure') {
+        appStep.note = 'Not sure whether you may create app registrations? Try **New registration** - if the button is greyed out, you may not. Then ask your Entra admin, or use a managed identity ([option C](' + GUIDE + 'azure-devops.md#option-c---managed-identity)).';
+      }
+      steps.push(appStep);
+      var g = graphPortalStep('the pipeline identity');
+      g.more = link('azure-devops.md', 'step-3---allow-the-pipeline-identity-to-read-microsoft-entra-id', 'Run from Azure DevOps, step 3');
+      steps.push(g);
+      steps.push(readerStep('the app registration', optionA, 'While you are here: note the **ID** and the **name** of the management group - the service connection asks for both.'));
+      steps.push(importStep);
+      steps.push(contributeStep);
+      steps.push({ where: W.ado, title: 'Start the service connection',
+        text: ['Still in **Project settings**: **Service connections** > **New service connection** > **Azure Resource Manager** > **Next** > identity type **App registration or managed identity (manual)**, credential **Workload identity federation**.',
+          '**Step 1: Basics**: a name (e.g. `AzADServicePrincipalInsights`), environment **Azure Cloud**, the tenant ID > **Next**. **Step 2**: scope level **Management Group** with its ID and name; the client ID; leave **Grant access permission to all pipelines** unchecked.',
+          'Copy the **Issuer** and the **Subject identifier** > **Keep as draft**.'],
+        check: 'The service connection is saved as a draft, and you copied issuer and subject identifier.',
+        more: optionA });
+      steps.push({ where: W.entra, title: 'Connect the app registration to Azure DevOps',
+        text: ['Your app registration > **Certificates & secrets** > **Federated credentials** > **Add credential** > scenario **Other issuer** > paste the **Issuer** and the **Subject identifier** (if asked: **Explicit subject identifier**) > a name, e.g. `AzADServicePrincipalInsights_AzDO`; keep the audience `api://AzureADTokenExchange` > **Add**.'],
+        check: 'The app registration lists the federated credential.',
+        more: optionA });
+      steps.push({ where: W.ado, title: 'Finish the service connection',
+        text: ['**Project settings** > **Service connections** > your draft > **Finish setup** > **Verify and save**.'],
+        check: 'The service connection is no longer a draft, and the verification passed.',
+        more: optionA });
+    } else if (option === 'B') {
+      //Azure DevOps -> Azure portal -> Entra -> Azure DevOps
+      var optionB = link('azure-devops.md', 'option-b---app-registration-created-by-azure-devops', 'Option B - App registration, created by Azure DevOps');
+      steps.push(importStep);
+      steps.push(contributeStep);
+      steps.push({ where: W.ado, title: 'Let Azure DevOps create the service connection',
+        text: ['Still in **Project settings**: **Service connections** > **New service connection** > **Azure Resource Manager** > identity type **App registration (automatic)**, credential **Workload identity federation** > scope **Management Group** > a name; leave **Grant access permission to all pipelines** unchecked > **Save**.',
+          'Open the new service connection: it links to the app registration Azure DevOps created - note its name and its **Application (client) ID**.'],
+        check: '**Service connections** lists your service connection.',
+        more: optionB });
+      steps.push({ where: W.azure, title: 'Reduce the rights of the pipeline identity to ‘Reader’',
+        text: ['Azure DevOps gives the new app registration more rights than needed. Somebody with ‘**Owner**’ or ‘**User Access Administrator**’ on the management group: **Management groups** > your management group > **Access control (IAM)** > **Add role assignment** > ‘**Reader**’ for the app registration; then **Role assignments** > remove the role assignment Azure DevOps created.'],
+        check: '**Role assignments** lists only ‘**Reader**’ for the app registration.',
+        more: optionB });
+      var g2 = graphPortalStep('the pipeline identity');
+      g2.text = ['[Azure portal](https://portal.azure.com) > **Microsoft Entra ID** > **App registrations** > **All applications** > search the client ID of the service connection > **API permissions** > **Add a permission** > **Microsoft Graph** > **Application permissions** (not Delegated) > search and select each of these > **Add permissions** > **Grant admin consent for <tenant>** > **Yes**.'];
+      g2.more = link('azure-devops.md', 'step-3---allow-the-pipeline-identity-to-read-microsoft-entra-id', 'Run from Azure DevOps, step 3');
+      steps.push(g2);
+    } else {
+      //Azure portal (identity + Reader) -> PowerShell (permissions) -> Azure DevOps
+      var optionC = link('azure-devops.md', 'option-c---managed-identity', 'Option C - Managed identity');
+      steps.push({ where: W.azure, title: 'Create the managed identity',
+        text: ['[Create a user-assigned managed identity](https://learn.microsoft.com/entra/identity/managed-identities-azure-resources/how-manage-user-assigned-managed-identities?pivots=identity-mi-methods-azp#create-a-user-assigned-managed-identity) in any resource group (needs ‘**Managed Identity Contributor**’ on it). Note its **Object (principal) ID**, its subscription and resource group.'],
+        check: 'You noted the object (principal) ID.',
+        more: optionC });
+      steps.push(readerStep('the managed identity', optionC));
+      steps.push(graphScriptStep());
+      steps.push(importStep);
+      steps.push(contributeStep);
+      steps.push({ where: W.ado, title: 'Create the service connection',
+        text: ['Still in **Project settings**: **Service connections** > **New service connection** > **Azure Resource Manager** > **Next** > identity type **Managed identity** > the subscription, resource group and managed identity; scope level **Management Group** and your management group > a name (e.g. `AzADServicePrincipalInsights`) > **Save**. If Azure DevOps added a role assignment of its own, remove it - ‘**Reader**’ is enough.'],
+        check: '**Service connections** lists your service connection.',
+        more: optionC });
+    }
+    steps.push(runStep);
+    return [{ title: 'Run from Azure DevOps', steps: steps }];
+  }
+
+  function webAppPlan() {
+    var access = answers.webLicense === 'p1' ? 'Assignment' : 'GroupClaim';
+    var variablesWhere = platform() === 'github'
+      ? 'in `.github/AzADServicePrincipalInsights.variables.yml`, section \u2018Web App publishing\u2019'
+      : 'in `.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml`, section \u2018Web App publishing\u2019';
+    var setup = [
+      '# without a clone of the repository: these two lines download the script alone (it needs only the module Az.Accounts)',
+      'New-Item -ItemType Directory -Force -Path ./pwsh | Out-Null',
+      "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/pwsh/New-AzADSPIWebApp.ps1' -OutFile ./pwsh/New-AzADSPIWebApp.ps1",
+      '',
+      'Connect-AzAccount -TenantId ' + ps('tenantId', 'Tenant ID'),
+      '',
+      './pwsh/New-AzADSPIWebApp.ps1 `',
+      '  -SubscriptionId ' + ps('webSubscriptionId', 'Subscription ID') + ' `',
+      '  -ResourceGroupName ' + ps('webResourceGroup', 'Resource group') + ' `',
+      '  -WebAppName ' + ps('webAppName', 'Web app name') + ' `',
+      '  -ManagementGroupId ' + psMg('Management group ID') + ' `',
+      '  -AuthorizedGroupObjectId ' + ps('webGroupId', 'Object ID of the viewer group') + ' `',
+      '  -PublisherPrincipalObjectId ' + ps('pipelineObjectId', 'Object ID of the enterprise application of the pipeline identity') + ' `',
+      '  -AccessControl ' + access
+    ];
+    var getScript = 'In PowerShell 7 with the module `Az.Accounts`, in the folder of a clone of the repository (`git clone https://github.com/JulianHayward/AzADServicePrincipalInsights.git`) - or in any folder: the first lines download the script alone.';
+    var steps = [];
+    if (answers.webTeams === 'two') {
+      steps.push({ where: W.entra, phase: 'infra', title: 'Web app: sign-in, part 1 (Entra admin)',
+        text: ['**App registrations** > **New registration**: e.g. `AzADSPI-WebApp-{webApp}`, single tenant > **Register**; note the **Application (client) ID**.',
+          '**API permissions** > Microsoft Graph > **Delegated permissions** `openid`, `profile`, `email`, `offline_access` > **Grant admin consent**.',
+          access === 'Assignment'
+            ? '**Enterprise applications** > the same name > **Properties** > **Assignment required?** **Yes**; **Users and groups** > add the viewer group.'
+            : 'App registration > **Token configuration** > **Add groups claim** > **Security groups**.'],
+        more: link('azure-web-app.md', 'path-b---two-teams-entra-admin-and-azure-admin', 'Path B - two teams') });
+      setup.splice(setup.length - 1, 1, '  -AccessControl ' + access + ' `', '  -SkipEntra -EntraClientId <Application (client) ID>');
+      steps.push({ where: W.ps, phase: 'infra', title: 'Web app: create it (Azure admin)',
+        text: [getScript + ' (Or use the **Deploy to Azure** button of the guide.)'],
+        code: setup.join('\n'),
+        text2: ['The script prints what the Entra admin does next.'],
+        more: link('azure-web-app.md', 'path-b---two-teams-entra-admin-and-azure-admin', 'Path B - two teams') });
+      steps.push({ where: W.entra, phase: 'infra', title: 'Web app: sign-in, part 2 (Entra admin)',
+        text: ['App registration > **Authentication** > **Add a platform** > **Web** > the redirect URI `https://{webApp}.azurewebsites.net/.auth/login/aad/callback`, tick **ID tokens (used for implicit and hybrid flows)** > **Configure**. Then **Certificates & secrets** > **Federated credentials** > **Add credential** > scenario **Managed identity** > `id-{webApp}-auth` > **Add**.',
+          'Without **ID tokens** every sign-in fails with `AADSTS700054`.'],
+        check: 'Open `https://{webApp}.azurewebsites.net` in a private browser window: you are sent to the Microsoft sign-in page.',
+        more: link('azure-web-app.md', 'path-b---two-teams-entra-admin-and-azure-admin', 'Path B - two teams') });
+    } else {
+      steps.push({ where: W.ps, phase: 'infra', title: 'Web app: create it',
+        text: [getScript + ' You need ‘**Cloud Application Administrator**’ (or ‘**Application Administrator**’) and ‘**Owner**’ of the resource group. You can run it again at any time.'],
+        code: setup.join('\n'),
+        check: 'The script ends with `Web app: https://{webApp}.azurewebsites.net`. In a private browser window, that URL sends you to the Microsoft sign-in page.',
+        more: link('azure-web-app.md', 'step-2---create-the-web-app-path-a', 'Publish to a web app, step 2') });
+    }
+    steps.push({ where: pipelineWhere(), phase: 'vars', title: 'Web app: tell the pipeline where to publish',
+      text: ['Set the values of these entries ' + variablesWhere + ':'],
+      code: variableEntries([['WebAppPublish', 'true'], ['WebAppSubscriptionId', yamlValue('webSubscriptionId', '<YourWebAppSubscriptionId>')], ['WebAppResourceGroup', yamlValue('webResourceGroup', '<YourWebAppResourceGroup>')], ['WebAppName', yamlValue('webAppName', '<YourWebAppName>')]]),
+      more: link('azure-web-app.md', 'step-3---connect-your-pipeline', 'Publish to a web app, step 3') });
+    steps.push({ where: W.browser, phase: 'check', title: 'Web app: check who can see the report',
+      text: ['After the run, the step **Publish HTML to WebApp** shows `Published \'.../AzADServicePrincipalInsights_{report}.html\'`. Then a member of the viewer group signs in and sees the report. Somebody else is turned away (' + (access === 'Assignment' ? 'Microsoft says the user is not assigned to the application' : 'the web app shows "access denied"') + ').' + (access === 'Assignment' ? ' Put users **directly** into the viewer group - a group inside the group doesn’t count.' : ''),
+        'Publishing fails with `403` / `AuthorizationFailed` right after the setup? The setup gave your pipeline identity ‘**Website Contributor**’ on the web app; a new role assignment can take up to about 30 minutes - run it again later.'],
+      more: link('azure-web-app.md', 'step-4---check-who-can-see-the-report', 'Publish to a web app, step 4') });
+    return { title: 'Publish the report to a website', steps: steps };
+  }
+
+  function logAnalyticsPlan() {
+    var assign = answers.laAssign === 'yes';
+    var newWorkspace = answers.laWorkspace === 'new';
+    var deployUrl = 'https://portal.azure.com/#create/Microsoft.Template/uri/' + encodeURIComponent('https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/setup/log-analytics-dcr.json');
+    var steps = [];
+    steps.push({ where: W.azure, phase: 'infra', title: newWorkspace ? 'Log Analytics: deploy the workspace, the table and the Data Collection Rule' : 'Log Analytics: deploy the table and the Data Collection Rule',
+      text: ['Into the **resource group of the workspace**: [Deploy to Azure](' + deployUrl + ') (Azure public cloud) with `workspaceName`, `location` = ' + (newWorkspace ? 'the region for the new workspace' : 'the region of the workspace (the workspace > **Overview** > **Location**) - the Data Collection Rule must be in the same region') + (newWorkspace ? ', **createWorkspace** `true`' : '') + (assign ? ' and `principalId` = the object ID of the **enterprise application** of your pipeline identity (not of the app registration) - it gets ‘**Monitoring Metrics Publisher**’ and ‘**Monitoring Reader**’ on the Data Collection Rule' : '') + '. Or with Azure PowerShell (modules `Az.Accounts` and `Az.Resources`; it loads the template from GitHub):'],
+      code: 'Connect-AzAccount -TenantId ' + ps('tenantId', 'tenant ID') + ' -Subscription ' + ps('laSubscriptionId', 'subscription ID of the workspace') + '\n' +
+        'New-AzResourceGroupDeployment -ResourceGroupName ' + ps('laResourceGroup', 'resource group of the workspace') + " -TemplateUri 'https://raw.githubusercontent.com/JulianHayward/AzADServicePrincipalInsights/main/setup/log-analytics-dcr.json' -workspaceName " + ps('laWorkspaceName', 'workspace name') + ' -location <region of the workspace>' + (newWorkspace ? ' -createWorkspace $true' : '') + (assign ? ' -principalId ' + ps('pipelineObjectId', 'object ID of the enterprise application') : ''),
+      text2: assign ? ['A new role assignment can take up to about 30 minutes before the ingestion accepts it.'] : null,
+      note: newWorkspace ? null : 'Keep **createWorkspace** `false` for your existing workspace - `true` would overwrite its settings.',
+      check: (newWorkspace ? '**Log Analytics workspaces** lists the new workspace, its ' : 'The workspace > ') + '**Tables** lists `AzADSPI_CL`, and **Monitor** > **Data Collection Rules** lists `dcr-azadspi`.',
+      more: link('log-analytics.md', 'step-1---deploy-the-table-and-the-data-collection-rule', 'Send to Log Analytics, step 1') });
+    if (!assign) {
+      steps.push({ where: W.azure, phase: 'infra', title: 'Log Analytics: allow your pipeline identity to send',
+        text: ['Somebody with ‘**Owner**’, ‘**User Access Administrator**’ or ‘**Role Based Access Control Administrator**’: **Monitor** > **Data Collection Rules** > `dcr-azadspi` > **Access control (IAM)** > **Add role assignment** > ‘**Monitoring Metrics Publisher**’ > your pipeline identity. Then the same for ‘**Monitoring Reader**’ (the sending step reads the rule first).'],
+        check: 'The role assignments of the Data Collection Rule list ‘**Monitoring Metrics Publisher**’ and ‘**Monitoring Reader**’ for your pipeline identity. A new role assignment can take up to about 30 minutes before the ingestion accepts it.',
+        more: link('log-analytics.md', 'step-2---allow-your-pipeline-identity-to-send', 'Send to Log Analytics, step 2') });
+    }
+    steps.push({ where: pipelineWhere(), phase: 'vars', title: 'Log Analytics: turn it on',
+      text: ['In the variables file, section ‘Log Analytics ingestion’ (' + (platform() === 'github' ? '`.github/AzADServicePrincipalInsights.variables.yml`' : '`.azuredevops/pipelines/AzADServicePrincipalInsights.variables.yml`') + '):'],
+      code: variableEntries([['IngestToLogAnalytics', 'true'], ['DataCollectionRuleSubscriptionId', yamlValue('laSubscriptionId', '<YourDataCollectionRuleSubscriptionId>')], ['DataCollectionRuleResourceGroup', yamlValue('laResourceGroup', '<YourDataCollectionRuleResourceGroup>')], ['DataCollectionRuleName', 'dcr-azadspi'], ['LogAnalyticsCustomLogTableName', 'AzADSPI_CL']]),
+      text2: ['Don’t set `NoJsonExport` - the JSON output is what gets sent.'],
+      more: link('log-analytics.md', 'step-3---turn-it-on', 'Send to Log Analytics, step 3') });
+    steps.push({ where: W.azure, phase: 'check', title: 'Log Analytics: check the data',
+      text: ['After the run, the step **Upload data to Log Analytics via Logs ingestion API** shows `Ingested <n> of <n> records`. The first records of a new table can take several minutes to appear: the workspace > **Logs**:'],
+      code: 'AzADSPI_CL | summarize count() by RunId',
+      check: 'One row per run.',
+      more: link('log-analytics.md', 'step-4---query-the-data', 'Send to Log Analytics, step 4') });
+    return { title: 'Send the data to Log Analytics', steps: steps };
+  }
+
+  //the optional features come after the pipeline runs (both feature guides start from a successful run), grouped by place so
+  //that the work of one place stays together: their Azure and PowerShell work, their variables (GitHub / Azure DevOps), the
+  //next run, their checks
+  function buildPlan() {
+    var p = platform();
+    if (p === 'console') return consolePlan();
+    var sections = p === 'github' ? githubPlan() : adoPlan();
+    var features = [];
+    if (has('la')) features = features.concat(logAnalyticsPlan().steps);
+    if (has('webapp')) features = features.concat(webAppPlan().steps);
+    if (!features.length) return sections;
+    function ofPhase(phase) { return features.filter(function (f) { return f.phase === phase; }); }
+    var github = p === 'github';
+    var rerun = { where: pipelineWhere(), title: github ? 'Run the workflow with the features' : 'Run the pipeline with the features',
+      text: ['Commit the variables file, then run ' + (github ? 'the workflow (**Actions** > the workflow > **Run workflow**)' : 'the pipeline (**Pipelines** > the pipeline > **Run pipeline**)') + ' - or wait for its next scheduled run.'],
+      check: 'The run succeeds.' };
+    Array.prototype.push.apply(sections[0].steps, ofPhase('infra').concat(ofPhase('vars'), [rerun], ofPhase('check')));
+    return sections;
+  }
+  function planSummary() {
+    var p = platform(), parts = [];
+    if (p === 'console') {
+      parts.push(answers.where === 'codespace' ? 'In a GitHub Codespace' : 'From your computer');
+      parts.push({ member: 'as yourself', guest: 'as a guest', sp: 'as a service principal' }[answers.account]);
+    } else if (p === 'github') {
+      parts.push('GitHub Actions');
+      parts.push(answers.ghSignin === 'secret' ? 'client secret' : 'federated credential');
+    } else {
+      parts.push('Azure DevOps');
+      parts.push(answers.adoExisting === 'existing' ? 'existing setup' : { A: 'app registration created by you', B: 'app registration created by Azure DevOps', C: 'managed identity' }[adoOption()]);
+    }
+    if (has('webapp')) parts.push('web app (' + (answers.webLicense === 'p1' ? 'Assignment' : 'GroupClaim') + ')');
+    if (has('la')) parts.push('Log Analytics');
+    return parts.join(' · ');
+  }
+
+  // ---------- rendering ----------
+  function render() {
+    renderProgress();
+    var main = document.getElementById('main');
+    main.textContent = '';
+    if (current === 'plan') renderPlan(main); else renderQuestion(main, question(current));
+    var focus = main.querySelector('legend, h2');
+    if (focus) { focus.setAttribute('tabindex', '-1'); focus.focus({ preventScroll: false }); }
+  }
+  function answerLabel(q) {
+    var a = answers[q.id];
+    if (q.type === 'fields') { var n = 0; for (var k in (a || {})) { if (a[k]) n++; } return n ? n + ' value' + (n > 1 ? 's' : '') : 'no values'; }
+    if (q.type === 'multi') {
+      if (!a || !a.length) return 'none';
+      return a.map(function (v) { var o = q.options.filter(function (x) { return x.v === v; })[0]; return o ? o.label : v; }).join(', ');
+    }
+    var o = q.options.filter(function (x) { return x.v === a; })[0];
+    return o ? o.label : '';
+  }
+  function renderProgress() {
+    var list = document.getElementById('progress');
+    list.textContent = '';
+    history.forEach(function (id, i) {
+      var q = question(id);
+      list.appendChild(el('li', null, [el('button', { type: 'button', title: 'Change this answer', onclick: function () { goBack(i); } }, [
+        el('span', { className: 'q', text: shortTitle(q) + ': ' }), answerLabel(q)
+      ])]));
+    });
+  }
+  function shortTitle(q) {
+    return { platform: 'Run', regular: 'Report', repoHost: 'Code in', account: 'Account', where: 'Where', ghSignin: 'Sign-in', adoExisting: 'Setup', adoCanCreate: 'App registrations', adoAuto: 'Created by', getCode: 'Script', optionalPermissions: 'Optional data', features: 'Features', webLicense: 'License', webTeams: 'Web app setup', laWorkspace: 'Existing workspace', laAssign: 'Role assignment', values: 'Values' }[q.id] || q.id;
+  }
+  function goBack(index) {
+    if (current === 'values') saveFields();
+    current = history[index];
+    history = history.slice(0, index);
+    render();
+  }
+
+  // the typed values of the shown values page; kept for the fields the page does not show now (another answer may bring them back)
+  function saveFields() {
+    var vals = {}, k, saved = answers.values || {};
+    for (k in saved) vals[k] = saved[k];
+    question('values').fields().forEach(function (f) { var input = document.getElementById('f-' + f.id); if (input) vals[f.id] = input.value.trim(); });
+    answers.values = vals;
+  }
+
+  function renderQuestion(main, q) {
+    var form = el('form', { novalidate: 'novalidate' });
+    var fs = el('fieldset');
+    fs.appendChild(el('legend', { text: q.title }));
+    if (q.help) fs.appendChild(el('p', { className: 'help' }, [rich(q.help)]));
+    var error = el('p', { className: 'error', role: 'alert' });
+    if (q.type === 'fields') {
+      var box = el('div', { className: 'fields' });
+      var saved = answers.values || {};
+      q.fields().forEach(function (f) {
+        var input = el('input', { type: 'text', id: 'f-' + f.id, name: f.id, autocomplete: 'off', spellcheck: 'false' });
+        input.value = saved[f.id] || '';
+        var hint = el('span', { className: 'hint', 'aria-live': 'polite' });
+        function validate() {
+          var v = input.value.trim();
+          hint.textContent = !v ? '' : (f.guid && !GUID.test(v)) ? 'This doesn’t look like an ID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) - the plan keeps the placeholder.' : (f.pattern && !f.pattern.test(v)) ? f.patternHint + ' - the plan keeps the placeholder.' : '';
+        }
+        input.addEventListener('input', validate); validate();
+        box.appendChild(el('div', { className: 'field' }, [el('label', { for: 'f-' + f.id, text: f.label }), f.desc ? el('span', { className: 'desc', text: f.desc }) : null, input, hint]));
+      });
+      fs.appendChild(box);
+    } else {
+      var opts = el('div', { className: 'options' });
+      var prev = answers[q.id];
+      q.options.forEach(function (o, i) {
+        var input = el('input', { type: q.type === 'multi' ? 'checkbox' : 'radio', name: q.id, value: o.v, id: q.id + '-' + i });
+        if (q.type === 'multi') input.checked = prev ? prev.indexOf(o.v) >= 0 : (q.defaults || []).indexOf(o.v) >= 0;
+        else input.checked = prev === o.v;
+        var text = el('span', null, [el('span', { className: 'label', text: o.label }), o.badge ? el('span', { className: 'badge', text: o.badge }) : null, o.desc ? el('span', { className: 'desc', text: o.desc }) : null]);
+        opts.appendChild(el('label', { className: 'option', for: q.id + '-' + i }, [input, text]));
+      });
+      fs.appendChild(opts);
+    }
+    form.appendChild(fs);
+    form.appendChild(error);
+    var actions = el('div', { className: 'actions' });
+    actions.appendChild(el('button', { type: 'submit', className: 'primary', text: q.type === 'fields' ? 'Show my plan' : 'Next' }));
+    if (history.length) actions.appendChild(el('button', { type: 'button', className: 'secondary', text: 'Back', onclick: function () { goBack(history.length - 1); } }));
+    if (history.length) actions.appendChild(el('button', { type: 'button', className: 'secondary', text: 'Start over', onclick: startOver }));
+    form.appendChild(actions);
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (q.type === 'fields') {
+        saveFields();
+      } else if (q.type === 'multi') {
+        answers[q.id] = Array.prototype.map.call(form.querySelectorAll('input:checked'), function (i) { return i.value; });
+      } else {
+        var checked = form.querySelector('input:checked');
+        if (!checked) { error.textContent = 'Please choose an option.'; return; }
+        answers[q.id] = checked.value;
+      }
+      history.push(q.id);
+      // answers to questions that no longer apply are dropped (e.g. after switching from GitHub to Azure DevOps)
+      QUESTIONS.forEach(function (x) { if (x.id !== 'values' && history.indexOf(x.id) < 0 && !applies(x)) delete answers[x.id]; });
+      current = nextQuestion();
+      render();
+    });
+    main.appendChild(form);
+  }
+
+  function renderPlan(main) {
+    var plan = el('div', { className: 'plan' });
+    plan.appendChild(el('h2', { text: 'Your setup plan' }));
+    plan.appendChild(el('p', { className: 'summary', text: planSummary() }));
+    plan.appendChild(el('p', null, [rich('Do the steps in this order. Each step links to the full description in the [setup guides](' + GUIDE + 'README.md). The Microsoft Entra steps are described in the Azure portal (**Microsoft Entra ID**); the [Microsoft Entra admin center](https://entra.microsoft.com/) has the same pages.')]));
+    var sections = buildPlan();
+    //the places in the order of the steps, without repeats in a row: how often the user changes the screen
+    var route = [];
+    sections.forEach(function (section) { section.steps.forEach(function (s) { if (s.where && route[route.length - 1] !== s.where) route.push(s.where); }); });
+    if (route.length) {
+      var routeLine = el('p', { className: 'route' }, [el('strong', { text: 'Where you work, in this order: ' })]);
+      route.forEach(function (w, i) { if (i) routeLine.appendChild(document.createTextNode(' \u2192 ')); routeLine.appendChild(whereBadge(w)); });
+      plan.appendChild(routeLine);
+    }
+    var n = 0;
+    sections.forEach(function (section) {
+      plan.appendChild(el('h3', { text: section.title }));
+      section.steps.forEach(function (s) {
+        n++;
+        var body = el('div');
+        body.appendChild(el('h4', null, [s.title, s.where ? whereBadge(s.where) : null]));
+        (s.text || []).forEach(function (t) { body.appendChild(el('p', null, [rich(t)])); });
+        if (s.list) body.appendChild(copyList(s.list));
+        if (s.code) body.appendChild(codeBlock(s.code));
+        (s.text2 || []).forEach(function (t) { body.appendChild(el('p', null, [rich(t)])); });
+        if (s.note) body.appendChild(el('div', { className: 'note' }, [rich(s.note)]));
+        if (s.check) body.appendChild(el('div', { className: 'check' }, [el('strong', { text: 'Check: ' }), rich(s.check)]));
+        if (s.more) body.appendChild(el('p', { className: 'more' }, [rich('Details: ' + s.more)]));
+        plan.appendChild(el('div', { className: 'step' }, [el('div', { className: 'num', 'aria-hidden': 'true', text: String(n) }), body]));
+      });
+    });
+    var status = el('p', { className: 'status', role: 'status' });
+    var actions = el('div', { className: 'actions no-print' }, [
+      el('button', { type: 'button', className: 'primary', text: 'Copy plan as Markdown', onclick: function (e) { copyText(planMarkdown(plan), e.currentTarget); } }),
+      el('button', { type: 'button', className: 'secondary', text: 'Print', onclick: function () { window.print(); } }),
+      el('button', { type: 'button', className: 'secondary', text: 'Back', onclick: function () { goBack(history.length - 1); } }),
+      el('button', { type: 'button', className: 'secondary', text: 'Start over', onclick: startOver })
+    ]);
+    plan.appendChild(actions);
+    plan.appendChild(status);
+    main.appendChild(plan);
+  }
+  function codeBlock(code) {
+    var pre = el('pre', null, [el('code', { text: code })]);
+    return el('div', { className: 'codeblock' }, [el('button', { type: 'button', text: 'Copy', 'aria-label': 'Copy the command', onclick: function (e) { copyText(code, e.currentTarget); } }), pre]);
+  }
+  // one entry per line, each with its own Copy button, and one button for all (one per line)
+  function copyList(items) {
+    var ul = el('ul');
+    items.forEach(function (item) {
+      ul.appendChild(el('li', null, [el('code', { text: item }), el('button', { type: 'button', text: 'Copy', 'aria-label': 'Copy ' + item, onclick: function (e) { copyText(item, e.currentTarget); } })]));
+    });
+    return el('div', { className: 'copylist' }, [ul, el('button', { type: 'button', className: 'copyall', text: 'Copy all (one per line)', onclick: function (e) { copyText(items.join('\n'), e.currentTarget); } })]);
+  }
+  function planMarkdown(plan) {
+    var out = ['# AzADServicePrincipalInsights setup plan', '', plan.querySelector('.summary').textContent, ''];
+    var routeNode = plan.querySelector('.route');
+    if (routeNode) out.push(routeNode.textContent, '');
+    plan.querySelectorAll('h3, .step').forEach(function (node) {
+      if (node.tagName === 'H3') { out.push('## ' + node.textContent, ''); return; }
+      var num = node.querySelector('.num').textContent;
+      var body = node.children[1];
+      Array.prototype.forEach.call(body.children, function (c) {
+        if (c.tagName === 'H4') { var badge = c.querySelector('.where'); out.push('### ' + num + '. ' + mdText(c.firstChild.textContent) + (badge ? ' (' + badge.textContent + ')' : ''), ''); }
+        else if (c.classList.contains('codeblock')) out.push('```', c.querySelector('code').textContent, '```', '');
+        else if (c.classList.contains('copylist')) { c.querySelectorAll('li code').forEach(function (code) { out.push('- `' + code.textContent + '`'); }); out.push(''); }
+        else out.push(inlineMarkdown(c), '');
+      });
+    });
+    return out.join('\n');
+  }
+  // text outside code: a <placeholder> would be read as an HTML tag and disappear
+  function mdText(t) { return t.replace(/</g, '\\<'); }
+  function inlineMarkdown(node) {
+    var s = '';
+    node.childNodes.forEach(function (c) {
+      if (c.nodeType === 3) s += mdText(c.textContent);
+      else if (c.tagName === 'CODE') s += '`' + c.textContent + '`';
+      else if (c.tagName === 'STRONG') s += '**' + mdText(c.textContent) + '**';
+      else if (c.tagName === 'A') s += '[' + mdText(c.textContent) + '](' + c.getAttribute('href') + ')';
+      else s += inlineMarkdown(c);
+    });
+    return s;
+  }
+  function startOver() { answers = {}; history = []; current = nextQuestion(); render(); }
+
+  current = nextQuestion();
+  render();
+  // for the tests: the plan as data
+  window.__azadspiSetup = { answers: function () { return answers; }, plan: function () { return buildPlan(); }, markdown: function () { var p = document.querySelector('.plan'); return p ? planMarkdown(p) : null; } };
+})();
+</script>
+</body>
+</html>
