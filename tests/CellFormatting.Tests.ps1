@@ -6,7 +6,7 @@ BeforeAll {
     $script:Source = Get-Content -Raw -LiteralPath $script:MainScriptPath
     $ast = Get-ScriptAst -Path $script:MainScriptPath
     . ([scriptblock]::Create($ast.Find({ param($n) $n -is [System.Management.Automation.Language.TypeDefinitionAst] -and $n.Name -eq 'HtmlSafe' }, $true).Extent.Text))
-    foreach ($name in 'getSpiItemsHtml', 'getSpiGroupedItemsHtml', 'getSpiCriticalIconHtml', 'getSpiClassificationDotHtml', 'getSpiOwnerItemsHtml', 'getSpiEntraObjectLinkHtml', 'getSpiTagsHtml', 'getSpiCredentialItemsHtml', 'getSpiFicItemsHtml') {
+    foreach ($name in 'getSpiItemsHtml', 'getSpiGroupedItemsHtml', 'getSpiCriticalIconHtml', 'getSpiClassificationDotHtml', 'getSpiOwnerItemsHtml', 'getSpiEntraObjectLinkHtml', 'getSpiTagsHtml', 'getSpiCredentialItemsHtml', 'getSpiFicItemsHtml', 'getSpiPrincipalMarkerHtml', 'getSpiThroughGroupMarkerHtml') {
         . ([scriptblock]::Create($ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true).Extent.Text))
     }
     $script:getClassifications = @{ permissionColors = @{ critical = '#ff0000'; medium = '#dc9405' } }
@@ -31,6 +31,25 @@ Describe 'getSpiItemsHtml' {
         $groups = [ordered]@{ subscription = @(@{ Main = 'Owner' }); 'resource group' = @(@{ Main = 'Reader' }, @{ Main = 'Contributor' }) }
         $html = getSpiGroupedItemsHtml -Groups $groups
         $html.IndexOf('subscription (1)') | Should -BeLessThan $html.IndexOf('resource group (2)')
+    }
+    It 'SP snapshot: groups keyed by an API id - two APIs with the same name stay apart, the id on the label' {
+        $groups = [ordered]@{ '22222222-2222-2222-2222-222222222222' = @(@{ Main = 'User.Read.All' }); '77777777-7777-7777-7777-777777777777' = @(@{ Main = 'Write.All' }); 'name:Other' = @(@{ Main = 'x' }) }
+        $labels = @{ '22222222-2222-2222-2222-222222222222' = 'Microsoft Graph'; '77777777-7777-7777-7777-777777777777' = 'Microsoft Graph'; 'name:Other' = 'Other <api>' }
+        $html = getSpiGroupedItemsHtml -Groups $groups -Labels $labels
+        $html | Should -BeLike '<b class="spiItemsLabel" data-spi-api="22222222-2222-2222-2222-222222222222">Microsoft Graph (1)</b><ul class="spiList spiItems"><li>User.Read.All</li></ul><b class="spiItemsLabel" data-spi-api="77777777-7777-7777-7777-777777777777">Microsoft Graph (1)</b>*'
+        $html | Should -Match '<b class="spiItemsLabel">Other &lt;api&gt; \(1\)</b>' -Because 'a key that is not an id: no attribute'
+    }
+}
+
+Describe 'SP snapshot markers' {
+    It 'a principal marker: the id (lower case), name and type encoded; no marker without a GUID' {
+        getSpiPrincipalMarkerHtml -Id '3333AAAA-3333-3333-3333-333333333333' -Name 'U "x" <y>' -Type 'User' | Should -BeExactly '<span class="spiPrincipal" data-spi-principal="3333aaaa-3333-3333-3333-333333333333" data-spi-principal-name="U &quot;x&quot; &lt;y&gt;" data-spi-principal-type="User"></span>'
+        getSpiPrincipalMarkerHtml -Id 'not-an-id' -Name 'x' -Type 'User' | Should -BeExactly ''
+    }
+    It 'the group of an assignment through a group: from "<name> (<id>)"' {
+        getSpiThroughGroupMarkerHtml 'Grp (One) (44444444-4444-4444-4444-444444444444)' | Should -BeExactly '<span class="spiPrincipal" data-spi-principal="44444444-4444-4444-4444-444444444444" data-spi-principal-name="Grp (One)" data-spi-principal-type="Group"></span>'
+        getSpiThroughGroupMarkerHtml '' | Should -BeExactly ''
+        getSpiThroughGroupMarkerHtml 'no id' | Should -BeExactly ''
     }
 }
 

@@ -1837,7 +1837,7 @@ function addReportSection([string]$Region, [string]$Title, [object[]]$Rows, [obj
     if ($Warning) {
         [void]$builder.AppendLine("<div class=`"az-note az-note-warning`"><i class=`"fa fa-triangle-exclamation`" aria-hidden=`"true`"></i> $([HtmlSafe]::Encode($Warning))</div>")
     }
-    $gridColumns = @(foreach ($column in $Columns) { @{ header = $column.Header; property = $column.Property; htmlProperty = $column.HtmlProperty; portal = $column.Portal; appIdProperty = $column.AppIdProperty; filter = $(if ($column.Select) { 'select' } elseif ($column.Number) { 'number' }) } })
+    $gridColumns = @(foreach ($column in $Columns) { @{ header = $column.Header; property = $column.Property; htmlProperty = $column.HtmlProperty; portal = $column.Portal; appIdProperty = $column.AppIdProperty; snapshot = $column.Snapshot; data = $column.Data; filter = $(if ($column.Select) { 'select' } elseif ($column.Number) { 'number' }) } })
     [void]$builder.AppendLine((buildSpiGrid -HtmlTableId $htmlTableId -Rows $Rows -PopoutTitle $Title -ColumnDefinitions $gridColumns))
     [void]$builder.AppendLine('</div>')
     if (-not $NoCsvExport) {
@@ -1854,6 +1854,9 @@ function getSPColumns {
         @{ Header = 'SP displayName'; Property = 'SPDisplayName' }
         @{ Header = 'SP type'; Property = 'SPType'; Select = $true }
         @{ Header = 'SP App Owner Organization Id'; Property = 'SPAppOwnerOrganizationId'; Select = $true }
+        #SP snapshot: the app registration of the row (an app without a Service Principal has no SP ids)
+        @{ Header = 'App object Id'; Property = 'APPObjectIdOfRow'; Data = $true; Snapshot = 'app'; Csv = $false }
+        @{ Header = 'App application Id'; Property = 'APPAppIdOfRow'; Data = $true; Snapshot = 'appId'; Csv = $false }
     )
 }
 function getSPRowBase($entry) {
@@ -1863,6 +1866,8 @@ function getSPRowBase($entry) {
         SPDisplayName = $(if ($entry.SP) { @($entry.SP)[0].SPDisplayName } else { @($entry.APP)[0].APPDisplayName })
         SPType = $entry.ObjectType
         SPAppOwnerOrganizationId = @($entry.SP)[0].SPAppOwnerOrganizationId
+        APPObjectIdOfRow = @($entry.APP)[0].APPObjectId
+        APPAppIdOfRow = @($entry.APP)[0].APPAppClientId
     }
 }
 #user-assigned managed identities: isolation scope, assignment restrictions (preview) and the resources the identity is attached to.
@@ -1946,6 +1951,7 @@ function getUserAssignedIdentitySettingsRows($Settings, $Attachments, $FicByMI, 
             MILocation = $mi.location
             MIResourceId = $mi.id
             MIAADSPObjectId = $mi.principalId
+            MIClientId = $mi.clientId
             IsolationScope = $isolationScope
             AssignmentRestrictions = $restrictionsText
             AttachedResourcesCount = $attached.Count
@@ -2913,6 +2919,20 @@ function buildSpiGrid {
       typeProperty - with portal 'principal': the property with the principal type ('User ...' / 'Group ...' are linked)
       tooltip      - optional, the header tooltip
       hide         - optional, the column is available but not shown
+      data         - optional, a data column only (no grid column): a value the SP snapshot needs, e.g. the API ids of a row
+      snapshot     - optional, the role of the column in the SP snapshot (feature zoom-in): the row is about the object with that
+                     id - 'sp' (Service Principal object id), 'app' (application object id), 'appId' (application id), 'object'
+                     (object id of either); 'api': the row's object uses these APIs (Service Principal object ids, separated
+                     by spaces); 'principal': a user, group or Service Principal related to the row's object (owner,
+                     HiPo user), 'principalName' its name column; 'scope': the Azure scopes (lower case ARM paths,
+                     separated by line breaks) of the row's Azure role assignments; the entity grid (Service Principals)
+                     names its 'name', 'appName' and 'type' columns. A portal 'principal' / 'user' / 'group' column is
+                     'principal'. 'resource': the ARM id of an Azure resource the row's managed identity belongs to or is
+                     attached to; 'credName', 'credType', 'credDetail', 'credOn': a credential per row (graph).
+                     A name column (SP / App / MI / Display name, principalName) carries the snapshot icon of the id
+                     column of its object; that id column then has none (one icon per row)
+                     Without it: a portal 'servicePrincipal' column is 'sp', a portal 'application' column 'app' ('appId'
+                     without appIdProperty), their appIdProperty 'appId'
     #>
     param(
         [Parameter(Mandatory)][string]$HtmlTableId,
@@ -2939,9 +2959,40 @@ function buildSpiGrid {
     }
     $gridColumnCount = $gridColumns.Count
 
+    #SP snapshot: the name column of an object carries its snapshot icon (users look at the names, not at the id columns);
+    #name property -> id property; the id columns targeted get no icon of their own
+    $snapshotNameRoles = @{}
+    foreach ($columnDefinition in $ColumnDefinitions) {
+        if ($columnDefinition.portal -eq 'servicePrincipal') { if (-not $snapshotNameRoles.Contains('sp')) { $snapshotNameRoles['sp'] = $columnDefinition.property } }
+        elseif ($columnDefinition.portal -eq 'application' -and $columnDefinition.appIdProperty) { if (-not $snapshotNameRoles.Contains('app')) { $snapshotNameRoles['app'] = $columnDefinition.property } }
+        elseif ($columnDefinition.portal -in 'principal', 'user', 'group') { if (-not $snapshotNameRoles.Contains('principal')) { $snapshotNameRoles['principal'] = $columnDefinition.property } }
+        if ($columnDefinition.snapshot -in 'sp', 'object' -and -not $snapshotNameRoles.Contains('sp')) { $snapshotNameRoles['sp'] = $columnDefinition.property }
+        if ($columnDefinition.snapshot -eq 'app' -and -not $snapshotNameRoles.Contains('app')) { $snapshotNameRoles['app'] = $columnDefinition.property }
+    }
+    $snapshotNameTargets = @{}
+    foreach ($columnDefinition in $ColumnDefinitions) {
+        #a credential's 'Display name' is not the object's name
+        if ($columnDefinition.data -or $columnDefinition.htmlProperty -or $columnDefinition.portal -or [string]$columnDefinition.snapshot -like 'cred*') { continue }
+        $header = [string]$columnDefinition.header
+        $target = $null
+        if ($columnDefinition.snapshot -eq 'principalName') { $target = $snapshotNameRoles['principal'] }
+        elseif ($header -match '^(?i)(App|Application) ?display ?name$') { $target = $(if ($snapshotNameRoles['app']) { $snapshotNameRoles['app'] } else { $snapshotNameRoles['sp'] }) }
+        elseif ($header -match '^(?i)(SP|SP \(MI\)) ?display ?name$|^MI Name$|^Display name$') { $target = $(if ($snapshotNameRoles['sp']) { $snapshotNameRoles['sp'] } else { $snapshotNameRoles['app'] }) }
+        if ($target) { $snapshotNameTargets[$columnDefinition.property] = $target }
+    }
+    $snapshotIconlessIds = @{}
+    foreach ($target in $snapshotNameTargets.Values) { $snapshotIconlessIds[$target] = $true }
+
     #review F-51: '<' as \u003c - a '</script>' in a title or header must not end the inline script
     $jsString = { param([string]$text) $text.Replace('\', '\\').Replace("'", "\'").Replace("`r", '').Replace("`n", '\n').Replace('<', '\u003c') }
     $columnDefsJs = @(foreach ($columnDefinition in $ColumnDefinitions) {
+            if ($columnDefinition.data) {
+                #SP snapshot: the API ids and the Azure scopes of a row as hidden columns - 'Show in report' of an API's clients or of
+                #a scope filters on them
+                if ([string]$columnDefinition.snapshot -notin 'api', 'scope') { continue }
+                "        { headerName: '$(& $jsString $columnDefinition.header)', colId: '$(& $jsString $columnDefinition.property)', valueGetter: spiColumnValueGetter(spiRowData, $($gridColumns.IndexOf($columnDefinition.property))), hide: true }"
+                continue
+            }
             $valueIndex = $gridColumns.IndexOf($columnDefinition.property)
             $parts = [System.Collections.Generic.List[string]]::new()
             $parts.Add("headerName: '$(& $jsString $columnDefinition.header)'")
@@ -2962,7 +3013,10 @@ function buildSpiGrid {
                 if ($auxProperty -and $auxIndex -lt 0) {
                     throw "buildSpiGrid $($HtmlTableId): '$($auxProperty)' is not a column"
                 }
-                $parts.Add("cellRenderer: spiColumnPortalLinkRenderer(spiRowData, $valueIndex, $auxIndex, '$(& $jsString $columnDefinition.portal)', spiHighlighter)")
+                $parts.Add("cellRenderer: spiColumnPortalLinkRenderer(spiRowData, $valueIndex, $auxIndex, '$(& $jsString $columnDefinition.portal)', spiHighlighter$(if ($snapshotIconlessIds[$columnDefinition.property]) { ', true' }))")
+            }
+            if ($snapshotNameTargets.Contains($columnDefinition.property) -and $columnDefinition.filter -ne 'number') {
+                $parts.Add("cellRenderer: spiColumnSnapNameRenderer(spiRowData, $valueIndex, $($gridColumns.IndexOf($snapshotNameTargets[$columnDefinition.property])), spiHighlighter)")
             }
             if ($columnDefinition.htmlProperty) {
                 $parts.Add("cellRenderer: spiColumnHtmlRenderer(spiRowData, $($gridColumns.IndexOf($columnDefinition.htmlProperty)), spiHighlighter)")
@@ -2994,6 +3048,48 @@ function buildSpiGrid {
             }
             "        { $($parts -join ', ') }"
         }) -join ",`n"
+
+    #SP snapshot (feature zoom-in): the columns of the grid (header, value / html / portal column) and the columns with object
+    #ids, for the browser index (spiSnapIndex). c: [header, value index, html index or -1, portal kind, aux index or -1, role];
+    #k: [value index, role] of the id columns
+    $snapshotRoles = @{}
+    foreach ($columnDefinition in $ColumnDefinitions) {
+        if ($columnDefinition.portal -eq 'servicePrincipal') {
+            if (-not $snapshotRoles.Contains($columnDefinition.property)) { $snapshotRoles[$columnDefinition.property] = 'sp' }
+            if ($columnDefinition.appIdProperty -and -not $snapshotRoles.Contains($columnDefinition.appIdProperty)) { $snapshotRoles[$columnDefinition.appIdProperty] = 'appId' }
+        }
+        elseif ($columnDefinition.portal -eq 'application') {
+            if (-not $snapshotRoles.Contains($columnDefinition.property)) { $snapshotRoles[$columnDefinition.property] = $(if ($columnDefinition.appIdProperty) { 'app' } else { 'appId' }) }
+            if ($columnDefinition.appIdProperty -and -not $snapshotRoles.Contains($columnDefinition.appIdProperty)) { $snapshotRoles[$columnDefinition.appIdProperty] = 'appId' }
+        }
+        elseif ($columnDefinition.portal -in 'principal', 'user', 'group') {
+            if (-not $snapshotRoles.Contains($columnDefinition.property)) { $snapshotRoles[$columnDefinition.property] = 'principal' }
+        }
+    }
+    foreach ($columnDefinition in $ColumnDefinitions) {
+        if ($columnDefinition.snapshot) { $snapshotRoles[$columnDefinition.property] = [string]$columnDefinition.snapshot }
+        #columns about all items of the row (classification, count, tags): left out where the snapshot shows only some items
+        elseif (-not $snapshotRoles.Contains($columnDefinition.property) -and ($columnDefinition.header -in 'Classification', '#' -or $columnDefinition.header -like '* Tags')) { $snapshotRoles[$columnDefinition.property] = 'summary' }
+    }
+    $snapshotColumns = [System.Collections.Generic.List[object]]::new()
+    $snapshotKeys = [System.Collections.Generic.List[object]]::new()
+    foreach ($columnDefinition in $ColumnDefinitions) {
+        $valueIndex = $gridColumns.IndexOf($columnDefinition.property)
+        $role = [string]$snapshotRoles[$columnDefinition.property]
+        if ($role -in 'sp', 'app', 'appId', 'object', 'api', 'principal', 'scope', 'resource') { $snapshotKeys.Add(@($valueIndex, $role)) }
+        if ($columnDefinition.data) { continue }
+        $auxProperty = $(if ($columnDefinition.appIdProperty) { $columnDefinition.appIdProperty } else { $columnDefinition.typeProperty })
+        $snapshotColumns.Add(@(
+                [string]$columnDefinition.header
+                $valueIndex
+                $(if ($columnDefinition.htmlProperty) { $gridColumns.IndexOf($columnDefinition.htmlProperty) } else { -1 })
+                [string]$columnDefinition.portal
+                $(if ($columnDefinition.portal -and $auxProperty) { $gridColumns.IndexOf($auxProperty) } else { -1 })
+                $role
+            ))
+    }
+    #EscapeHtml: no '<' in the inline script (a header with '</script>')
+    $snapshotJson = ConvertTo-Json -InputObject ([ordered]@{ c = $snapshotColumns.ToArray(); k = $snapshotKeys.ToArray() }) -Compress -Depth 4 -EscapeHandling EscapeHtml
 
     #per column dictionary of distinct values; a row holds only the indexes into those dictionaries.
     #Review P-5: no .NET method call per cell (hashtable indexer, one -join per row) - a method call costs microseconds in PowerShell
@@ -3101,7 +3197,7 @@ $columnDefsJs
 <div class="spiToolbarHost" id="spiToolbar4$($HtmlTableId)"></div>
 <div id="$HtmlTableId" class="spiGrid" style="width:100%;"></div>
 <script type="application/octet-stream" id="spiData4$($HtmlTableId)">$dataBase64</script>
-<script>spiRegisterReportGrid('$HtmlTableId', '$key', '$title');</script>
+<script>spiRegisterReportGrid('$HtmlTableId', '$key', '$title', $snapshotJson);</script>
 "@
 }
 
@@ -3133,7 +3229,9 @@ function getSpiGridListHtml([AllowNull()][AllowEmptyCollection()][object[]]$Item
 function getSpiItemsHtml {
     param(
         [AllowNull()][AllowEmptyCollection()][object[]]$Items,
-        [string]$Label
+        [string]$Label,
+        #SP snapshot: the object id of the API the group is about (data-spi-api on the label: matched by id, never by name)
+        [string]$LabelApiId
     )
     #review P-6: called per row and cell - foreach statements instead of pipelines (an empty ForEach-Object costs ~24 us)
     if ($null -eq $Items -or $Items.Count -eq 0) { return '' }
@@ -3156,7 +3254,8 @@ function getSpiItemsHtml {
     if ($entries.Count -eq 1 -and -not $Label) {
         return "<span class=`"spiItem$(if ($entries[0].state) { " spiItem-$($entries[0].state)" })`">$($entries[0].html)</span>"
     }
-    $head = $(if ($Label) { "<b class=`"spiItemsLabel`">$([HtmlSafe]::Encode($Label)) ($($entries.Count))</b>" } else { '' })
+    $labelAttribute = $(if ($LabelApiId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { " data-spi-api=`"$($LabelApiId.ToLowerInvariant())`"" } else { '' })
+    $head = $(if ($Label) { "<b class=`"spiItemsLabel`"$labelAttribute>$([HtmlSafe]::Encode($Label)) ($($entries.Count))</b>" } else { '' })
     $listItems = foreach ($entry in $entries) {
         $classAttribute = $(if ($entry.state) { ' class="spiItem-' + $entry.state + '"' } else { '' })
         '<li' + $classAttribute + '>' + $entry.html + '</li>'
@@ -3172,6 +3271,32 @@ function getSpiResourceTypeLinkHtml([string]$ResourceType) {
         return "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azresourcetypes/$($page).html`" target=`"_blank`">$([HtmlSafe]::Encode($ResourceType))</a>"
     }
     return [HtmlSafe]::Encode($ResourceType)
+}
+#SP snapshot (feature zoom-in): the scope of an Azure role assignment from its id - the lower case ARM path before
+#'/providers/Microsoft.Authorization/roleAssignments/<id>' ('/' for the tenant root); '' when the id has no such part
+function getSpiAzureScopeFromAssignmentId([string]$RoleAssignmentId) {
+    if ([string]::IsNullOrEmpty($RoleAssignmentId)) { return '' }
+    $scope = $RoleAssignmentId -replace '(?i)/providers/Microsoft\.Authorization/roleAssignments/[^/]+$', ''
+    if ($scope -eq $RoleAssignmentId) { return '' }
+    if (-not $scope) { $scope = '/' }
+    return $scope.ToLowerInvariant()
+}
+#the scope of an Azure role assignment in a cell, for the snapshot (an empty element: the browser adds the snapshot icon of the scope)
+function getSpiAzureScopeMarkerHtml([string]$RoleAssignmentId, [string]$ScopeName) {
+    $scope = getSpiAzureScopeFromAssignmentId $RoleAssignmentId
+    if (-not $scope) { return '' }
+    return "<span class=`"spiScope`" data-spi-scope=`"$([HtmlSafe]::Encode($scope))`" data-spi-scope-name=`"$([HtmlSafe]::Encode($ScopeName))`"></span>"
+}
+#SP snapshot: a user, group or Service Principal named in a cell (role holders, the group of an assignment through a group) -
+#an empty element with the id; the snapshot matches ids, never display names (a name can be anything)
+function getSpiPrincipalMarkerHtml([string]$Id, [string]$Name, [string]$Type) {
+    if ($Id -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { return '' }
+    return "<span class=`"spiPrincipal`" data-spi-principal=`"$($Id.ToLowerInvariant())`" data-spi-principal-name=`"$([HtmlSafe]::Encode($Name))`" data-spi-principal-type=`"$([HtmlSafe]::Encode($Type))`"></span>"
+}
+#the group of an assignment through a group (roleAssignmentAppliesThrough: '<group name> (<group id>)')
+function getSpiThroughGroupMarkerHtml([string]$AppliesThrough) {
+    if ($AppliesThrough -match '^(?<name>[\s\S]*) \((?<id>[0-9a-fA-F-]{36})\)$') { return (getSpiPrincipalMarkerHtml -Id $Matches['id'] -Name $Matches['name'] -Type 'Group') }
+    return ''
 }
 function getSpiPortalResourceLinkHtml([string]$ResourceId) {
     if ([string]::IsNullOrEmpty($ResourceId)) { return '' }   #review F-34
@@ -3190,7 +3315,10 @@ function getSpiResourceTypeListHtml([string]$Text, [string]$Delimiter) {
             }) -join [HtmlSafe]::Encode($Delimiter))
 }
 #labelled groups: ordered dictionary label -> items
-function getSpiGroupedItemsHtml($Groups) {
+#$Labels: groups keyed by the object id of an API - the label text per key, the key on the label (data-spi-api); two APIs with
+#the same display name stay two groups
+function getSpiGroupedItemsHtml($Groups, $Labels) {
+    if ($Labels) { return (@(foreach ($key in $Groups.Keys) { getSpiItemsHtml -Items $Groups[$key] -Label ([string]$Labels[$key]) -LabelApiId ([string]$key) }) -join '') }
     return (@(foreach ($key in $Groups.Keys) { getSpiItemsHtml -Items $Groups[$key] -Label $key }) -join '')
 }
 #markers: critical (Entra/Azure roles), permission classification (colour from permissionClassification.json)
@@ -3582,6 +3710,8 @@ function getSpiShellStartHtml {
         <button type="button" class="az-iconbtn" id="azNavToggle" aria-label="Toggle navigation" title="Toggle navigation"></button>
         <div class="az-brand"><span class="az-brand-name">$encodedProduct</span><span class="az-brand-short" aria-hidden="true">AzADSPI</span> <small id="azVersion">$([HtmlSafe]::Encode($ProductVersion))</small></div>
         <div class="az-search"><input type="search" id="azSearch" placeholder="Search sections (/)" aria-label="Search sections" autocomplete="off" spellcheck="false"></div>
+        <button type="button" class="az-iconbtn" id="spiSnapOpen" aria-label="Snapshot: zoom in on one Service Principal" title="Snapshot: zoom in on one Service Principal"><i class="fa fa-magnifying-glass-plus" aria-hidden="true"></i></button>
+        <div class="spiFocusChip" id="spiFocusChip" role="status" hidden><i class="fa fa-filter" aria-hidden="true"></i><button type="button" class="spiFocusName"></button><button type="button" class="spiFocusClear" aria-label="Clear the focus" title="Clear the focus: all objects"><i class="fa fa-xmark" aria-hidden="true"></i></button></div>
         $UpdateHtml
         <div class="az-meta" id="azMeta">$([HtmlSafe]::Encode($TenantId)) <span class="az-dim">&middot; $([HtmlSafe]::Encode($ReportDate))</span></div>
         <a class="az-iconbtn az-topbar-link" href="https://github.com/JulianHayward/AzADServicePrincipalInsights" target="_blank" rel="noopener" aria-label="$encodedProduct on GitHub" title="$encodedProduct on GitHub"><i class="fa fa-github" aria-hidden="true"></i></a>
@@ -3665,12 +3795,12 @@ function summary() {
         'Compared by ID: objects added or removed (not Microsoft first-party apps, Microsoft adds them), effective privilege, Entra roles, critical Azure roles, application and delegated permissions, credentials (not of managed identities, Azure rotates them), federated credentials, direct owners, group memberships, names, enabled/disabled, sign-in audience, redirect and identifier URIs. ' +
         "Objects with collection errors in a run keep their previous state (the next complete run reports their changes); a run with another scope starts a new baseline. Period: parameter ChangeHistoryDays ($ChangeHistoryDays)."
         addReportSection -Region 'ChangeHistory' -Title "Changes in the last $ChangeHistoryDays days" -Description $changeHistoryNote -Warning $changeHistoryReadIssue -Rows $changeHistoryRows -Columns @(
-            @{ Header = 'Time'; Property = 'Time' }
+            @{ Header = 'Time'; Property = 'Time'; Snapshot = 'time' }
             @{ Header = 'Category'; Property = 'Category'; Select = $true }
             @{ Header = 'Change'; Property = 'Change'; Select = $true }
-            @{ Header = 'Object type'; Property = 'ObjectType'; Select = $true }
-            @{ Header = 'Display name'; Property = 'DisplayName' }
-            @{ Header = 'Object Id'; Property = 'ObjectId' }
+            @{ Header = 'Object type'; Property = 'ObjectType'; Select = $true; Snapshot = 'objectType' }
+            @{ Header = 'Display name'; Property = 'DisplayName'; Snapshot = 'objectName' }
+            @{ Header = 'Object Id'; Property = 'ObjectId'; Snapshot = 'object' }
             @{ Header = 'Detail'; Property = 'Detail' }
             @{ Header = 'Note'; Property = 'Note' }
             @{ Header = 'Script version'; Property = 'ScriptVersion'; Select = $true }
@@ -4225,6 +4355,8 @@ var myChart = new Chart(ctx, {
 $($miAssignedToResourcesHtml)
 "@
             $spiGridRow.c20 = $(if ($spiGridRow.c20Html) { ConvertTo-SpiPlainText $spiGridRow.c20Html } else { '' })   #review F-34
+            #SP snapshot: the Azure resource of a system-assigned managed identity (graph, the snapshot of the resource)
+            $spiGridRow.c21 = $(if ($spType -eq 'SP MI System assigned' -and $sp.ManagedIdentity.alternativeName) { ([string]$sp.ManagedIdentity.alternativeName).ToLowerInvariant() } else { '' })
             $null = $spiGridRows.Add([PSCustomObject]$spiGridRow)
             if (-not $NoCsvExport) {
                 $null = $servicePrincipals4CSVExport.Add([PSCustomObject]@{
@@ -4261,15 +4393,15 @@ $($miAssignedToResourcesHtml)
         [void]$htmlTenantSummary.AppendLine((buildSpiGrid -HtmlTableId $htmlTableId -Rows $spiGridRows -PopoutTitle 'Service Principals' -ColumnDefinitions @(
                     @{ header = 'SP object Id'; property = 'c0'; portal = 'servicePrincipal'; appIdProperty = 'c1' }
                     @{ header = 'SP application Id'; property = 'c1' }
-                    @{ header = 'SP displayName'; property = 'c2' }
+                    @{ header = 'SP displayName'; property = 'c2'; snapshot = 'name' }
                     @{ header = 'SP notes'; property = 'c3' }
                     @{ header = 'SP Owners'; property = 'c4'; htmlProperty = 'c4Html' }
                     @{ header = 'SP App Owner Organization Id'; property = 'c5'; filter = 'select' }
-                    @{ header = 'Type'; property = 'c6'; filter = 'select' }
+                    @{ header = 'Type'; property = 'c6'; filter = 'select'; snapshot = 'type' }
                     @{ header = 'SP Tags'; property = 'c7'; htmlProperty = 'c7Html' }
                     @{ header = 'App object Id'; property = 'c8'; portal = 'application'; appIdProperty = 'c9' }
                     @{ header = 'App application (client) Id'; property = 'c9' }
-                    @{ header = 'App displayName'; property = 'c10' }
+                    @{ header = 'App displayName'; property = 'c10'; snapshot = 'appName' }
                     @{ header = 'App Owners'; property = 'c11'; htmlProperty = 'c11Html' }
                     @{ header = 'AppReg'; property = 'c12'; filter = 'select' }
                     @{ header = 'App SignIn Audience'; property = 'c13'; filter = 'select' }
@@ -4285,6 +4417,7 @@ MI Relict $abbrMIRelict
                     }
                     @{ header = 'MI associated Resource(s) count'; property = 'c19'; filter = 'number' }
                     @{ header = 'MI associated Resource(s)'; property = 'c20'; htmlProperty = 'c20Html' }
+                    @{ header = 'MI resource (system assigned)'; property = 'c21'; data = $true; snapshot = 'resource' }
                 )))
         $spiGridRows = $null
     }
@@ -4381,11 +4514,11 @@ $($ownerOwnedByHtml)
                     @{ header = 'SP displayName'; property = 'c2' }
                     @{ header = 'SP App Owner Organization Id'; property = 'c3'; filter = 'select' }
                     @{ header = 'Type'; property = 'c4'; filter = 'select' }
-                    @{ header = 'Owner DisplayName'; property = 'c5' }
+                    @{ header = 'Owner DisplayName'; property = 'c5'; snapshot = 'principalName' }
                     @{ header = 'Owner PrincipalType'; property = 'c6'; filter = 'select' }
                     @{ header = 'Owner Id'; property = 'c7'; portal = 'principal'; typeProperty = 'c6' }
-                    @{ header = 'Owner Applicability'; property = 'c8'; filter = 'select' }
-                    @{ header = 'Indirect via'; property = 'c10'; tooltip = 'how an indirect owner controls this Service Principal: owner (or app registration owner) of a Service Principal that controls the direct owner of this Service Principal' }
+                    @{ header = 'Owner Applicability'; property = 'c8'; filter = 'select'; snapshot = 'applicability' }
+                    @{ header = 'Indirect via'; property = 'c10'; snapshot = 'via'; tooltip = 'how an indirect owner controls this Service Principal: owner (or app registration owner) of a Service Principal that controls the direct owner of this Service Principal' }
                     @{ header = 'Owner OwnedBy'; property = 'c9'; htmlProperty = 'c9Html'; tooltip = 'who controls this owner Service Principal: direct = its owners, indirect = principals that control those (through ownership of the Service Principal or of its app registration), with the path' }
                 )))
         $spiGridRows = $null
@@ -4481,10 +4614,10 @@ $($ownerOwnedByHtml)
                     @{ header = 'App displayName'; property = 'c2' }
                     @{ header = 'SP App Owner Organization Id'; property = 'c3'; filter = 'select' }
                     @{ header = 'Type'; property = 'c4'; filter = 'select' }
-                    @{ header = 'Owner DisplayName'; property = 'c5' }
+                    @{ header = 'Owner DisplayName'; property = 'c5'; snapshot = 'principalName' }
                     @{ header = 'Owner PrincipalType'; property = 'c6'; filter = 'select' }
                     @{ header = 'Owner Id'; property = 'c7'; portal = 'principal'; typeProperty = 'c6' }
-                    @{ header = 'Owner Applicability'; property = 'c8'; filter = 'select' }
+                    @{ header = 'Owner Applicability'; property = 'c8'; filter = 'select'; snapshot = 'applicability' }
                     @{ header = 'Owner OwnedBy'; property = 'c9'; htmlProperty = 'c9Html'; tooltip = 'who controls this owner Service Principal: direct = its owners, indirect = principals that control those (through ownership of the Service Principal or of its app registration), with the path' }
                 )))
         $spiGridRows = $null
@@ -4696,7 +4829,7 @@ $($ownerOwnedByHtml)
                         @{ header = 'Res Subscription Name'; property = 'c12' }
                         @{ header = 'Res Subscription Id'; property = 'c13' }
                         @{ header = 'Res ResourceGroup'; property = 'c14' }
-                        @{ header = 'Res Id'; property = 'c15'; htmlProperty = 'c15Html' }
+                        @{ header = 'Res Id'; property = 'c15'; htmlProperty = 'c15Html'; snapshot = 'resource' }
                         @{ header = 'Res count assigned MIs'; property = 'c16'; filter = 'number' }
                     )))
             $spiGridRows = $null
@@ -4723,7 +4856,7 @@ $($ownerOwnedByHtml)
         }
         addReportSection -Region 'ManagedIdentityUserAssignedAssignmentRestrictions' -Title 'User-assigned managed identities: assignment restrictions and isolation scope' -Description $script:spiUamiSettingsNote -Rows $uamiSettingsRows -Columns @(
             @{ Header = 'MI Name'; Property = 'MIName' }, @{ Header = 'MI Subscription Name'; Property = 'MISubscriptionName' }, @{ Header = 'MI Subscription Id'; Property = 'MISubscriptionId' }, @{ Header = 'MI ResourceGroup'; Property = 'MIResourceGroup' },
-            @{ Header = 'MI Location'; Property = 'MILocation'; Select = $true }, @{ Header = 'MI ResourceId'; Property = 'MIResourceId'; HtmlProperty = 'MIResourceIdHtml' }, @{ Header = 'MI SP object Id'; Property = 'MIAADSPObjectId' },
+            @{ Header = 'MI Location'; Property = 'MILocation'; Select = $true }, @{ Header = 'MI ResourceId'; Property = 'MIResourceId'; HtmlProperty = 'MIResourceIdHtml'; Snapshot = 'resource' }, @{ Header = 'MI SP object Id'; Property = 'MIAADSPObjectId'; Portal = 'servicePrincipal'; AppIdProperty = 'MIClientId' }, @{ Header = 'MI SP application Id'; Property = 'MIClientId' },
             @{ Header = 'Isolation scope'; Property = 'IsolationScope'; Select = $true }, @{ Header = 'Assignment restrictions'; Property = 'AssignmentRestrictions'; HtmlProperty = 'AssignmentRestrictionsHtml'; Select = $true },
             @{ Header = 'Usage'; Property = 'Usage'; Select = $true }, @{ Header = 'Attached resources'; Property = 'AttachedResourcesCount'; Number = $true }, @{ Header = 'Attached resource types'; Property = 'AttachedResourceTypes'; HtmlProperty = 'AttachedResourceTypesHtml' }, @{ Header = 'Attached regions'; Property = 'AttachedRegions' },
             @{ Header = 'Federated identity credentials'; Property = 'FederatedIdentityCredentialsCount'; Number = $true }, @{ Header = 'Suggestion'; Property = 'Suggestion' })
@@ -4826,7 +4959,7 @@ $($ownerOwnedByHtml)
                         #review F-45: the plain text (sort, filter, grid CSV export) from the values, not from the markup above
                         $null = $arrayPlain.Add("$($ra.roleType) '$($ra.roleDefinitionName)' $($ra.roleDefinitionId)$(if ($raScopeText) { " (scope: $($raScopeText))" })$(if ($ra.roleAssignmentApplicability -eq 'indirect') { " [$($ra.roleAssignmentApplicability) - $($ra.roleAssignmentAppliesThrough)]" })")
 
-                        $null = $raItems.Add(@{ MainHtml = "$(getSpiCriticalIconHtml ($ra.roleIsCritical -eq $true))$raRoleDefinitionName"; Dim = @($ra.roleType, $(if ($raScopeText) { "scope: $($raScopeText)" }), $(if ($ra.roleAssignmentApplicability -eq 'indirect') { "through group $($ra.roleAssignmentAppliesThrough)" }), $ra.roleDefinitionId) })
+                        $null = $raItems.Add(@{ MainHtml = "$(getSpiCriticalIconHtml ($ra.roleIsCritical -eq $true))$raRoleDefinitionName$(if ($ra.roleAssignmentApplicability -eq 'indirect') { getSpiThroughGroupMarkerHtml $ra.roleAssignmentAppliesThrough })"; Dim = @($ra.roleType, $(if ($raScopeText) { "scope: $($raScopeText)" }), $(if ($ra.roleAssignmentApplicability -eq 'indirect') { "through group $($ra.roleAssignmentAppliesThrough)" }), $ra.roleDefinitionId) })
                         $null = $arrayServicePrincipalsAADRoleAssignments4CSV.Add([PSCustomObject]@{
                                 SPObjectType = $sp.ObjectType
                                 SPObjectId = $sp.ObjectId
@@ -4956,7 +5089,8 @@ $($ownerOwnedByHtml)
                         }
 
                         $null = $array.Add("$raRoleDefinitionName ($([HtmlSafe]::Encode($rao.roleId))) on $([HtmlSafe]::Encode($rao.principalDisplayName)) - $([HtmlSafe]::Encode($rao.principalType)) ($([HtmlSafe]::Encode($rao.principalId)))")
-                        $null = $raoItems.Add(@{ MainHtml = $raRoleDefinitionName; Dim = @("assigned to $($rao.principalDisplayName)", $rao.principalType, $rao.principalId) })
+                        #SP snapshot: the holder by its id (the snapshot of the holder, the graph node)
+                        $null = $raoItems.Add(@{ MainHtml = "$raRoleDefinitionName$(getSpiPrincipalMarkerHtml -Id $rao.principalId -Name $rao.principalDisplayName -Type $rao.principalType)"; Dim = @("assigned to $($rao.principalDisplayName)", $rao.principalType, $rao.principalId) })
                         if (-not $NoCsvExport) {
                             $null = $SPAAADRoleAssignedOn4CSVExport.Add([PSCustomObject]@{
                                     SPObjectId = $sp.SP.SPObjectId
@@ -5063,7 +5197,8 @@ $($ownerOwnedByHtml)
                         }
 
                         $null = $array.Add("$raRoleDefinitionName ($([HtmlSafe]::Encode($rao.roleId))) on $([HtmlSafe]::Encode($rao.principalDisplayName)) - $([HtmlSafe]::Encode($rao.principalType)) ($([HtmlSafe]::Encode($rao.principalId)))")
-                        $null = $raoItems.Add(@{ MainHtml = $raRoleDefinitionName; Dim = @("assigned to $($rao.principalDisplayName)", $rao.principalType, $rao.principalId) })
+                        #SP snapshot: the holder by its id (the snapshot of the holder, the graph node)
+                        $null = $raoItems.Add(@{ MainHtml = "$raRoleDefinitionName$(getSpiPrincipalMarkerHtml -Id $rao.principalId -Name $rao.principalDisplayName -Type $rao.principalType)"; Dim = @("assigned to $($rao.principalDisplayName)", $rao.principalType, $rao.principalId) })
                         if (-not $NoCsvExport) {
                             $null = $applicationsAADRoleAssignedOn4CSVExport.Add([PSCustomObject]@{
                                     AppObjectId = $sp.APP.APPObjectId
@@ -5168,6 +5303,7 @@ $($ownerOwnedByHtml)
             }
             $SPAppRoleAssignments = $null
             $appRoleItemsByResource = [ordered]@{}
+            $appRoleLabelsByResource = @{}
             if (($sp.SPAppRoleAssignments)) {
                 if (($sp.SPAppRoleAssignments.count -gt 0)) {
                     $array = [System.Collections.ArrayList]@()
@@ -5215,8 +5351,10 @@ $($ownerOwnedByHtml)
                         }
                         $null = $arrayPlain.Add("$($approleAss.AppRoleAssignmentResourceDisplayName) ($($appRolePermissionText))")
                         $appRolePermissionHtml = $(if (-not $approleAss.AppRolePermission) { [HtmlSafe]::Encode($appRolePermissionText) } elseif ($appIdRefAppRoleAssignment) { "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$([HtmlSafe]::Encode($appIdRefAppRoleAssignment))&targetPermissionId=$([HtmlSafe]::Encode($approleAss.AppRoleId))`" target=`"_blank`">$([HtmlSafe]::Encode($approleAss.AppRolePermission))</a>" } else { [HtmlSafe]::Encode($approleAss.AppRolePermission) })
-                        if (-not $appRoleItemsByResource.Contains([string]$approleAss.AppRoleAssignmentResourceDisplayName)) { $appRoleItemsByResource[[string]$approleAss.AppRoleAssignmentResourceDisplayName] = [System.Collections.ArrayList]@() }
-                        $null = $appRoleItemsByResource[[string]$approleAss.AppRoleAssignmentResourceDisplayName].Add(@{ MainHtml = "$(getSpiClassificationDotHtml $approleAss.AppRolePermissionSensitivity)$appRolePermissionHtml"; Dim = @($(if ($approleAss.AppRolePermissionSensitivity -ne 'unclassified') { $approleAss.AppRolePermissionSensitivity })) })
+                        #grouped by the API's object id (two APIs with the same display name are two groups), labelled with the name
+                        $appRoleGroupKey = $(if ($approleAss.AppRoleAssignmentResourceId) { [string]$approleAss.AppRoleAssignmentResourceId } else { "name:$($approleAss.AppRoleAssignmentResourceDisplayName)" })
+                        if (-not $appRoleItemsByResource.Contains($appRoleGroupKey)) { $appRoleItemsByResource[$appRoleGroupKey] = [System.Collections.ArrayList]@(); $appRoleLabelsByResource[$appRoleGroupKey] = [string]$approleAss.AppRoleAssignmentResourceDisplayName }
+                        $null = $appRoleItemsByResource[$appRoleGroupKey].Add(@{ MainHtml = "$(getSpiClassificationDotHtml $approleAss.AppRolePermissionSensitivity)$appRolePermissionHtml"; Dim = @($(if ($approleAss.AppRolePermissionSensitivity -ne 'unclassified') { $approleAss.AppRolePermissionSensitivity })) })
                         $null = $arrayServicePrincipalsAppRoleAssignments4CSV.Add([PSCustomObject]@{
                                 SPObjectType = $sp.ObjectType
                                 SPObjectId = $sp.ObjectId
@@ -5253,9 +5391,13 @@ $($ownerOwnedByHtml)
             $spiGridRow.c5Html = getSpiTagsHtml -Entry $sp -Of App
             $spiGridRow.c6 = $sp.SP.SPappOwnerOrganizationId
             $spiGridRow.c7 = ($classificationCollection | Sort-Object -Unique) -join ', '
-            $spiGridRow.c8Html = getSpiGroupedItemsHtml -Groups $appRoleItemsByResource
+            $spiGridRow.c8Html = getSpiGroupedItemsHtml -Groups $appRoleItemsByResource -Labels $appRoleLabelsByResource
             #review F-45: the plain text from the values
             $spiGridRow.c8 = $(if ($SPAppRoleAssignments) { "$(($sp.SPAppRoleAssignments).Count) ($($arrayPlain -join "$CsvDelimiterOpposite "))" } else { '' })
+            #SP snapshot: the object ids of the APIs (resource Service Principals) - the clients of an API
+            $apiObjectIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($approleAss in $sp.SPAppRoleAssignments) { if ($approleAss.AppRoleAssignmentResourceId) { [void]$apiObjectIds.Add([string]$approleAss.AppRoleAssignmentResourceId) } }
+            $spiGridRow.c9 = [string]::Join(' ', [string[]]@($apiObjectIds))
             $null = $spiGridRows.Add([PSCustomObject]$spiGridRow)
         }
 
@@ -5274,6 +5416,7 @@ $($ownerOwnedByHtml)
                     @{ header = 'SP App Owner Organization Id'; property = 'c6'; filter = 'select' }
                     @{ header = 'Classification'; property = 'c7' }
                     @{ header = 'App role assignments (application permissions)'; property = 'c8'; htmlProperty = 'c8Html' }
+                    @{ header = 'API object Ids'; property = 'c9'; data = $true; snapshot = 'api' }
                 )))
         $spiGridRows = $null
 
@@ -5438,6 +5581,7 @@ $($ownerOwnedByHtml)
             }
             $SPOauth2PermissionGrants = $null
             $grantItemsByResource = [ordered]@{}
+            $grantLabelsByResource = @{}
             if (($sp.SPOauth2PermissionGrants)) {
                 if (($sp.SPOauth2PermissionGrants.count -gt 0)) {
                     $array = [System.Collections.ArrayList]@()
@@ -5467,8 +5611,9 @@ $($ownerOwnedByHtml)
                         $null = $array.Add("$($oauthGrant.SPDisplayName) ($($grantPermissionText) - $($consentLabel))")
 
                         $grantPermissionHtml = $(if ($appIdRefOauth2PermissionGrant) { "<a class=`"externallink`" href=`"https://www.azadvertizer.net/azEntraIdAPIpermissionsAdvertizer.html?targetAppId=$([HtmlSafe]::Encode($appIdRefOauth2PermissionGrant))&targetPermissionId=$([HtmlSafe]::Encode($oauthGrant.id))`" target=`"_blank`">$([HtmlSafe]::Encode($oauthGrant.permission))</a>" } else { [HtmlSafe]::Encode($grantPermissionText) })
-                        if (-not $grantItemsByResource.Contains([string]$oauthGrant.SPDisplayName)) { $grantItemsByResource[[string]$oauthGrant.SPDisplayName] = [System.Collections.ArrayList]@() }
-                        $null = $grantItemsByResource[[string]$oauthGrant.SPDisplayName].Add(@{ MainHtml = "$(getSpiClassificationDotHtml $oauthGrant.permissionSensitivity)$grantPermissionHtml"; Dim = @($consentLabel, $(if ($oauthGrant.permissionSensitivity -ne 'unclassified') { $oauthGrant.permissionSensitivity })) })
+                        $grantGroupKey = $(if ($oauthGrant.SPId) { [string]$oauthGrant.SPId } else { "name:$($oauthGrant.SPDisplayName)" })
+                        if (-not $grantItemsByResource.Contains($grantGroupKey)) { $grantItemsByResource[$grantGroupKey] = [System.Collections.ArrayList]@(); $grantLabelsByResource[$grantGroupKey] = [string]$oauthGrant.SPDisplayName }
+                        $null = $grantItemsByResource[$grantGroupKey].Add(@{ MainHtml = "$(getSpiClassificationDotHtml $oauthGrant.permissionSensitivity)$grantPermissionHtml"; Dim = @($consentLabel, $(if ($oauthGrant.permissionSensitivity -ne 'unclassified') { $oauthGrant.permissionSensitivity })) })
                     }
                     foreach ($oauthGrant in $sp.SPOauth2PermissionGrants) {
                         $null = $arrayServicePrincipalsOauth2PermissionGrants4CSV.Add([PSCustomObject]@{
@@ -5513,8 +5658,12 @@ $($ownerOwnedByHtml)
             $spiGridRow.c5Html = getSpiTagsHtml -Entry $sp -Of App
             $spiGridRow.c6 = $sp.SP.SPappOwnerOrganizationId
             $spiGridRow.c7 = ($classificationCollection | Sort-Object -Unique) -join ', '
-            $spiGridRow.c8Html = getSpiGroupedItemsHtml -Groups $grantItemsByResource
+            $spiGridRow.c8Html = getSpiGroupedItemsHtml -Groups $grantItemsByResource -Labels $grantLabelsByResource
             $spiGridRow.c8 = [string]$SPOauth2PermissionGrants   #plain text (R-1: built from the values, no html)
+            #SP snapshot: the object ids of the APIs (resource Service Principals) - the clients of an API
+            $apiObjectIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($oauthGrant in $sp.SPOauth2PermissionGrants) { if ($oauthGrant.SPId) { [void]$apiObjectIds.Add([string]$oauthGrant.SPId) } }
+            $spiGridRow.c9 = [string]::Join(' ', [string[]]@($apiObjectIds))
             $null = $spiGridRows.Add([PSCustomObject]$spiGridRow)
         }
 
@@ -5533,6 +5682,7 @@ $($ownerOwnedByHtml)
                     @{ header = 'SP App Owner Organization Id'; property = 'c6'; filter = 'select' }
                     @{ header = 'Classification'; property = 'c7' }
                     @{ header = 'OAuth2 permission grants (delegated permissions)'; property = 'c8'; htmlProperty = 'c8Html' }
+                    @{ header = 'API object Ids'; property = 'c9'; data = $true; snapshot = 'api' }
                 )))
         $spiGridRows = $null
         #closes the 'content' div opened above; it used to be appended outside this 'if', so with 0 grants it closed #summary early
@@ -5622,7 +5772,7 @@ $($ownerOwnedByHtml)
                             if (-not $azureItemsByScope.Contains($azureScopeLabel)) { $azureItemsByScope[$azureScopeLabel] = [System.Collections.ArrayList]@() }
                             #Azure role conditions: 'limited by role definition condition: can assign only ...' and its marker
                             $azureRoleConditionText = getAzureRoleConditionText $azureroleAss
-                            $null = $azureItemsByScope[$azureScopeLabel].Add(@{ MainHtml = "$(getSpiCriticalIconHtml ($azureroleAss.roleIsCritical -eq $true))$(getSpiConditionLimitedIconHtml ($azureroleAss.roleConditionEffect -eq 'limited'))$roleName"; Dim = @($azureRoleConditionText, $azureroleAss.roleAssignmentAssignmentScopeName, $(if ($azureroleAss.roleAssignmentAssignmentResourceType -in 'ManagementGroup', 'Subscription' -and $azureroleAss.roleAssignmentAssignmentScopeId -ne $azureroleAss.roleAssignmentAssignmentScopeName) { $azureroleAss.roleAssignmentAssignmentScopeId }), $(if ($azureroleAss.priviledgedIdentityManagementBased -eq $true) { 'PIM' }), $(if ($azureroleAss.roleAssignmentApplicability -eq 'indirect') { "through group $($azureroleAss.roleAssignmentAppliesThrough)" })) })
+                            $null = $azureItemsByScope[$azureScopeLabel].Add(@{ MainHtml = "$(getSpiCriticalIconHtml ($azureroleAss.roleIsCritical -eq $true))$(getSpiConditionLimitedIconHtml ($azureroleAss.roleConditionEffect -eq 'limited'))$roleName$(getSpiAzureScopeMarkerHtml -RoleAssignmentId $azureroleAss.roleAssignmentId -ScopeName $azureroleAss.roleAssignmentAssignmentScopeName)$(if ($azureroleAss.roleAssignmentApplicability -eq 'indirect') { getSpiThroughGroupMarkerHtml $azureroleAss.roleAssignmentAppliesThrough })"; Dim = @($azureRoleConditionText, $azureroleAss.roleAssignmentAssignmentScopeName, $(if ($azureroleAss.roleAssignmentAssignmentResourceType -in 'ManagementGroup', 'Subscription' -and $azureroleAss.roleAssignmentAssignmentScopeId -ne $azureroleAss.roleAssignmentAssignmentScopeName) { $azureroleAss.roleAssignmentAssignmentScopeId }), $(if ($azureroleAss.priviledgedIdentityManagementBased -eq $true) { 'PIM' }), $(if ($azureroleAss.roleAssignmentApplicability -eq 'indirect') { "through group $($azureroleAss.roleAssignmentAppliesThrough)" })) })
                             #review F-45: the plain text from the values
                             $null = $arrayPlain.Add("$($azureroleAss.roleName) ($($azureroleAss.roleAssignmentAssignmentResourceType) $($azureroleAss.roleAssignmentAssignmentScopeName))$(if ($azureroleAss.priviledgedIdentityManagementBased -eq $true) { ' [PIM]' })$(if ($azureroleAss.roleAssignmentApplicability -eq 'indirect') { " [$($azureroleAss.roleAssignmentApplicability) - $($azureroleAss.roleAssignmentAppliesThrough)]" })$(if ($azureRoleConditionText) { " [$($azureRoleConditionText)]" })")
                             if ($azureroleAss.roleIsCritical -eq $true) {
@@ -5684,6 +5834,10 @@ $($ownerOwnedByHtml)
                 $spiGridRow.c8 = ($sp.SPAzureRoleAssignments).Count
                 $spiGridRow.c9Html = getSpiGroupedItemsHtml -Groups $azureItemsByScope
                 $spiGridRow.c9 = $(if ($SPAzureRoleAssignments) { $arrayPlain -join "$CsvDelimiterOpposite " } else { '' })
+                #SP snapshot: the scopes of the role assignments (an Azure scope's snapshot: the Service Principals with roles there)
+                $azureScopes = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+                foreach ($azureroleAss in $sp.SPAzureRoleAssignments) { $azureScope = getSpiAzureScopeFromAssignmentId $azureroleAss.roleAssignmentId; if ($azureScope) { [void]$azureScopes.Add($azureScope) } }
+                $spiGridRow.c10 = [string]::Join("`n", [string[]]@($azureScopes))
                 $null = $spiGridRows.Add([PSCustomObject]$spiGridRow)
             }
             if (-not $NoCsvExport) {
@@ -5702,6 +5856,7 @@ $($ownerOwnedByHtml)
                         @{ header = 'Classification'; property = 'c7'; filter = 'select' }
                         @{ header = '#'; property = 'c8'; filter = 'number' }
                         @{ header = 'Azure role assignments'; property = 'c9'; htmlProperty = 'c9Html' }
+                        @{ header = 'Azure role assignment scopes'; property = 'c10'; data = $true; snapshot = 'scope' }
                     )))
             $spiGridRows = $null
 
@@ -6609,8 +6764,8 @@ $($hipo.permission4HTML)
         }
 
         [void]$htmlTenantSummary.AppendLine((buildSpiGrid -HtmlTableId $htmlTableId -Rows $spiGridRows -PopoutTitle 'High-privilege (HiPo) users' -ColumnDefinitions @(
-                    @{ header = 'User'; property = 'c0' }
-                    @{ header = 'UserId'; property = 'c1'; portal = 'user' }
+                    @{ header = 'User'; property = 'c0'; snapshot = 'principalName' }
+                    @{ header = 'UserId'; property = 'c1'; portal = 'user'; typeProperty = 'c2' }
                     @{ header = 'UserType'; property = 'c2'; filter = 'select' }
                     @{ header = 'ownership'; property = 'c3'; filter = 'select' }
                     @{ header = 'SP displayName'; property = 'c4' }
@@ -6640,17 +6795,17 @@ $($hipo.permission4HTML)
 
     #region SUMMARYInsights
     addReportSection -Region 'ServicePrincipalCredentials' -Title 'Service Principal credentials (on the service principal, not on the app registration)' -Rows $insightRows.SPCredentials -Columns (@(getSPColumns) + @(
-            @{ Header = 'Credential type'; Property = 'CredentialType'; Select = $true }, @{ Header = 'Key Id'; Property = 'KeyId' }, @{ Header = 'Display name'; Property = 'DisplayName' }, @{ Header = 'Expiry'; Property = 'ExpiryInfo'; Select = $true }, @{ Header = 'End (UTC)'; Property = 'EndDateTime' }, @{ Header = 'Note'; Property = 'Note'; Select = $true }))
+            @{ Header = 'Credential type'; Property = 'CredentialType'; Select = $true; Snapshot = 'credType' }, @{ Header = 'Key Id'; Property = 'KeyId' }, @{ Header = 'Display name'; Property = 'DisplayName'; Snapshot = 'credName' }, @{ Header = 'Expiry'; Property = 'ExpiryInfo'; Select = $true; Snapshot = 'credDetail' }, @{ Header = 'End (UTC)'; Property = 'EndDateTime'; Snapshot = 'credDetail' }, @{ Header = 'Note'; Property = 'Note'; Select = $true }))
 
     addReportSection -Region 'ApplicationConfigurationFindings' -Title 'Application configuration findings' -Rows $insightRows.AppConfiguration -Columns @(
-        @{ Header = 'App object Id'; Property = 'APPObjectId' }, @{ Header = 'App displayName'; Property = 'APPDisplayName' }, @{ Header = 'SP object Id'; Property = 'SPObjectId' }, @{ Header = 'SP type'; Property = 'SPType'; Select = $true },
+        @{ Header = 'App object Id'; Property = 'APPObjectId'; Snapshot = 'app' }, @{ Header = 'App displayName'; Property = 'APPDisplayName' }, @{ Header = 'SP object Id'; Property = 'SPObjectId'; Snapshot = 'sp' }, @{ Header = 'SP type'; Property = 'SPType'; Select = $true },
         @{ Header = 'Severity'; Property = 'Severity'; Select = $true }, @{ Header = 'Finding'; Property = 'Finding'; Select = $true }, @{ Header = 'Why it is risky'; Property = 'Why'; Csv = $false }, @{ Header = 'Detail'; Property = 'Detail' })
 
     addReportSection -Region 'FederatedIdentityCredentialTrust' -Title 'Federated identity credentials: who can sign in' -Rows $insightRows.FederatedCredentialTrust -Columns (@(getSPColumns) + @(
-            @{ Header = 'Credential on'; Property = 'CredentialOn'; Select = $true }, @{ Header = 'Name'; Property = 'Name' }, @{ Header = 'Issuer type'; Property = 'IssuerType'; Select = $true }, @{ Header = 'Trust'; Property = 'Trust' }, @{ Header = 'Issuer'; Property = 'Issuer' }, @{ Header = 'Subject'; Property = 'Subject' }, @{ Header = 'Finding'; Property = 'Finding'; Select = $true }))
+            @{ Header = 'Credential on'; Property = 'CredentialOn'; Select = $true; Snapshot = 'credOn' }, @{ Header = 'Name'; Property = 'Name'; Snapshot = 'credName' }, @{ Header = 'Issuer type'; Property = 'IssuerType'; Select = $true; Snapshot = 'credType' }, @{ Header = 'Trust'; Property = 'Trust'; Snapshot = 'credDetail' }, @{ Header = 'Issuer'; Property = 'Issuer' }, @{ Header = 'Subject'; Property = 'Subject' }, @{ Header = 'Finding'; Property = 'Finding'; Select = $true }))
 
     addReportSection -Region 'ServicePrincipalEffectivePrivilege' -Title 'Service Principal effective privilege (incl. control through ownership)' -CreditHtml (getThomasCreditHtml -What 'The classification of privileged Entra roles (as Microsoft marks them) and Entra roles through role-assignable groups') -Rows $insightRows.EffectivePrivilege -Columns (@(getSPColumns) + @(
-            @{ Header = 'Effective level'; Property = 'EffectiveLevel'; Select = $true }, @{ Header = 'Level'; Property = 'Level'; Select = $true }, @{ Header = 'Category'; Property = 'Category'; Select = $true }, @{ Header = 'Why it is risky'; Property = 'Why'; Csv = $false }, @{ Header = 'Detail'; Property = 'Detail' }, @{ Header = 'Via'; Property = 'Via' }))
+            @{ Header = 'Effective level'; Property = 'EffectiveLevel'; Select = $true; Snapshot = 'level' }, @{ Header = 'Level'; Property = 'Level'; Select = $true }, @{ Header = 'Category'; Property = 'Category'; Select = $true }, @{ Header = 'Why it is risky'; Property = 'Why'; Csv = $false }, @{ Header = 'Detail'; Property = 'Detail' }, @{ Header = 'Via'; Property = 'Via' }))
 
     addReportSection -Region 'ServicePrincipalCredentialRisk' -Title 'Credential risk of privileged Service Principals' -Rows $insightRows.CredentialRisk -Columns (@(getSPColumns) + @(
             @{ Header = 'Level'; Property = 'Level'; Select = $true }, @{ Header = 'Credentials'; Property = 'Credentials' }, @{ Header = 'Findings'; Property = 'Findings' }, @{ Header = 'Why it is risky'; Property = 'Why'; Csv = $false }))
@@ -6662,7 +6817,7 @@ $($hipo.permission4HTML)
             @{ Header = 'Reason'; Property = 'Reason'; Select = $true }, @{ Header = 'Why it is risky'; Property = 'Why'; Csv = $false }, @{ Header = 'Detail'; Property = 'Detail' }))
 
     addReportSection -Region 'AgentObjects' -Title 'Agent objects (Microsoft Entra Agent ID)' -Rows $insightRows.AgentObjects -NotCollectedReason $(if ($null -eq $htAgentObjectsById) { 'agent object types not available' }) -Columns @(
-        @{ Header = 'Agent type'; Property = 'AgentType'; Select = $true }, @{ Header = 'Object Id'; Property = 'ObjectId' }, @{ Header = 'Display name'; Property = 'DisplayName' }, @{ Header = 'In this report'; Property = 'InThisReport'; Select = $true }, @{ Header = 'Effective level'; Property = 'EffectiveLevel'; Select = $true })
+        @{ Header = 'Agent type'; Property = 'AgentType'; Select = $true }, @{ Header = 'Object Id'; Property = 'ObjectId'; Snapshot = 'object' }, @{ Header = 'Display name'; Property = 'DisplayName'; Snapshot = 'objectName' }, @{ Header = 'In this report'; Property = 'InThisReport'; Select = $true }, @{ Header = 'Effective level'; Property = 'EffectiveLevel'; Select = $true })
 
     addReportSection -Region 'TenantConsentSettings' -Title 'Tenant consent settings' -Rows @($tenantConsentSettings | Select-Object -Property *, @{ Name = 'Why'; Expression = { getRiskExplanation -Table 'ConsentSettings' -Key $_.Setting } }) -NotCollectedReason $(if ($null -eq $tenantConsentSettings) { 'optional permission Policy.Read.All missing' }) -Columns @(
         @{ Header = 'Setting'; Property = 'Setting' }, @{ Header = 'Value'; Property = 'Value' }, @{ Header = 'Note'; Property = 'Note' }, @{ Header = 'Why it matters'; Property = 'Why'; Csv = $false })
@@ -9414,9 +9569,10 @@ $servicePrincipalsAndAppsOnlyEnrichedSPBatch | ForEach-Object -Parallel {
                                     $oauth2PermissionSensitivity = getClassification -permission $hlperPublishedPermissionScope.value -permissionType 'oauth2Permissions'
 
                                     $htOptInfo = [ordered] @{
-                                        SPId = $hlperServicePrincipalsPublishedPermissionScope.id
+                                        #the API: the grant's resource (an API that publishes no - or no longer this - scope is not in the lookup)
+                                        SPId = $(if ($hlperServicePrincipalsPublishedPermissionScope.id) { $hlperServicePrincipalsPublishedPermissionScope.id } else { $servicePrincipalOauth2PermissionGrant.resourceId })
                                         SPAppId = $hlperServicePrincipalsPublishedPermissionScope.appId
-                                        SPDisplayName = $hlperServicePrincipalsPublishedPermissionScope.displayName
+                                        SPDisplayName = $(if ($hlperServicePrincipalsPublishedPermissionScope.displayName) { $hlperServicePrincipalsPublishedPermissionScope.displayName } elseif ($htSpLookup[[string]$servicePrincipalOauth2PermissionGrant.resourceId].spDisplayName) { $htSpLookup[[string]$servicePrincipalOauth2PermissionGrant.resourceId].spDisplayName } else { $servicePrincipalOauth2PermissionGrant.resourceId })
                                         scope = $scope
                                         permission = $hlperPublishedPermissionScope.value
                                         permissionSensitivity = $oauth2PermissionSensitivity
@@ -10686,6 +10842,176 @@ $spiGridStyle = @'
         #spiCellPanel .spiPanelButton:hover { background: var(--az-hover, #f3f2f1); }
         #spiCellPanel .spiCellPanelBody { flex: 1; margin: 0; padding: 8px 12px; overflow: auto; white-space: pre; font-family: "Cascadia Code", Consolas, "Courier New", monospace; font-size: 11px; line-height: 1.4; }
         #spiCellPanel.spiPanelText .spiCellPanelBody { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 12.5px; line-height: 1.5; }
+        /* SP snapshot (feature zoom-in): the icon next to objects, the dialog over the report */
+        .spiSnapLink { margin-left: 3px; color: var(--az-accent, #0078d4); text-decoration: none; font-size: 11px; opacity: .7; white-space: nowrap; }
+        .spiSnapLink:hover { opacity: 1; text-decoration: none; }
+        dialog.spiSnap { box-sizing: border-box; width: min(1500px, 97vw); height: 95vh; max-width: 97vw; max-height: 95vh; padding: 0; border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 6px; background: var(--az-page-bg, #f3f2f1); color: var(--az-text, #323130); box-shadow: 0 12px 40px rgba(0, 0, 0, .35); font-family: "Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 13px; }
+        dialog.spiSnap[open] { display: flex; flex-direction: column; }
+        dialog.spiSnap::backdrop { background: rgba(0, 0, 0, .45); }
+        .spiSnap div { float: none; }
+        .spiSnapBar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--az-border, #e1dfdd); background: var(--az-card-bg, #ffffff); border-radius: 6px 6px 0 0; }
+        .spiSnapFind { position: relative; flex: 1; min-width: 0; }
+        .spiSnapFind input { box-sizing: border-box; width: 100%; height: 30px; padding: 0 10px; font: inherit; color: var(--az-text, #323130); background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 4px; }
+        .spiSnapHits { position: absolute; z-index: 2; top: 34px; left: 0; right: 0; max-height: 50vh; overflow-y: auto; background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, .2); }
+        .spiSnapHit { display: block; width: 100%; padding: 6px 10px; text-align: left; font: inherit; color: var(--az-text, #323130); background: transparent; border: 0; cursor: pointer; overflow-wrap: anywhere; }
+        .spiSnapHit:hover, .spiSnapHit.active { background: var(--az-hover, #f3f2f1); }
+        .spiSnapBtn { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; font: inherit; color: var(--az-text, #323130); background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 4px; cursor: pointer; white-space: nowrap; }
+        .spiSnapBtn:hover:not(:disabled) { background: var(--az-hover, #f3f2f1); }
+        .spiSnapBtn:disabled { opacity: .4; cursor: default; }
+        .spiSnapBody { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px 24px; outline: none; }
+        .spiSnapHead h2 { margin: 0 0 4px; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+        /* contrast (4.5:1 text, 3:1 marks) in both themes: white text on a strong blue, warning text and marks darker in light */
+        :root { --spi-strong-accent: #0f6cbd; --spi-warn-text: #a4262c; --spi-warn-mark: #986f0b; }
+        :root[data-theme="dark"] { --spi-warn-text: var(--az-warning-strong, #f1707b); --spi-warn-mark: var(--az-warning, #fce100); }
+        @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --spi-warn-text: var(--az-warning-strong, #f1707b); --spi-warn-mark: var(--az-warning, #fce100); } }
+        .spiSnapType { display: inline-block; margin-left: 10px; padding: 1px 8px; font-size: 12px; font-weight: 600; border-radius: 10px; color: var(--az-accent-pressed, #005a9e); background: var(--az-accent-soft, #deecf9); vertical-align: 3px; }
+        .spiSnapLevel { display: inline-block; margin-left: 8px; padding: 1px 8px; font-size: 12px; font-weight: 600; border-radius: 10px; color: #ffffff; vertical-align: 3px; }
+        .spiSnapLevel-critical { background: #a4262c; }
+        .spiSnapLevel-high { color: #323130; background: #fce100; }
+        .spiSnapLive { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+        .spiSnapGroupTitle:focus { outline: none; }
+        .spiSnapGroupTitle:focus-visible { outline: 2px solid var(--az-accent, #0078d4); outline-offset: 2px; }
+        .spiSnapIds { color: var(--az-text-secondary, #605e5c); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+        .spiSnapIds code, .spiSnapNote code { font-family: "Cascadia Code", Consolas, "Courier New", monospace; font-size: 11.5px; }
+        .spiSnapToc { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+        .spiSnapToc button { padding: 2px 10px; font: inherit; font-size: 12px; color: var(--az-text, #323130); background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 12px; cursor: pointer; }
+        .spiSnapToc button:hover { background: var(--az-hover, #f3f2f1); }
+        .spiSnapToc button.warn { color: var(--spi-warn-text); border-color: var(--spi-warn-text); }
+        .spiSnapGroupTitle { margin: 18px 0 8px; font-size: 15px; font-weight: 600; }
+        .spiSnapGroupTitle .fa { width: 18px; color: var(--az-text-secondary, #605e5c); }
+        .spiSnapGroup.warn .spiSnapGroupTitle, .spiSnapGroup.warn .spiSnapGroupTitle .fa { color: var(--spi-warn-text); }
+        .spiSnapCard { margin: 0 0 10px; background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border, #e1dfdd); border-radius: 4px; }
+        .spiSnapCardHead { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--az-border, #e1dfdd); }
+        .spiSnapCardHead h4 { flex: 1; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+        .spiSnapCount { padding: 0 7px; font-size: 11px; font-weight: 600; line-height: 18px; border-radius: 9px; color: var(--az-text-secondary, #605e5c); background: var(--az-hover, #f3f2f1); }
+        .spiSnapAction { padding: 2px 4px; font: inherit; font-size: 12px; color: var(--az-accent, #0078d4); background: transparent; border: 0; cursor: pointer; white-space: nowrap; }
+        .spiSnapAction:hover { text-decoration: underline; }
+        .spiSnapCardBody { padding: 8px 12px; }
+        .spiSnapFields { display: grid; grid-template-columns: minmax(140px, 240px) minmax(0, 1fr); gap: 5px 14px; margin: 0; }
+        .spiSnapFields dt { font-weight: 600; color: var(--az-text-secondary, #605e5c); overflow-wrap: anywhere; }
+        .spiSnapFields dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+        .spiSnapTableWrap { max-height: 480px; overflow: auto; }
+        .spiSnapTable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+        .spiSnapTable th, .spiSnapTable td { min-width: 90px; padding: 4px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--az-border, #e1dfdd); overflow-wrap: anywhere; }
+        .spiSnapTable th { position: sticky; top: 0; font-weight: 600; background: var(--az-card-bg-alt, #faf9f8); overflow-wrap: break-word; }
+        .spiSnapNote { padding: 10px 0; color: var(--az-text-secondary, #605e5c); }
+        .spiSnapMore { display: flex; align-items: center; gap: 10px; padding: 6px 8px 2px; color: var(--az-text-secondary, #605e5c); }
+        .spiSnap a { color: var(--az-accent, #0078d4); }
+        .spiSnap .spiDim { color: var(--az-text-secondary, #605e5c); }
+        .spiSnap ul.spiList, .spiSnap ul.spiItems { margin: 0 0 2px; padding-left: 16px; }
+        .spiSnap .spiItemsLabel { display: block; margin-top: 2px; font-weight: 600; }
+        .spiSnap .spiKv { display: block; font-size: 11.5px; line-height: 15px; color: var(--az-text-secondary, #605e5c); }
+        .spiSnap .spiKvLine { display: block; overflow-wrap: anywhere; }
+        .spiSnap .spiKvKey { font-weight: 600; }
+        .spiSnap .spiItem-muted, .spiSnap .spiItem-muted a { color: var(--az-text-secondary, #605e5c); }
+        .spiSnap .spiItem-warn { color: var(--az-warning-strong, #d83b01); }
+        .spiSnap .spiCritical { margin-right: 4px; font-size: 10px; color: var(--az-warning-strong, #d83b01); }
+        .spiSnap .spiClassDot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; vertical-align: 1px; }
+        /* graph (feature zoom-in, level 3) */
+        .spiSnapGlance { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0 0; padding: 8px 12px; font-size: 12.5px; background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border, #e1dfdd); border-radius: 4px; }
+        .spiSnapGlance b { margin-right: 4px; color: var(--az-text-secondary, #605e5c); font-weight: 600; }
+        .spiSnapTree { margin: 2px 0; padding-left: 18px; }
+        .spiSnapTree li { margin: 2px 0; overflow-wrap: anywhere; }
+        .spiSnapReach > .spiSnapTree { padding-left: 4px; list-style: none; }
+        .spiSnapReachDetail { font-size: 11.5px; color: var(--az-text-secondary, #605e5c); }
+        .spiSnapClass { display: inline-block; padding: 0 6px; font-size: 11px; font-weight: 600; border-radius: 8px; color: #ffffff; background: #605e5c; }
+        .spiSnapClass-critical { background: #a4262c; }
+        .spiSnapClass-high { background: #ca5010; }
+        .spiSnapClass-medium { color: #323130; background: #fce100; }
+        .spiSnapLazy summary { cursor: pointer; color: var(--az-accent, #0078d4); }
+        .spiSnapLazyBody .spiSnapTableWrap { max-height: 320px; margin-top: 4px; }
+        .spiSnapTop { position: sticky; top: -14px; z-index: 4; margin: -14px -18px 10px; padding: 14px 18px 8px; background: var(--az-page-bg, #f3f2f1); border-bottom: 1px solid var(--az-border, #e1dfdd); }
+        .spiSnapTop .spiSnapToc { margin-bottom: 0; }
+        .spiSnapGroup { scroll-margin-top: calc(var(--spi-top-height, 0px) + 4px); }
+        dialog.spiSnap.spiSnapNoObject .spiSnapView, dialog.spiSnap.spiSnapNoObject [data-act="focus"], dialog.spiSnap.spiSnapNoObject [data-act="tab"], dialog.spiSnap.spiSnapNoObject .spiSnapCopy, dialog.spiSnap.spiSnapNoObject [data-act="link"] { display: none; }
+        .spiSnapTrail { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; margin: -4px 0 8px; font-size: 12px; color: var(--az-text-secondary, #605e5c); }
+        .spiSnapTrail .spiSnapAction { padding: 0 2px; }
+        .spiSnapTrail [aria-current] { font-weight: 600; color: var(--az-text, #323130); }
+        .spiSnapFocusNote { flex: 0 0 auto; padding: 5px 14px; font-size: 12px; color: var(--az-text, #323130); background: var(--az-accent-soft, #deecf9); border-bottom: 1px solid var(--az-border, #e1dfdd); }
+        .spiSnapFocusNote[hidden] { display: none; }
+        .spiSnapCopy { position: relative; display: inline-flex; }
+        .spiSnapCopyMenu { position: absolute; z-index: 3; top: 34px; right: 0; min-width: 260px; padding: 4px 0; background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
+        .spiSnapCopyMenu[hidden] { display: none; }
+        .spiSnapCopyMenu button { display: block; width: 100%; padding: 6px 12px; font: inherit; font-size: 12.5px; text-align: left; color: var(--az-text, #323130); background: transparent; border: 0; cursor: pointer; }
+        .spiSnapCopyMenu button:hover, .spiSnapCopyMenu button:focus-visible { background: var(--az-hover, #f3f2f1); outline: none; }
+        .spiGraphWrap:focus-visible { outline: 2px solid var(--az-accent, #0078d4); outline-offset: 1px; }
+        .spiSnapView { display: inline-flex; border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 4px; overflow: hidden; }
+        .spiSnapView .spiSnapBtn { border: 0; border-radius: 0; }
+        .spiSnapView .spiSnapBtn[aria-pressed="true"] { color: #ffffff; background: var(--spi-strong-accent); }
+        .spiGraphTools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0; }
+        .spiGraphFilter { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12.5px; }
+        .spiGraphFilter input[type="search"] { box-sizing: border-box; width: 260px; max-width: 100%; height: 26px; padding: 0 8px; font: inherit; color: var(--az-text, #323130); background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 4px; }
+        .spiGraphFilter label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+        .spiGraphHighlightStatus { color: var(--az-text-secondary, #605e5c); }
+        .spiGraphDim { opacity: .25; }
+        .spiGraphBubble.spiGraphHit { box-shadow: 0 0 0 3px var(--az-accent, #0078d4); }
+        .spiGraphHitCount { padding: 0 6px; font-size: 11px; font-weight: 600; border-radius: 8px; color: #ffffff; background: var(--spi-strong-accent, #0f6cbd); }
+        .spiGraphZoom { display: inline-flex; gap: 4px; }
+        .spiGraphZoom .spiSnapBtn { height: 26px; padding: 0 8px; }
+        .spiGraphWrap { overflow: auto; height: calc(95vh - 230px); min-height: 320px; border: 1px solid var(--az-border, #e1dfdd); border-radius: 4px; background: var(--az-card-bg, #ffffff); cursor: grab; }
+        .spiGraphWrap.spiGraphDragging { cursor: grabbing; user-select: none; }
+        .spiGraphSizer { position: relative; }
+        .spiGraph { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+        .spiGraphEdges { position: absolute; left: 0; top: 0; }
+        .spiGraphEdges line { stroke: var(--az-text-secondary, #605e5c); stroke-width: 1.4; }
+        .spiGraphEdges line.risky { stroke: var(--az-warning-strong, #d83b01); stroke-width: 1.8; stroke-dasharray: 6 3; }
+        .spiGraphArrow path { fill: var(--az-text-secondary, #605e5c); }
+        .spiGraphArrow.risky path { fill: var(--az-warning-strong, #d83b01); }
+        .spiGraphBubble { position: absolute; z-index: 1; transform: translate(-50%, -50%); box-sizing: border-box; width: max-content; max-width: 600px; padding: 6px 8px 8px; cursor: move; background: var(--az-card-bg-alt, #faf9f8); border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 14px; }
+        .spiGraphBubble.risky { border-color: var(--az-warning-strong, #d83b01); }
+        .spiGraphBubble.indirect { border-style: dashed; }
+        .spiGraphEdges line.indirect { stroke-dasharray: 2 4; }
+        .spiGraphBubble.spiGraphMoving { z-index: 3; cursor: grabbing; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
+        .spiGraphBubbleHead { display: flex; align-items: center; gap: 6px; margin: 0 2px 6px; font-size: 12px; font-weight: 600; color: var(--az-text, #323130); }
+        .spiGraphBubble.risky .spiGraphBubbleTitle { color: var(--spi-warn-text); }
+        .spiGraphBubbleBody { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+        .spiGraphBubbleBody.spiGraphScroll { max-height: 520px; overflow-y: auto; padding: 2px; }
+        .spiGraphLegend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 11.5px; color: var(--az-text-secondary, #605e5c); }
+        .spiGraphLegend span { display: inline-flex; align-items: center; gap: 5px; }
+        .spiGraphSwatch { display: inline-block; width: 16px; height: 10px; box-sizing: border-box; border-radius: 3px; background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border-strong, #c8c6c4); }
+        .spiGraphSwatch-risky { border: 2px dashed var(--az-warning-strong, #d83b01); }
+        .spiGraphSwatch-indirect { border: 2px dotted var(--az-text-secondary, #605e5c); }
+        .spiGraphSwatch-critical { border: 3px solid #a4262c; }
+        .spiGraphSwatch-high { border: 3px double var(--spi-warn-mark); }
+        .spiGraphSwatch-warn { border: 2px dashed var(--spi-warn-mark); }
+        .spiGraphSwatch-muted { opacity: .55; }
+        .spiGraphClosed { font-size: 11.5px; color: var(--az-text-secondary, #605e5c); }
+        .spiGraphNode { display: flex; flex-direction: column; align-items: center; gap: 1px; box-sizing: border-box; max-width: 170px; padding: 4px 8px; font: inherit; font-size: 11.5px; line-height: 14px; text-align: center; text-decoration: none; color: var(--az-text, #323130); background: var(--az-card-bg, #ffffff); border: 1px solid var(--az-border-strong, #c8c6c4); border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
+        .spiGraphNode:hover, .spiGraphNode:focus-visible { border-color: var(--az-accent, #0078d4); box-shadow: 0 0 0 2px var(--az-accent-soft, #deecf9); text-decoration: none; outline: none; }
+        .spiGraphNode .fa { font-size: 13px; color: var(--az-accent, #0078d4); }
+        .spiGraphType { font-size: 10.5px; color: var(--az-text-secondary, #605e5c); }
+        .spiGraphDetail { font-size: 10.5px; font-weight: 600; color: var(--az-text, #323130); }
+        .spiGraphKind-user .fa { color: var(--az-success, #107c10); }
+        .spiGraphKind-group .fa { color: #8764b8; }
+        .spiGraphKind-scope .fa { color: var(--az-warning, #c19c00); }
+        .spiGraphKind-role .fa { color: var(--az-warning-strong, #d83b01); }
+        .spiGraphLevel-critical { border: 3px solid #a4262c; }
+        .spiGraphLevel-high { border: 3px double var(--spi-warn-mark); }
+        .spiGraphCenter { position: absolute; z-index: 2; transform: translate(-50%, -50%); max-width: 230px; padding: 8px 14px; font-size: 13px; font-weight: 600; color: #ffffff; background: var(--az-accent, #0078d4); border: 2px solid var(--az-accent, #0078d4); cursor: default; }
+        .spiGraphCenter .fa, .spiGraphCenter .spiGraphType { color: #ffffff; }
+        .spiGraphCenter { background: var(--spi-strong-accent); border-color: var(--spi-strong-accent); }
+        .spiGraphCenter.spiGraphLevel-critical { box-shadow: 0 0 0 4px #a4262c; }
+        .spiGraphCenter.spiGraphLevel-high { box-shadow: 0 0 0 4px var(--spi-warn-mark); }
+        .spiGraphCenter:not(.spiGraphLevel-critical):not(.spiGraphLevel-high):hover { box-shadow: none; }
+        .spiGraphIcon { width: 16px; height: 16px; }
+        .spiSnapHead h2 .spiGraphIcon { width: 22px; height: 22px; vertical-align: -3px; }
+        .spiGraphCenter .spiGraphIcon { width: 20px; height: 20px; }
+        .spiGraphKind-credential { cursor: default; }
+        .spiGraphKind-credential:hover { border-color: var(--az-border-strong, #c8c6c4); box-shadow: none; }
+        .spiGraphState-muted { opacity: .55; text-decoration: line-through; }
+        .spiGraphState-warn { border: 2px dashed var(--spi-warn-mark); }
+        .spiGraphEdges line.spiGraphPair { stroke: var(--az-accent, #0078d4); stroke-width: 2.5; }
+        /* focus (feature zoom-in, level 2): the chip in the top bar, sections without rows of the object */
+        .spiFocusChip { display: inline-flex; align-items: center; gap: 6px; max-width: 340px; min-height: 26px; margin: 0 6px; padding: 2px 3px 2px 10px; box-sizing: border-box; border-radius: 13px; font-size: 12.5px; line-height: 15px; color: #ffffff; background: var(--spi-strong-accent, #0f6cbd); }
+        .spiFocusChip[hidden] { display: none; }
+        .spiFocusChip .spiFocusName { min-width: 0; max-height: 32px; overflow-y: auto; overflow-wrap: anywhere; padding: 0; font: inherit; text-align: left; color: inherit; background: transparent; border: 0; cursor: pointer; }
+        .spiFocusChip .spiFocusName:focus-visible { outline: 2px solid #ffffff; outline-offset: 1px; }
+        .spiFocusChip .spiFocusName:hover { text-decoration: underline; }
+        .spiFocusChip .spiFocusClear { flex: 0 0 auto; width: 22px; height: 22px; padding: 0; color: inherit; background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
+        .spiFocusChip .spiFocusClear:hover { background: rgba(255, 255, 255, .22); }
+        .spiFocusNone { opacity: .45; }
+        .az-count.spiFocusZero, .az-badge.spiFocusZero { color: var(--az-text-secondary, #605e5c); background: var(--az-hover, #f3f2f1); }
+        @media (max-width: 700px) { .spiSnapFields { grid-template-columns: minmax(0, 1fr); } .spiSnapFields dd { margin-bottom: 6px; } .spiSnapBtn span { display: none; } .spiSnapBar { flex-wrap: wrap; } .spiSnapFind { flex: 1 1 100%; order: 9; } }
 '@
 $spiGridSelectFilter = @'
     /* AG Grid Community has no set filter; this floating filter renders a <select> (like the TableFilter 'select' columns)
@@ -10881,6 +11207,7 @@ $spiGridSupportScript = @'
             api.addEventListener('filterChanged', sync);
             api.addEventListener('modelUpdated', sync);
             sync();
+            if (spiFocusState.plan) { spiFocusApplyGrid(id, api); }
             return api;
         });
         grid.ready.catch(function (error) { spiGridError(element, error); });
@@ -11079,7 +11406,8 @@ $spiGridSupportScript = @'
     function spiColumnHtmlRenderer(encoded, columnIndex, highlighter) {
         var dictionary = encoded.dictionaries[columnIndex];
         return function (params) {
-            return highlighter.html(dictionary[params.data[columnIndex]], params.column.getColId());
+            var html = highlighter.html(dictionary[params.data[columnIndex]], params.column.getColId());
+            return spiSnapInReport(params) ? spiSnapDecorate(html) : html;
         };
     }
 
@@ -11087,35 +11415,51 @@ $spiGridSupportScript = @'
     //in the report) and only from GUIDs. kind: servicePrincipal (enterprise application; aux column: application id), application
     //(app registration; aux column: application id, else the cell), user, group, principal (aux column: the principal type,
     //'User...' or 'Group...'; other types are not linked)
-    function spiColumnPortalLinkRenderer(encoded, columnIndex, auxIndex, kind, highlighter) {
-        var dictionary = encoded.dictionaries[columnIndex];
-        var aux = auxIndex >= 0 ? encoded.dictionaries[auxIndex] : null;
+    function spiPortalHref(kind, value, auxValue) {
         var guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         var portal = 'https://portal.azure.com/#view/';
+        if (!value || !guid.test(value)) { return ''; }
+        var cellKind = kind;
+        if (kind === 'principal') {
+            cellKind = /^user/i.test(auxValue || '') ? 'user' : (/^group/i.test(auxValue || '') ? 'group' : '');
+        }
+        if (cellKind === 'servicePrincipal' && auxValue && guid.test(auxValue)) {
+            return portal + 'Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/' + value + '/appId/' + auxValue;
+        }
+        if (cellKind === 'application' && auxValue && guid.test(auxValue)) {
+            return portal + 'Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/' + auxValue;
+        }
+        if (cellKind === 'user') {
+            return portal + 'Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/' + value;
+        }
+        if (cellKind === 'group') {
+            return portal + 'Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/' + value + '/menuId/';
+        }
+        return '';
+    }
+    /* noSnap: the grid's name column carries the snapshot icon of this object */
+    function spiColumnPortalLinkRenderer(encoded, columnIndex, auxIndex, kind, highlighter, noSnap) {
+        var dictionary = encoded.dictionaries[columnIndex];
+        var aux = auxIndex >= 0 ? encoded.dictionaries[auxIndex] : null;
         return function (params) {
             var value = dictionary[params.data[columnIndex]];
             var text = highlighter.text(value, params.column.getColId());
-            if (!value || !guid.test(value)) { return text; }
             var auxValue = aux ? aux[params.data[auxIndex]] : value;
-            var cellKind = kind;
-            if (kind === 'principal') {
-                cellKind = /^user/i.test(auxValue || '') ? 'user' : (/^group/i.test(auxValue || '') ? 'group' : '');
-            }
-            var href = '';
-            if (cellKind === 'servicePrincipal' && auxValue && guid.test(auxValue)) {
-                href = portal + 'Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/' + value + '/appId/' + auxValue;
-            }
-            else if (cellKind === 'application' && auxValue && guid.test(auxValue)) {
-                href = portal + 'Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/' + auxValue;
-            }
-            else if (cellKind === 'user') {
-                href = portal + 'Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/' + value;
-            }
-            else if (cellKind === 'group') {
-                href = portal + 'Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/' + value + '/menuId/';
-            }
-            if (!href) { return text; }
-            return '<a class="externallink" href="' + href + '" target="_blank" rel="noopener">' + text + '</a>';
+            var href = spiPortalHref(kind, value, auxValue);
+            /* SP snapshot: the icon next to Service Principals, applications, users, groups and owners */
+            var snap = noSnap ? '' : spiSnapCellLink(params, kind, value, auxValue);
+            if (!href) { return text + snap; }
+            return '<a class="externallink" href="' + href + '" target="_blank" rel="noopener">' + text + '</a>' + snap;
+        };
+    }
+
+    //SP snapshot: a name column (SP / App / MI / display name, owner) with the snapshot icon of its object (the id column of the row)
+    function spiColumnSnapNameRenderer(encoded, columnIndex, idIndex, highlighter) {
+        var dictionary = encoded.dictionaries[columnIndex];
+        var ids = encoded.dictionaries[idIndex];
+        return function (params) {
+            var name = dictionary[params.data[columnIndex]];
+            return highlighter.text(name, params.column.getColId()) + spiSnapCellLink(params, 'principal', ids[params.data[idIndex]], '', name);
         };
     }
 
@@ -11317,6 +11661,16 @@ $spiGridSupportScript = @'
        state is the live state object of the grid, the renderers read it when a cell is drawn */
     function spiPrepareOptions(options, state, doc) {
         options.columnDefs = spiDecorateColumnDefs(options.columnDefs, state, true);
+        /* SP snapshot: Enter on a cell with the snapshot icon opens the snapshot (the keyboard way to the icon) */
+        options.onCellKeyDown = function (event) {
+            var key = event.event;
+            if (!key || key.key !== 'Enter' || key.ctrlKey || key.metaKey || key.altKey || key.shiftKey) { return; }
+            var cell = key.target && key.target.closest ? key.target.closest('.ag-cell') : null;
+            var link = cell ? cell.querySelector('a[data-spi-snap]') : null;
+            if (!link || typeof spiSnapOpen !== 'function') { return; }
+            key.preventDefault();
+            spiSnapOpen(link.getAttribute('data-spi-snap'), true);
+        };
         options.maintainColumnOrder = true;
         /* tooltips: the header tooltips only (headerTooltip of a column); cells have none - their text is never cut (cells
            wrap, or scroll sideways in one-line mode), the full value of a cell is shown on double click */
@@ -11608,7 +11962,7 @@ $spiGridSupportScript = @'
             menu.appendChild(row);
         });
         menu.appendChild(Object.assign(document.createElement('div'), { className: 'spiMenuSep' }));
-        spiMenuItem(menu, 'Clear all filters', function () { api.setFilterModel(null); });
+        spiMenuItem(menu, 'Clear all filters', function () { api.setFilterModel(spiFocusKeep(id, null)); });
     }
     function spiOnFirstDataRendered(api, element) {
         var id = element.id;
@@ -11651,6 +12005,7 @@ $spiGridSupportScript = @'
                 + ' var spiPopoutEntry = spiGrids[' + JSON.stringify(id) + '];'
                 + ' spiPopoutEntry.popout = true; spiPopoutEntry.filtersTouched = true;'
                 + ' spiPopoutEntry.state = ' + JSON.stringify({ wrap: grid.state.wrap, pin: grid.state.pin, filters: true }) + ';'
+                + (spiFocusState.plan && spiFocusState.plan[id] ? ' spiFocusState.plan = ' + JSON.stringify((function () { var plan = {}; plan[id] = spiFocusState.plan[id]; return plan; })()) + ';' : '')
                 + ' spiRenderGridToolbar(' + JSON.stringify(id) + ', document.getElementById("spiPopoutToolbar"));'
                 + ' spiCreateGrid(' + JSON.stringify(id) + ');';
             /* review F-51: '<' only occurs inside the JSON strings (the title): as \u003c it cannot end the script element */
@@ -11769,8 +12124,9 @@ $spiGridSupportScript = @'
     document.addEventListener('click', function () { setTimeout(spiCreateVisibleGrids, 0); });
     document.addEventListener('DOMContentLoaded', spiCreateVisibleGrids);
     /* registration plus the toolbar above the grid */
-    function spiRegisterReportGrid(id, key, title) {
+    function spiRegisterReportGrid(id, key, title, snapshot) {
         spiRegisterGrid(id, key, title);
+        spiSnapRegister(id, snapshot);
         var host = document.getElementById('spiToolbar4' + id);
         if (host) { spiRenderGridToolbar(id, host); }
     }
@@ -11799,10 +12155,2431 @@ $spiGridSupportScript = @'
                 if (!column) { return; }
                 model[column.getColId()] = spiTermToFilterModel(entry[1], !!column.getColDef().floatingFilterComponent);
             });
-            api.setFilterModel(model);
+            api.setFilterModel(spiFocusKeep(id, model));
             return api;
         });
     }
+
+    /* ---------- SP snapshot: zoom in on one Service Principal (feature zoom-in) ----------
+       Everything the report knows about one Service Principal (or an application without one) on one page: a dialog over
+       the report. The emitter describes per grid its columns and the columns with object ids (spiRegisterReportGrid; role
+       sp / app / appId / object: the row is about that object, api: the row's object uses that API). The first snapshot
+       decodes those grids (spiLoadGridData - no grid is created) and indexes the ids once. ?sp=<id> in the address opens
+       the snapshot (shared link, bookmark); every snapshot is a history entry (Back), closing returns to the report. */
+    var spiSnapMeta = {};
+    var spiSnapGridOrder = [];
+    var spiSnapEntityGrid = 'TenantSummary_ServicePrincipals';
+    var spiSnapIdentityRoles = { sp: 1, app: 1, appId: 1, object: 1, name: 1, appName: 1, type: 1 };
+    /* the id columns that say what a row is about (principal, scope and api columns name related objects) */
+    var spiSnapSelfRoles = { sp: 1, app: 1, appId: 1, object: 1 };
+    var spiSnapGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    var spiSnapIndexPromise = null;
+    var spiSnapState = { dialog: null, id: null, hits: [], hit: -1, silent: false, more: {}, moreSeq: 0, afterClose: null, onPop: null, view: 'cards', graphExpanded: {} };
+    var spiSnapApiTitles = {
+        ServicePrincipalsAppRoleAssignments: 'Clients with application permissions on this API',
+        ServicePrincipalsOauth2PermissionGrants: 'Clients with delegated permissions on this API'
+    };
+    function spiSnapRegister(id, meta) {
+        if (!meta || !meta.c) { return; }
+        if (!spiSnapMeta[id]) { spiSnapGridOrder.push(id); }
+        spiSnapMeta[id] = meta;
+    }
+    function spiSnapRegistry() {
+        if (!spiSnapRegistry.value) {
+            var element = document.getElementById('azadspiRegistry');
+            try { spiSnapRegistry.value = element ? JSON.parse(element.textContent) : null; } catch (e) { spiSnapRegistry.value = null; }
+            spiSnapRegistry.value = spiSnapRegistry.value || { pages: [], sections: [] };
+        }
+        return spiSnapRegistry.value;
+    }
+    function spiSnapEsc(text) { return spiEscapeHtml(text == null ? '' : text); }
+
+    /* ---------- data: the grids with object id columns, the objects by id ----------
+       Only the Service Principals grid gets an id map (object id, application id, application object id -> its row); the
+       other grids are scanned per snapshot (spiSnapRefs): a map of every id of every grid cost seconds for large tenants
+       (each grid has its own copy of the id strings, each copy is hashed), a scan of the value dictionaries compares strings. */
+    function spiSnapNow() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+    function spiSnapIndex() {
+        if (spiSnapIndexPromise) { return spiSnapIndexPromise; }
+        var started = spiSnapNow();
+        var ids = spiSnapGridOrder.filter(function (id) { return spiSnapMeta[id].k.length > 0 && (document.getElementById('spiData4' + id) || spiGridDataProviders[id]); });
+        spiSnapIndexPromise = Promise.all(ids.map(function (id) {
+            return spiLoadGridData(id).then(function (data) { return { id: id, data: data }; }, function () { return { id: id, data: null }; });
+        })).then(function (results) {
+            var index = { grids: [], data: {}, failed: [], byId: new Map(), roles: {}, entities: null };
+            results.forEach(function (result) {
+                if (!result.data) { index.failed.push(result.id); return; }
+                index.grids.push(result.id);
+                index.data[result.id] = result.data;
+            });
+            var data = index.data[spiSnapEntityGrid];
+            if (data) {
+                ['sp', 'app', 'appId', 'name', 'appName', 'type'].forEach(function (role) {
+                    index.roles[role] = spiSnapColumnsOfRole(spiSnapEntityGrid, role).map(function (column) { return column[1]; });
+                });
+                var idColumns = index.roles.sp.concat(index.roles.app, index.roles.appId);
+                for (var r = 0; r < data.rows.length; r++) {
+                    for (var j = 0; j < idColumns.length; j++) {
+                        var value = data.dictionaries[idColumns[j]][data.rows[r][idColumns[j]]];
+                        if (!value) { continue; }
+                        var key = String(value).toLowerCase();
+                        if (!index.byId.has(key)) { index.byId.set(key, r); }
+                    }
+                }
+            }
+            index.ms = Math.round(spiSnapNow() - started);
+            return index;
+        });
+        return spiSnapIndexPromise;
+    }
+    function spiSnapValue(index, gridId, row, column) {
+        var data = index.data[gridId];
+        if (!data || column < 0 || column >= data.dictionaries.length) { return ''; }
+        var value = data.dictionaries[column][data.rows[row][column]];
+        return value == null ? '' : String(value);
+    }
+    function spiSnapColumnsOfRole(gridId, role) {
+        return (spiSnapMeta[gridId] ? spiSnapMeta[gridId].c : []).filter(function (column) { return column[5] === role; });
+    }
+
+    /* ---------- the object: its row of the Service Principals grid ---------- */
+    function spiSnapEntityFromRow(index, row) {
+        var first = function (role) {
+            var columns = index.roles[role] || [];
+            for (var i = 0; i < columns.length; i++) {
+                var value = spiSnapValue(index, spiSnapEntityGrid, row, columns[i]);
+                if (value) { return value; }
+            }
+            return '';
+        };
+        var appIds = [];
+        (index.roles.appId || []).forEach(function (column) {
+            var value = spiSnapValue(index, spiSnapEntityGrid, row, column).toLowerCase();
+            if (value && appIds.indexOf(value) < 0) { appIds.push(value); }
+        });
+        var entity = { kind: 'sp', row: row, spId: first('sp').toLowerCase(), appObjectId: first('app').toLowerCase(), appIds: appIds, name: first('name'), appName: first('appName'), type: first('type') };
+        entity.id = entity.spId || entity.appObjectId || appIds[0] || '';
+        if (!entity.name) { entity.name = entity.appName || entity.id; }
+        return entity;
+    }
+    /* kind: sp (a row of the Service Principals grid), scope (an Azure scope: ARM path), principal (another object id: user,
+       group), unknown */
+    function spiSnapEntity(index, id) {
+        id = String(id || '').trim().toLowerCase();
+        var row = id ? index.byId.get(id) : undefined;
+        if (row !== undefined) { return spiSnapEntityFromRow(index, row); }
+        var kind = id.charAt(0) === '/' ? 'scope' : (spiSnapGuid.test(id) ? 'principal' : 'unknown');
+        if (kind === 'scope' && id.length > 1) { id = id.replace(/\/+$/, ''); }
+        return { kind: kind, row: -1, id: id, spId: '', appObjectId: '', appIds: [], name: '', appName: '', type: '' };
+    }
+    function spiSnapEntityIds(entity) {
+        var ids = [entity.spId, entity.appObjectId].concat(entity.appIds).filter(function (x) { return x; });
+        if (!ids.length && entity.id) { ids.push(entity.id); }
+        return ids;
+    }
+    /* the rows about the object (self: an id column holds one of its ids) and the rows of the objects that use it as an API
+       (api: the API id list holds its object id), per grid: the value dictionaries are scanned (plain string compares, ids
+       as the report writes them - lower case - or upper case), then the rows that reference a matching value */
+    function spiSnapRefs(index, entity) {
+        var variants = [];
+        spiSnapEntityIds(entity).forEach(function (id) {
+            variants.push(id);
+            if (id.toUpperCase() !== id) { variants.push(id.toUpperCase()); }
+        });
+        var apiId = entity.spId || (entity.row < 0 ? entity.id : '');
+        var apiIdUpper = apiId.toUpperCase();
+        var result = { self: {}, api: {} };
+        index.grids.forEach(function (gridId) {
+            var data = index.data[gridId];
+            spiSnapMeta[gridId].k.forEach(function (key) {
+                var column = key[0], isApi = key[1] === 'api';
+                if (!isApi && !spiSnapSelfRoles[key[1]]) { return; }
+                if (isApi && !apiId) { return; }
+                var dictionary = data.dictionaries[column] || [];
+                var marks = null;
+                for (var i = 0; i < dictionary.length; i++) {
+                    var value = dictionary[i];
+                    if (!value) { continue; }
+                    var hit = false;
+                    if (isApi) { hit = value.indexOf(apiId) >= 0 || value.indexOf(apiIdUpper) >= 0; }
+                    else { for (var v = 0; v < variants.length && !hit; v++) { hit = value === variants[v]; } }
+                    if (hit) { (marks = marks || new Uint8Array(dictionary.length))[i] = 1; }
+                }
+                if (!marks) { return; }
+                var target = isApi ? result.api : result.self;
+                var list = target[gridId] = target[gridId] || [];
+                var rows = data.rows;
+                for (var r = 0; r < rows.length; r++) { if (marks[rows[r][column]]) { list.push(r); } }
+            });
+        });
+        [result.self, result.api].forEach(function (byGrid) {
+            Object.keys(byGrid).forEach(function (gridId) {
+                byGrid[gridId] = Array.from(new Set(byGrid[gridId])).sort(function (a, b) { return a - b; });
+            });
+        });
+        return result;
+    }
+    /* the values of the object's own row: a column of another grid that only repeats one of them (name, type, ids, tags) is
+       not shown again; short and numeric values never count (a '1' or 'True' of another column is no repetition) */
+    function spiSnapIdentityValues(index, entity) {
+        var values = new Set();
+        if (entity.row >= 0) {
+            spiSnapMeta[spiSnapEntityGrid].c.forEach(function (column) {
+                var value = spiSnapValue(index, spiSnapEntityGrid, entity.row, column[1]);
+                if (value.length >= 6 && !/^\d+$/.test(value)) { values.add(value.toLowerCase()); }
+            });
+        }
+        spiSnapEntityIds(entity).forEach(function (id) { values.add(id); });
+        return values;
+    }
+
+    /* ---------- links: the icon next to an object that opens its snapshot ---------- */
+    /* name: for the accessible name ('Snapshot: <name>' - many icons in one table) */
+    function spiSnapLinkHtml(id, name) {
+        return ' <a class="spiSnapLink" href="?sp=' + encodeURIComponent(id) + '" data-spi-snap="' + spiSnapEsc(id) + '" title="Snapshot: everything about this object on one page" aria-label="' + spiSnapEsc('Snapshot' + (name ? ': ' + name : '')) + '"><i class="fa fa-magnifying-glass-plus" aria-hidden="true"></i></a>';
+    }
+    /* a grid of the report (not of a pop out window: it has no snapshot) */
+    function spiSnapInReport(params) {
+        return !params || !params.eGridCell || params.eGridCell.ownerDocument === document;
+    }
+    function spiSnapCellLink(params, kind, value, auxValue, name) {
+        if (!value || !spiSnapGuid.test(value) || !spiSnapInReport(params)) { return ''; }
+        if (kind === 'servicePrincipal' || kind === 'application' || kind === 'user' || kind === 'group' || kind === 'principal') {
+            return spiSnapLinkHtml(value, name);
+        }
+        return '';
+    }
+    /* html cells: the icon after the Entra portal links of Service Principals and applications (owners, owned objects, ...) */
+    var spiSnapPortalLinks = /(<a class="externallink" href="https:\/\/portal\.azure\.com\/#view\/Microsoft_AAD_(?:IAM\/ManagedAppMenuBlade\/~\/Overview\/objectId|RegisteredApps\/ApplicationMenuBlade\/~\/Overview\/appId|UsersAndTenants\/UserProfileMenuBlade\/~\/overview\/userId|IAM\/GroupDetailsMenuBlade\/~\/Overview\/groupId)\/([0-9a-fA-F-]{36})[^"]*"[^>]*>[\s\S]*?<\/a>)/g;
+    var spiSnapScopeMarkers = /<span class="spiScope" data-spi-scope="([^"]*)" data-spi-scope-name="([^"]*)"><\/span>/g;
+    function spiSnapDecorate(html) {
+        if (!html) { return html; }
+        if (html.indexOf('portal.azure.com/#view/Microsoft_AAD_') >= 0) {
+            html = html.replace(spiSnapPortalLinks, function (match, link, id) { return link + spiSnapLinkHtml(id, spiSnapText(link)); });
+        }
+        if (html.indexOf('data-spi-scope=') >= 0) {
+            html = html.replace(spiSnapScopeMarkers, function (match, scope, name) { return spiSnapLinkHtml(spiSnapText(scope), spiSnapText(name)); });
+        }
+        return html;
+    }
+
+    /* ---------- list cells (getSpiItemsHtml): items and markers ----------
+       A string scan over the emitter's markup: the tenant text in it is encoded, so it cannot form a tag, an attribute or an
+       href - a match on markup (a marker, a portal link) is a match on the emitter's data, never on a display name. */
+    var spiSnapItemPattern = /<b class="spiItemsLabel"(?: data-spi-api="([^"]*)")?>([\s\S]*?) \(\d+\)<\/b>|<li(?: class="spiItem-(\w+)")?>([\s\S]*?)<\/li>/g;
+    /* the items of a cell: [{ html, inner, state, label: { html, text, apiId } or null, single }]; a cell without a list: null */
+    function spiSnapCellItems(html) {
+        html = html || '';
+        var single = /^<span class="spiItem(?: spiItem-(\w+))?">([\s\S]*)<\/span>$/.exec(html);
+        if (single) { return [{ html: html, inner: single[2], state: single[1] || '', label: null, single: true }]; }
+        if (html.indexOf('<li') < 0) { return null; }
+        var items = [], label = null, match;
+        spiSnapItemPattern.lastIndex = 0;
+        while ((match = spiSnapItemPattern.exec(html))) {
+            if (match[4] === undefined) { label = { html: match[0], text: match[2], apiId: (match[1] || '').toLowerCase() }; continue; }
+            items.push({ html: match[0], inner: match[4], state: match[3] || '', label: label, single: false });
+        }
+        return items;
+    }
+    /* the name of an item (the text before its dimmed parts), its dimmed parts */
+    function spiSnapItemName(inner) {
+        var cut = inner.search(/<span class="spi(?:Dim|Kv)"/);
+        return spiSnapText(cut >= 0 ? inner.slice(0, cut) : inner).trim();
+    }
+    function spiSnapItemDims(inner) {
+        var dim = /<span class="spiDim">([\s\S]*?)<\/span>/.exec(inner);
+        return dim ? dim[1].split(' &middot; ').map(function (part) { return spiSnapText(part).trim(); }) : [];
+    }
+    /* the users, groups and Service Principals a cell names by id (role holders, the group of an assignment through a group) */
+    var spiSnapPrincipalMarkerPattern = /<span class="spiPrincipal" data-spi-principal="([^"]*)" data-spi-principal-name="([^"]*)" data-spi-principal-type="([^"]*)"><\/span>/g;
+    function spiSnapPrincipalMarkers(html) {
+        var out = [], match;
+        if (!html || html.indexOf('data-spi-principal=') < 0) { return out; }
+        spiSnapPrincipalMarkerPattern.lastIndex = 0;
+        while ((match = spiSnapPrincipalMarkerPattern.exec(html))) { out.push({ id: match[1].toLowerCase(), name: spiSnapText(match[2]), type: spiSnapText(match[3]) }); }
+        return out;
+    }
+    /* the markup that names an object by its id: its marker, its Entra portal link */
+    function spiSnapPrincipalNeedles(id) {
+        var out = [];
+        [id, id.toUpperCase()].forEach(function (value, i) {
+            if (i && value === id) { return; }
+            out.push('data-spi-principal="' + value + '"',
+                'href="https://portal.azure.com/#view/Microsoft_AAD_UsersAndTenants/UserProfileMenuBlade/~/overview/userId/' + value,
+                'href="https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/' + value,
+                'href="https://portal.azure.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/' + value);
+        });
+        return out;
+    }
+    function spiSnapHasNeedle(html, needles) {
+        for (var i = 0; i < needles.length; i++) { if (html.indexOf(needles[i]) >= 0) { return true; } }
+        return false;
+    }
+    /* the Azure scopes of the markers in a cell */
+    function spiSnapScopeMarkersIn(html) {
+        var out = [], pattern = /data-spi-scope="([^"]*)"/g, match;
+        while ((match = pattern.exec(html || ''))) { out.push(spiSnapText(match[1])); }
+        return out;
+    }
+
+    /* ---------- cards ---------- */
+    function spiSnapCellHtml(column, cell) {
+        if (cell.html) { return spiSnapDecorate(cell.html); }
+        var text = spiSnapEsc(cell.plain);
+        if (!column[3]) { return text; }
+        var auxValue = column[4] >= 0 ? cell.aux : cell.plain;
+        var href = spiPortalHref(column[3], cell.plain, auxValue);
+        return (href ? '<a class="externallink" href="' + href + '" target="_blank" rel="noopener">' + text + '</a>' : text) + spiSnapCellLink(null, column[3], cell.plain, auxValue);
+    }
+    /* the rows of a grid: one row as label / value lines, more rows as a table; columns that only repeat the object
+       (identity) or are empty in every row are left out */
+    function spiSnapRowsHtml(index, gridId, rows, identity, keepIdentity) {
+        var columns = spiSnapMeta[gridId].c.filter(function (column) { return keepIdentity || !spiSnapIdentityRoles[column[5]]; });
+        var cells = rows.map(function (row) {
+            return columns.map(function (column) {
+                var plain = spiSnapValue(index, gridId, row, column[1]);
+                var html = column[2] >= 0 ? spiSnapValue(index, gridId, row, column[2]) : '';
+                if (!plain && !html) { return null; }
+                return { plain: plain, html: html, aux: column[4] >= 0 ? spiSnapValue(index, gridId, row, column[4]) : '' };
+            });
+        });
+        var shown = [];
+        columns.forEach(function (column, i) {
+            var any = false, onlyIdentity = true;
+            cells.forEach(function (rowCells) {
+                var cell = rowCells[i];
+                if (!cell) { return; }
+                any = true;
+                if (keepIdentity || !identity.has(cell.plain.toLowerCase())) { onlyIdentity = false; }
+            });
+            if (any && !onlyIdentity) { shown.push(i); }
+        });
+        if (!shown.length) { return '<div class="spiSnapNote">Listed in this section - no further columns.</div>'; }
+        if (rows.length === 1) {
+            return '<dl class="spiSnapFields">' + shown.map(function (i) {
+                var cell = cells[0][i];
+                return '<dt>' + spiSnapEsc(columns[i][0]) + '</dt><dd>' + (cell ? spiSnapCellHtml(columns[i], cell) : '') + '</dd>';
+            }).join('') + '</dl>';
+        }
+        return spiSnapTableHtml(shown.map(function (i) { return columns[i][0]; }), cells, function (rowCells) {
+            return '<tr>' + shown.map(function (i) { return '<td>' + (rowCells[i] ? spiSnapCellHtml(columns[i], rowCells[i]) : '') + '</td>'; }).join('') + '</tr>';
+        });
+    }
+    /* a table: the first rows, the others on request (an API with thousands of clients); a row is rendered when it is shown */
+    var spiSnapPage = 200, spiSnapPageLarge = 1000, spiSnapShowAllAt = 2000;
+    function spiSnapTableHtml(headers, items, renderRow) {
+        var key = 'more' + (++spiSnapState.moreSeq);
+        var html = '<div class="spiSnapTableWrap"><table class="spiSnapTable"><thead><tr>' + headers.map(function (header) { return '<th>' + spiSnapEsc(header) + '</th>'; }).join('') + '</tr></thead><tbody data-more-body="' + key + '">' +
+            items.slice(0, spiSnapPage).map(renderRow).join('') + '</tbody></table></div>';
+        if (items.length > spiSnapPage) {
+            spiSnapState.more[key] = { items: items, next: spiSnapPage, renderRow: renderRow };
+            html += '<div class="spiSnapMore" data-more="' + key + '">' + spiSnapMoreHtml(items.length - spiSnapPage) + '</div>';
+        }
+        return html;
+    }
+    /* the bar under a long table: the next rows; 'Show all' while the rest is laid out quickly (tens of thousands of rows
+       freeze the page for seconds) - beyond that larger pages: every row stays reachable, nothing is cut */
+    function spiSnapMoreStep(left) { return left > spiSnapShowAllAt ? spiSnapPageLarge : spiSnapPage; }
+    function spiSnapMoreHtml(left) {
+        return '<span>' + left + ' more</span><button type="button" class="spiSnapAction" data-more-step="page">Show ' + Math.min(left, spiSnapMoreStep(left)) + ' more</button>' +
+            (left <= spiSnapShowAllAt ? '<button type="button" class="spiSnapAction" data-more-step="all">Show all</button>' : '');
+    }
+    function spiSnapShowMore(button) {
+        var bar = button.closest('[data-more]');
+        var key = bar.getAttribute('data-more');
+        var more = spiSnapState.more[key];
+        var body = spiSnapState.dialog.querySelector('[data-more-body="' + key + '"]');
+        if (!more || !body) { return; }
+        var left = more.items.length - more.next;
+        var end = button.getAttribute('data-more-step') === 'all' && left <= spiSnapShowAllAt ? more.items.length : Math.min(more.items.length, more.next + spiSnapMoreStep(left));
+        body.insertAdjacentHTML('beforeend', more.items.slice(more.next, end).map(more.renderRow).join(''));
+        more.next = end;
+        if (end >= more.items.length) { bar.remove(); delete spiSnapState.more[key]; } else { bar.innerHTML = spiSnapMoreHtml(more.items.length - end); }
+    }
+    /* the permissions of a client on this API: the group of the API (by its object id) in the client's permission cell -
+       nothing when the cell has no group of this API */
+    function spiSnapApiPermissionsHtml(html, apiId) {
+        if (!html || !apiId) { return ''; }
+        var at = html.indexOf('<b class="spiItemsLabel" data-spi-api="' + String(apiId).toLowerCase() + '">');
+        var end = at < 0 ? -1 : html.indexOf('</ul>', at);
+        return end < 0 ? '' : html.slice(at, end + 5);
+    }
+    function spiSnapApiRowsHtml(index, entity, gridId, rows) {
+        var spColumn = spiSnapColumnsOfRole(gridId, 'sp')[0];
+        var htmlColumns = spiSnapMeta[gridId].c.filter(function (column) { return column[2] >= 0; });
+        var permissionColumn = htmlColumns[htmlColumns.length - 1];
+        var apiId = entity.spId || entity.id;
+        return spiSnapTableHtml(['Client', 'Type', 'Permissions on this API'], rows, function (row) {
+            var clientId = spColumn ? spiSnapValue(index, gridId, row, spColumn[1]) : '';
+            var client = clientId ? spiSnapEntity(index, clientId) : null;
+            var permissions = permissionColumn ? spiSnapApiPermissionsHtml(spiSnapValue(index, gridId, row, permissionColumn[2]), apiId) : '';
+            return '<tr><td>' + spiSnapEsc(client && client.row >= 0 ? client.name : clientId) + (clientId ? spiSnapCellLink(null, 'servicePrincipal', clientId, '') : '') + '</td><td>' + spiSnapEsc(client ? client.type : '') + '</td><td>' + spiSnapDecorate(permissions) + '</td></tr>';
+        });
+    }
+    /* 'Show in report': the section, its grid filtered to the object (an id column of the grid) */
+    function spiSnapActionHtml(index, gridId, section, rows) {
+        var data = index.data[gridId];
+        var keys = spiSnapMeta[gridId].k.filter(function (key) { return spiSnapSelfRoles[key[1]] && spiSnapMeta[gridId].c.some(function (column) { return column[1] === key[0]; }); });
+        var colId = '', value = '';
+        for (var i = 0; i < keys.length && !value; i++) {
+            value = spiSnapValue(index, gridId, rows[0], keys[i][0]);
+            colId = value ? data.columns[keys[i][0]] : '';
+        }
+        return '<button type="button" class="spiSnapAction" data-grid="' + spiSnapEsc(gridId) + '" data-section="' + spiSnapEsc(section.id) + '" data-col="' + spiSnapEsc(colId) + '" data-value="' + spiSnapEsc(value) + '" title="The section in the report' + (value ? ', filtered to this object' : '') + '" aria-label="Show ' + spiSnapEsc(section.title) + ' in the report">Show in report <i class="fa fa-arrow-up-right-from-square" aria-hidden="true"></i></button>';
+    }
+    /* 'Show in report' with the grid filtered on the column of a role (api, scope: hidden columns; principal) - value '': the
+       section unfiltered */
+    function spiSnapFilterActionHtml(index, gridId, section, role, value) {
+        var key = spiSnapMeta[gridId].k.filter(function (k) { return k[1] === role; })[0];
+        var colId = key && value && index.data[gridId].columns ? index.data[gridId].columns[key[0]] : '';
+        return '<button type="button" class="spiSnapAction" data-grid="' + spiSnapEsc(gridId) + '" data-section="' + spiSnapEsc(section.id) + '" data-col="' + spiSnapEsc(colId || '') + '" data-value="' + spiSnapEsc(colId ? value : '') + '" title="The section in the report' + (colId ? ', filtered to these rows' : '') + '" aria-label="Show ' + spiSnapEsc(section.title) + ' in the report">Show in report <i class="fa fa-arrow-up-right-from-square" aria-hidden="true"></i></button>';
+    }
+    function spiSnapCardHtml(title, count, action, body) {
+        return '<section class="spiSnapCard"><div class="spiSnapCardHead"><h4>' + spiSnapEsc(title) + '</h4>' + (count === null ? '' : '<span class="spiSnapCount" title="Rows">' + count + '</span>') + action + '</div><div class="spiSnapCardBody">' + body + '</div></section>';
+    }
+
+    /* ---------- at a glance, who can control it, what it can reach, an API's clients by permission ---------- */
+    /* the relation groups by label */
+    function spiSnapGroupsByLabel(groups) {
+        var byLabel = {};
+        groups.forEach(function (group) { byLabel[group.label] = group; });
+        return byLabel;
+    }
+    function spiSnapNodeHtml(node) {
+        var linkable = node.kind === 'sp' || node.kind === 'app' || node.kind === 'user' || node.kind === 'group' || node.kind === 'object' || node.kind === 'scope';
+        return spiSnapEsc(node.name) + (node.type ? ' <span class="spiDim">' + spiSnapEsc(node.type) + '</span>' : '') + (node.level === 'critical' || node.level === 'high' ? ' <span class="spiSnapLevel spiSnapLevel-' + spiSnapEsc(node.level) + '">' + spiSnapEsc(node.level) + '</span>' : '') + (linkable ? spiSnapLinkHtml(node.id, node.name) : '');
+    }
+    /* at a glance: effective privilege, findings, credentials, control, reach, the last change */
+    function spiSnapGlanceHtml(index, entity, refs, groups) {
+        var byLabel = spiSnapGroupsByLabel(groups);
+        var count = function (labels) { return labels.reduce(function (sum, label) { return sum + (byLabel[label] ? byLabel[label].nodes.length : 0); }, 0); };
+        var items = [];
+        var level = spiGraphLevels(index).get(entity.id) || '';
+        items.push('<span><b>Effective privilege</b> ' + (level ? '<span class="spiSnapLevel spiSnapLevel-' + spiSnapEsc(level) + '">' + spiSnapEsc(level) + '</span>' : 'not rated') + '</span>');
+        var findings = 0, findingSections = 0;
+        (spiSnapRegistry().sections || []).forEach(function (section) {
+            if (section.state !== 'warning') { return; }
+            var rows = (section.grids || []).reduce(function (sum, gridId) { return sum + (refs.self[gridId] ? refs.self[gridId].length : 0); }, 0);
+            if (rows) { findings += rows; findingSections++; }
+        });
+        items.push('<span><b>Findings</b> ' + (findings ? findings + ' in ' + findingSections + (findingSections === 1 ? ' section' : ' sections') : 'none') + '</span>');
+        var credentials = [];
+        groups.forEach(function (group) { group.nodes.forEach(function (node) { if (node.kind === 'credential') { credentials.push(node); } }); });
+        var expired = credentials.filter(function (node) { return node.state === 'muted' || (node.details || []).some(function (detail) { return /^expired/i.test(detail); }); }).length;
+        var expiring = credentials.filter(function (node) { return node.state === 'warn'; }).length;
+        items.push('<span><b>Credentials</b> ' + (credentials.length ? credentials.length + (expired ? ', ' + expired + ' expired' : '') + (expiring ? ', ' + expiring + ' expiring' : '') : 'none') + '</span>');
+        var direct = count(['Owners', 'Application owners']), indirect = count(['Owners (indirect)', 'Application owners (indirect)']), holders = count(['Entra role holders on it', 'Entra role holders on the application']);
+        items.push('<span><b>Controlled by</b> ' + (direct + indirect + holders ? direct + ' direct ' + (direct === 1 ? 'owner' : 'owners') + (indirect ? ', ' + indirect + ' indirect' : '') + (holders ? ', ' + holders + ' role ' + (holders === 1 ? 'holder' : 'holders') : '') : 'no owner in this report') + '</span>');
+        var roles = count(['Entra roles']), scopes = count(['Azure role assignments']), owns = count(['Owns', 'Owner of (indirect)']);
+        if (roles + scopes + owns) { items.push('<span><b>Reaches</b> ' + [roles ? roles + ' Entra ' + (roles === 1 ? 'role' : 'roles') : '', scopes ? scopes + ' Azure ' + (scopes === 1 ? 'scope' : 'scopes') : '', owns ? owns + ' owned ' + (owns === 1 ? 'object' : 'objects') : ''].filter(function (x) { return x; }).join(', ') + '</span>'); }
+        var last = '';
+        Object.keys(refs.self).forEach(function (gridId) {
+            var time = spiSnapColumnsOfRole(gridId, 'time')[0];
+            if (!time) { return; }
+            refs.self[gridId].forEach(function (row) { var value = spiSnapValue(index, gridId, row, time[1]); if (value > last) { last = value; } });
+        });
+        if (last) { items.push('<span><b>Last change</b> ' + spiSnapEsc(last) + '</span>'); }
+        return '<div class="spiSnapGlance" aria-label="At a glance">' + items.join('') + '</div>';
+    }
+    /* who can control it: owners (direct, indirect with the path), owners of the app registration, Entra role holders scoped to
+       it, who can sign in as it (federated credentials), the Azure resource a managed identity belongs to */
+    var spiSnapControlKinds = [
+        ['Owners', 'Owner of the enterprise application'], ['Owners (indirect)', 'Controls an owner of the enterprise application'],
+        ['Application owners', 'Owner of the app registration'], ['Application owners (indirect)', 'Controls an owner of the app registration'],
+        ['Entra role holders on it', 'Entra role scoped to the enterprise application'], ['Entra role holders on the application', 'Entra role scoped to the app registration'],
+        ['Federated credentials', 'Signs in as it (federated credential on the enterprise application)'], ['Federated credentials (app registration)', 'Signs in as it (federated credential on the app registration)'],
+        ['Managed identity of (Azure resource)', 'The Azure resource of this managed identity: code running there acts as it'], ['Attached to (Azure resources)', 'An Azure resource it is attached to: code running there acts as it']
+    ];
+    function spiSnapControlHtml(groups) {
+        var byLabel = spiSnapGroupsByLabel(groups), rows = [];
+        spiSnapControlKinds.forEach(function (kind) {
+            var group = byLabel[kind[0]];
+            if (!group) { return; }
+            group.nodes.forEach(function (node) { rows.push({ node: node, how: kind[1], details: (node.details || []).join(', ') }); });
+        });
+        var note = '<div class="spiSnapNote">Not in this report: the holders of tenant-wide Entra roles that can manage every application (for example Global Administrator, Application Administrator, Cloud Application Administrator), and who can control the Azure resources of a managed identity.</div>';
+        if (!rows.length) { return '<div class="spiSnapNote">No owner, role holder or federated credential in this report.</div>' + note; }
+        return spiSnapTableHtml(['Who', 'How', 'Detail'], rows, function (row) {
+            return '<tr><td>' + spiSnapNodeHtml(row.node) + '</td><td>' + spiSnapEsc(row.how) + '</td><td>' + spiSnapEsc(row.details) + '</td></tr>';
+        }) + note;
+    }
+    /* what it can reach - the relations that give privilege, and those of the objects it owns (2 hops) */
+    var spiSnapReachLabels = ['Entra roles', 'Azure role assignments', 'APIs (application permissions)', 'Member of', 'Owns', 'Owner of (indirect)'];
+    function spiSnapReachList(groups, depth, index) {
+        var byLabel = spiSnapGroupsByLabel(groups);
+        var parts = [];
+        spiSnapReachLabels.forEach(function (label) {
+            var group = byLabel[label];
+            if (!group || !group.nodes.length) { return; }
+            var owning = label === 'Owns' || label === 'Owner of (indirect)';
+            var nodes = group.nodes.map(function (node) {
+                var html = spiSnapNodeHtml(node) + (node.details && node.details.length ? ' <span class="spiSnapReachDetail">' + spiSnapEsc(node.details.join(', ')) + '</span>' : '');
+                if (owning && depth === 1 && (node.kind === 'sp' || node.kind === 'app')) {
+                    var inner = spiSnapReachList(spiGraphGroupsCached(index, spiSnapEntity(index, node.id)), 2, index);
+                    html += inner || '';
+                }
+                return '<li>' + html + '</li>';
+            });
+            parts.push('<li><b>' + spiSnapEsc(label) + '</b> <span class="spiSnapCount">' + group.nodes.length + '</span><ul class="spiSnapTree">' + nodes.join('') + '</ul></li>');
+        });
+        return parts.length ? '<ul class="spiSnapTree">' + parts.join('') + '</ul>' : '';
+    }
+    function spiSnapReachHtml(index, groups) {
+        var list = spiSnapReachList(groups, 1, index);
+        return list ? '<div class="spiSnapNote">Its roles, scopes, application permissions and groups - and those of the objects it owns (directly or indirectly): what a leaked credential of it reaches.</div><div class="spiSnapReach">' + list + '</div>' : '<div class="spiSnapNote">No role, Azure scope, application permission, group or owned object in this report.</div>';
+    }
+    /* an API: its clients by permission (who has which permission on it), the most sensitive first */
+    var spiSnapClassRank = { critical: 4, high: 3, medium: 2, low: 1 };
+    function spiSnapApiByPermissionHtml(index, entity, refs) {
+        var apiId = entity.spId || entity.id, perms = {}, list = [];
+        Object.keys(refs.api).forEach(function (gridId) {
+            var type = /Oauth2/i.test(gridId) ? 'Delegated' : 'Application';
+            var htmlColumns = spiSnapMeta[gridId].c.filter(function (column) { return column[2] >= 0; });
+            var column = htmlColumns[htmlColumns.length - 1];
+            if (!column) { return; }
+            refs.api[gridId].forEach(function (row) {
+                (spiSnapCellItems(spiSnapApiPermissionsHtml(spiSnapValue(index, gridId, row, column[2]), apiId)) || []).forEach(function (item) {
+                    var name = spiSnapItemName(item.inner);
+                    if (!name) { return; }
+                    var key = type + '|' + name;
+                    var perm = perms[key];
+                    if (!perm) { perm = perms[key] = { name: name, type: type, classification: '', gridId: gridId, rows: [] }; list.push(perm); }
+                    var classification = spiSnapItemDims(item.inner).filter(function (dim) { return spiSnapClassRank[dim.toLowerCase()]; })[0];
+                    if (classification) { perm.classification = classification.toLowerCase(); }
+                    if (perm.rows[perm.rows.length - 1] !== row) { perm.rows.push(row); }
+                });
+            });
+        });
+        if (!list.length) { return ''; }
+        list.sort(function (a, b) { return (spiSnapClassRank[b.classification] || 0) - (spiSnapClassRank[a.classification] || 0) || b.rows.length - a.rows.length || (a.name < b.name ? -1 : 1); });
+        return spiSnapTableHtml(['Permission', 'Type', 'Classification', 'Clients'], list, function (perm) {
+            var key = 'lazy' + (++spiSnapState.moreSeq);
+            spiSnapState.more[key] = {
+                lazy: function () {
+                    var spColumn = spiSnapColumnsOfRole(perm.gridId, 'sp')[0];
+                    return spiSnapTableHtml(['Client', 'Type'], perm.rows, function (row) {
+                        var clientId = spColumn ? spiSnapValue(index, perm.gridId, row, spColumn[1]) : '';
+                        var client = clientId ? spiSnapEntity(index, clientId) : null;
+                        return '<tr><td>' + spiSnapEsc(client && client.row >= 0 ? client.name : clientId) + (clientId ? spiSnapLinkHtml(clientId, client && client.row >= 0 ? client.name : '') : '') + '</td><td>' + spiSnapEsc(client ? client.type : '') + '</td></tr>';
+                    });
+                }
+            };
+            return '<tr><td>' + spiSnapEsc(perm.name) + '</td><td>' + perm.type + '</td><td>' + (perm.classification ? '<span class="spiSnapClass spiSnapClass-' + perm.classification + '">' + perm.classification + '</span>' : '') + '</td><td><details class="spiSnapLazy" data-lazy="' + key + '"><summary>' + perm.rows.length + (perm.rows.length === 1 ? ' client' : ' clients') + '</summary><div class="spiSnapLazyBody"></div></details></td></tr>';
+        });
+    }
+
+    /* ---------- the snapshot ---------- */
+    /* the groups of a snapshot (identity, findings, the report's pages, history), cards are added to them */
+    function spiSnapGroups(withIdentity) {
+        var reg = spiSnapRegistry();
+        var list = [], byId = {};
+        var addGroup = function (key, title, fa, warn) { byId[key] = { key: key, title: title, fa: fa, warn: !!warn, cards: [] }; list.push(byId[key]); };
+        if (withIdentity) { addGroup('identity', 'Identity', 'fa-id-card'); addGroup('control', 'Control and reach', 'fa-shield-halved'); }
+        addGroup('findings', 'Findings', 'fa-triangle-exclamation', true);
+        (reg.pages || []).forEach(function (page) { if (page.id !== 'Overview' && page.id !== 'Changes') { addGroup(page.id, page.title, page.fa); } });
+        addGroup('history', 'History', 'fa-clock-rotate-left');
+        return { list: list, byId: byId };
+    }
+    /* the grids of the report in the order of its sections, with the group a section's cards go to; withEntityGrid: also the
+       Service Principals grid (a scope: the resources of system-assigned managed identities) */
+    function spiSnapEachGrid(index, groupsById, callback, withEntityGrid) {
+        (spiSnapRegistry().sections || []).forEach(function (section) {
+            (section.grids || []).forEach(function (gridId) {
+                if ((gridId === spiSnapEntityGrid && !withEntityGrid) || !spiSnapMeta[gridId] || !index.data[gridId]) { return; }
+                var group = section.id === 'ChangeHistory' ? groupsById.history : (section.state === 'warning' ? groupsById.findings : groupsById[section.page]);
+                if (group) { callback(section, gridId, group); }
+            });
+        });
+    }
+    /* the cards of the rows about the object (self) and of the objects that use it as an API (api) */
+    function spiSnapSelfCards(index, entity, refs, groupsById, identity) {
+        var total = 0;
+        spiSnapEachGrid(index, groupsById, function (section, gridId, group) {
+            var rows = refs.self[gridId];
+            if (rows && rows.length) {
+                group.cards.push(spiSnapCardHtml(section.title, rows.length, spiSnapActionHtml(index, gridId, section, rows), spiSnapRowsHtml(index, gridId, rows, identity, false)));
+                total++;
+            }
+            var apiRows = refs.api[gridId];
+            if (apiRows && apiRows.length && groupsById[section.page]) {
+                groupsById[section.page].cards.push(spiSnapCardHtml(spiSnapApiTitles[section.id] || (section.title + ' (this object as the API)'), apiRows.length, spiSnapFilterActionHtml(index, gridId, section, 'api', entity.spId || entity.id), spiSnapApiRowsHtml(index, entity, gridId, apiRows)));
+                total++;
+            }
+        });
+        return total;
+    }
+    /* the cards of the rows of other objects that name this one (owner, member, role holder, ...) */
+    function spiSnapRelationCards(index, refs, groupsById, itemTest, self) {
+        var total = 0;
+        spiSnapEachGrid(index, groupsById, function (section, gridId, group) {
+            var rows = refs.rel[gridId];
+            if (!rows || !rows.length) { return; }
+            /* all rows matched by the owner / HiPo column: the section filtered on it */
+            var exact = refs.exact[gridId];
+            var action = exact && exact.size === rows.length ? spiSnapFilterActionHtml(index, gridId, section, 'principal', spiSnapValue(index, gridId, rows[0], spiSnapMeta[gridId].k.filter(function (k) { return k[1] === 'principal'; })[0][0])) : '';
+            group.cards.push(spiSnapCardHtml(spiSnapRelationTitles[section.id] || section.title, rows.length, action, spiSnapRelatedRowsHtml(index, gridId, rows, itemTest, self, exact)));
+            total++;
+        });
+        return total;
+    }
+    function spiSnapHtml(index, id) {
+        spiSnapState.more = {};
+        var entity = spiSnapEntity(index, id);
+        if (entity.kind !== 'sp') { return spiSnapRelatedHtml(index, entity); }
+        var refs = spiSnapRefs(index, entity);
+        var identity = spiSnapIdentityValues(index, entity);
+        var groups = spiSnapGroups(true);
+        groups.byId.identity.cards.push(spiSnapCardHtml('Service Principal and application', null, '', spiSnapRowsHtml(index, spiSnapEntityGrid, [entity.row], identity, true)));
+        var total = spiSnapSelfCards(index, entity, refs, groups.byId, identity);
+        /* the objects it owns, directly and through ownership of other objects (the owner columns of the owner sections) */
+        if (entity.spId) { total += spiSnapRelationCards(index, spiSnapPrincipalRefs(index, { id: entity.spId }, true), groups.byId, null, entity); }
+        /* who can control it, what it reaches (from its relations, as in the graph); an API: its clients by permission */
+        var relations = spiGraphGroupsCached(index, entity);
+        groups.byId.control.cards.push(spiSnapCardHtml('Who can control it', null, '', spiSnapControlHtml(relations)));
+        groups.byId.control.cards.push(spiSnapCardHtml('What it can reach (2 hops)', null, '', spiSnapReachHtml(index, relations)));
+        var apiGrid = Object.keys(refs.api)[0];
+        if (apiGrid) {
+            var apiSection = (spiSnapRegistry().sections || []).filter(function (section) { return (section.grids || []).indexOf(apiGrid) >= 0; })[0];
+            var byPermission = spiSnapApiByPermissionHtml(index, entity, refs);
+            var apiGroup = apiSection && groups.byId[apiSection.page];
+            if (byPermission && apiGroup) { apiGroup.cards.unshift(spiSnapCardHtml('Clients by permission (this object as the API)', null, '', byPermission)); }
+        }
+        var used = groups.list.filter(function (group) { return group.cards.length; });
+        var ids = [];
+        if (entity.spId) { ids.push('Object Id <code>' + spiSnapEsc(entity.spId) + '</code>'); }
+        if (entity.appIds.length) { ids.push('Application Id <code>' + spiSnapEsc(entity.appIds[0]) + '</code>'); }
+        if (entity.appObjectId) { ids.push('Application object Id <code>' + spiSnapEsc(entity.appObjectId) + '</code>'); }
+        var portal = [];
+        if (entity.spId && entity.appIds.length) { portal.push('<a class="externallink" href="' + spiPortalHref('servicePrincipal', entity.spId, entity.appIds[0]) + '" target="_blank" rel="noopener">Enterprise application</a>'); }
+        if (entity.appObjectId && entity.appIds.length) { portal.push('<a class="externallink" href="' + spiPortalHref('application', entity.appObjectId, entity.appIds[entity.appIds.length - 1]) + '" target="_blank" rel="noopener">App registration</a>'); }
+        var html = '<div class="spiSnapHead"><h2 id="spiSnapTitle">' + spiSnapEsc(entity.name || entity.id) + (entity.type ? '<span class="spiSnapType">' + spiSnapEsc(entity.type) + '</span>' : '') + spiSnapLevelHtml(index, entity) + '</h2>' +
+            (entity.appName && entity.appName !== entity.name ? '<div class="spiSnapIds">Application: ' + spiSnapEsc(entity.appName) + '</div>' : '') +
+            '<div class="spiSnapIds">' + ids.join(' &middot; ') + (portal.length ? ' &middot; Entra portal: ' + portal.join(', ') : '') + '</div>' +
+            spiSnapGlanceHtml(index, entity, refs, relations) + '</div>' +
+            spiSnapGroupsHtml(used) +
+            (total ? '' : '<div class="spiSnapNote"><i class="fa fa-circle-info" aria-hidden="true"></i> No other section of this report names this object.</div>') +
+            (index.failed.length ? '<div class="spiSnapNote">Not read (data error): ' + spiSnapEsc(index.failed.join(', ')) + '</div>' : '');
+        return { entity: entity, html: html };
+    }
+
+    /* the groups of a snapshot: the buttons that jump to them (the number of cards), the groups with their cards */
+    function spiSnapGroupsHtml(used) {
+        return '<nav class="spiSnapToc" aria-label="Snapshot sections">' + used.map(function (group) {
+            return '<button type="button" data-target="spiSnapGroup-' + group.key + '"' + (group.warn ? ' class="warn"' : '') + ' title="' + group.cards.length + (group.cards.length === 1 ? ' section' : ' sections') + '"><i class="fa ' + group.fa + '" aria-hidden="true"></i> ' + spiSnapEsc(group.title) + ' (' + group.cards.length + ')</button>';
+        }).join('') + '</nav>' +
+            used.map(function (group) {
+                return '<div class="spiSnapGroup' + (group.warn ? ' warn' : '') + '" id="spiSnapGroup-' + group.key + '"><h3 class="spiSnapGroupTitle" tabindex="-1"><i class="fa ' + group.fa + '" aria-hidden="true"></i> ' + spiSnapEsc(group.title) + '</h3>' + group.cards.join('') + '</div>';
+            }).join('');
+    }
+
+    /* ---------- users, groups and Azure scopes (feature zoom-in) ----------
+       A user or group: the rows that name it - owner columns (role principal) and the list cells with its Entra portal link
+       (users and groups assigned to apps, group memberships, owners). An Azure scope (an ARM path, ?sp=/subscriptions/...):
+       the Service Principals with role assignments at the scope or below, and those inherited from the subscription or
+       resource group above (management groups: their hierarchy is not in the report). */
+    var spiSnapRelationTitles = {
+        ServicePrincipalOwners: 'Owner of these Service Principals',
+        ApplicationOwners: 'Owner of these applications',
+        ServicePrincipalOwnedObjects: 'Owned by these Service Principals',
+        ServicePrincipalsAppRoleAssignedTo: 'Assigned to these applications',
+        ServicePrincipalsGroupMemberships: 'Service Principals that are members',
+        Hipos: 'High-privilege (HiPo) user: owns privileged Service Principals or applications',
+        ServicePrincipalsAzureRoleAssignments: 'Azure role assignments through this group',
+        ServicePrincipalsAADRoleAssignments: 'Entra role assignments through this group',
+        ServicePrincipalsAADRoleAssignedOn: 'Holds an Entra role scoped to these Service Principals',
+        ApplicationsAADRoleAssignedOn: 'Holds an Entra role scoped to these applications'
+    };
+    function spiSnapText(html) {
+        html = String(html || '');
+        if (html.indexOf('<') < 0 && html.indexOf('&') < 0) { return html; }
+        return html.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+    }
+    function spiSnapScopeKind(scope) {
+        if (scope === '/') { return 'Tenant root'; }
+        if (/^\/providers\/microsoft\.management\/managementgroups\/[^/]+$/.test(scope)) { return 'Management group'; }
+        if (/^\/subscriptions\/[^/]+$/.test(scope)) { return 'Subscription'; }
+        if (/^\/subscriptions\/[^/]+\/resourcegroups\/[^/]+$/.test(scope)) { return 'Resource group'; }
+        return 'Resource';
+    }
+    /* the subscription and resource group above a scope */
+    function spiSnapScopeParents(scope) {
+        var match = /^(\/subscriptions\/[^/]+)(\/resourcegroups\/[^/]+)?(\/.+)?$/.exec(scope);
+        if (!match) { return []; }
+        var parents = [];
+        if (match[2] || match[3]) { parents.push(match[1]); }
+        if (match[2] && match[3]) { parents.push(match[1] + match[2]); }
+        return parents;
+    }
+    /* users, groups (id -> name, type) and Azure scopes (path -> name) of the report, for names and the find box */
+    function spiSnapDirectory(index) {
+        if (index.directory) { return index.directory; }
+        var principals = new Map(), scopes = new Map();
+        var linkPattern = /href="https:\/\/portal\.azure\.com\/#view\/Microsoft_AAD_(UsersAndTenants\/UserProfileMenuBlade\/~\/overview\/userId|IAM\/GroupDetailsMenuBlade\/~\/Overview\/groupId)\/([0-9a-fA-F-]{36})[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+        var markerPattern = /data-spi-scope="([^"]*)" data-spi-scope-name="([^"]*)"/g;
+        var addPrincipal = function (id, name, type) {
+            id = String(id || '').toLowerCase();
+            if (!spiSnapGuid.test(id) || index.byId.has(id)) { return; }
+            var known = principals.get(id);
+            if (!known) { principals.set(id, { id: id, name: name || id, type: type || '' }); return; }
+            if (known.name === id && name) { known.name = name; }
+            /* 'User (Member)' of an owner column over 'User' of a link */
+            if (type && type.length > known.type.length && type.toLowerCase().indexOf(known.type.toLowerCase()) === 0) { known.type = type; }
+        };
+        var addScope = function (scope, name) {
+            if (!scope) { return; }
+            if (!scopes.has(scope) || (name && !scopes.get(scope))) { scopes.set(scope, name || ''); }
+        };
+        index.grids.forEach(function (gridId) {
+            var data = index.data[gridId], meta = spiSnapMeta[gridId];
+            var nameColumn = meta.c.filter(function (column) { return column[5] === 'principalName'; })[0];
+            meta.k.forEach(function (key) {
+                if (key[1] === 'principal') {
+                    var column = meta.c.filter(function (c) { return c[1] === key[0]; })[0];
+                    for (var r = 0; r < data.rows.length; r++) {
+                        var id = spiSnapValue(index, gridId, r, key[0]);
+                        if (!id) { continue; }
+                        var type = column && column[4] >= 0 ? spiSnapValue(index, gridId, r, column[4]) : (column && column[3] === 'user' ? 'User' : '');
+                        addPrincipal(id, nameColumn ? spiSnapValue(index, gridId, r, nameColumn[1]) : '', type);
+                    }
+                }
+                else if (key[1] === 'scope') {
+                    (data.dictionaries[key[0]] || []).forEach(function (value) {
+                        if (!value) { return; }
+                        String(value).split('\n').forEach(function (scope) { addScope(scope, ''); spiSnapScopeParents(scope).forEach(function (parent) { addScope(parent, ''); }); });
+                    });
+                }
+            });
+            meta.c.forEach(function (column) {
+                if (column[2] < 0) { return; }
+                (data.dictionaries[column[2]] || []).forEach(function (html) {
+                    if (!html) { return; }
+                    var match;
+                    if (html.indexOf('UserProfileMenuBlade') >= 0 || html.indexOf('GroupDetailsMenuBlade') >= 0) {
+                        linkPattern.lastIndex = 0;
+                        while ((match = linkPattern.exec(html))) { addPrincipal(match[2], spiSnapText(match[3]), match[1].indexOf('UserProfile') >= 0 ? 'User' : 'Group'); }
+                    }
+                    if (html.indexOf('data-spi-scope=') >= 0) {
+                        markerPattern.lastIndex = 0;
+                        while ((match = markerPattern.exec(html))) { var markerScope = spiSnapText(match[1]); if (!scopes.get(markerScope)) { addScope(markerScope, spiSnapText(match[2])); } }
+                    }
+                    spiSnapPrincipalMarkers(html).forEach(function (marker) { addPrincipal(marker.id, marker.name, marker.type); });
+                });
+            });
+        });
+        index.directory = { principals: principals, scopes: scopes };
+        return index.directory;
+    }
+    /* the rows that name a user, group or Service Principal: exact - its id in an owner / HiPo column (principal role); in
+       grids without such a column, its id in the markup of a list cell (its Entra portal link, a marker: role holders, the
+       group of an assignment through a group) - never a display name or free text (a tag or a name can contain any id).
+       exactOnly: only the principal columns (a Service Principal as the owner of other objects). rel: rows per grid; exact:
+       the rows matched by a principal column per grid (a Set: the row is about this object - its cells are not filtered) */
+    function spiSnapPrincipalRefs(index, entity, exactOnly) {
+        var id = String(entity.id).toLowerCase(), upper = id.toUpperCase();
+        var needles = spiSnapPrincipalNeedles(id);
+        var rel = {}, exact = {};
+        index.grids.forEach(function (gridId) {
+            if (gridId === spiSnapEntityGrid) { return; }
+            var data = index.data[gridId], meta = spiSnapMeta[gridId];
+            var rows = new Set(), exactRows = new Set();
+            var mark = function (columnIndex, test, target) {
+                var dictionary = data.dictionaries[columnIndex] || [], marks = null;
+                for (var i = 0; i < dictionary.length; i++) {
+                    var value = dictionary[i];
+                    if (value && test(value)) { (marks = marks || new Uint8Array(dictionary.length))[i] = 1; }
+                }
+                if (!marks) { return; }
+                for (var r = 0; r < data.rows.length; r++) { if (marks[data.rows[r][columnIndex]]) { rows.add(r); if (target) { target.add(r); } } }
+            };
+            var principalKeys = meta.k.filter(function (key) { return key[1] === 'principal'; });
+            principalKeys.forEach(function (key) { mark(key[0], function (value) { return value === id || value === upper; }, exactRows); });
+            /* an owner grid's list cells name the owners of the owners (a second hop, its own rows as indirect owners) */
+            if (!principalKeys.length && !exactOnly) {
+                meta.c.forEach(function (column) { if (column[2] >= 0) { mark(column[2], function (value) { return spiSnapHasNeedle(value, needles); }, null); } });
+            }
+            if (rows.size) {
+                rel[gridId] = Array.from(rows).sort(function (a, b) { return a - b; });
+                if (exactRows.size) { exact[gridId] = exactRows; }
+            }
+        });
+        return { self: {}, api: {}, rel: rel, exact: exact };
+    }
+    /* the Tenant Root Group (its id is the tenant id): everything is below it */
+    function spiSnapTenantRootGroup() {
+        var reg = spiSnapRegistry();
+        var tenant = reg.report && reg.report.tenantId ? String(reg.report.tenantId).toLowerCase() : '';
+        return tenant ? '/providers/microsoft.management/managementgroups/' + tenant : '';
+    }
+    /* the card titles (and the graph labels) of a scope's role assignments; the management group hierarchy is not in the report:
+       a management group shows the assignments at it, a subscription not those at the management groups above it */
+    function spiSnapScopeTitles(scope) {
+        var root = spiSnapTenantRootGroup();
+        if (scope === '/' || (root && scope === root)) {
+            return { below: 'Role assignments in the tenant (at the root and below)', above: 'Inherited from above (tenant root)', note: '' };
+        }
+        if (spiSnapScopeKind(scope) === 'Management group') {
+            return { below: 'Role assignments at this management group', above: 'Inherited from above (tenant root)', note: 'The management groups and subscriptions below a management group are not known in this report: shown are the role assignments at this management group and those inherited from the tenant root.' };
+        }
+        return { below: 'Role assignments at this scope or below', above: 'Inherited from above (tenant root, subscription, resource group)', note: 'Role assignments at management groups other than the Tenant Root Group are not included: the management group hierarchy is not in this report.' };
+    }
+    /* the rows with role assignments at the scope or below (below) and at the subscription / resource group / tenant root above
+       (above) */
+    function spiSnapScopeRefs(index, entity) {
+        var scope = entity.id, below = {}, above = {}, resources = {};
+        var root = spiSnapTenantRootGroup();
+        var all = scope === '/' || (root !== '' && scope === root);
+        var isBelow = function (part) { return all || part === scope || part.indexOf(scope + '/') === 0; };
+        var isAbove = function (part) { return !all && part !== scope && (part === '/' || (root !== '' && part === root) || scope.indexOf(part + '/') === 0); };
+        index.grids.forEach(function (gridId) {
+            var data = index.data[gridId];
+            spiSnapMeta[gridId].k.forEach(function (key) {
+                if (key[1] === 'resource') {
+                    var values = data.dictionaries[key[0]] || [], hits = null;
+                    for (var v = 0; v < values.length; v++) { if (values[v] && isBelow(String(values[v]).toLowerCase())) { (hits = hits || new Uint8Array(values.length))[v] = 1; } }
+                    if (hits) { for (var row = 0; row < data.rows.length; row++) { if (hits[data.rows[row][key[0]]]) { (resources[gridId] = resources[gridId] || []).push(row); } } }
+                    return;
+                }
+                if (key[1] !== 'scope') { return; }
+                var dictionary = data.dictionaries[key[0]] || [], kinds = null;
+                for (var i = 0; i < dictionary.length; i++) {
+                    if (!dictionary[i]) { continue; }
+                    var kind = 0;
+                    String(dictionary[i]).split('\n').forEach(function (part) { if (isBelow(part)) { kind |= 1; } else if (isAbove(part)) { kind |= 2; } });
+                    if (kind) { (kinds = kinds || new Uint8Array(dictionary.length))[i] = kind; }
+                }
+                if (!kinds) { return; }
+                for (var r = 0; r < data.rows.length; r++) {
+                    var k = kinds[data.rows[r][key[0]]];
+                    if (k & 1) { (below[gridId] = below[gridId] || []).push(r); }
+                    if (k & 2) { (above[gridId] = above[gridId] || []).push(r); }
+                }
+            });
+        });
+        return { self: {}, api: {}, below: below, above: above, resources: resources, isBelow: isBelow, isAbove: isAbove };
+    }
+    /* the items of a list cell that pass the test (test: the markup of an item) - the users of an app, the role assignments
+       of a scope; a cell without a list (or one item) is kept or dropped as a whole */
+    function spiSnapItemsFilter(html, test) {
+        if (!html) { return ''; }
+        var items = spiSnapCellItems(html);
+        if (!items || !items.length || items[0].single) { return test(html) ? html : ''; }
+        var out = '', label = null, kept = [];
+        var flush = function () {
+            if (kept.length) { out += (label ? label.html.replace(/ \(\d+\)<\/b>$/, ' (' + kept.length + ')</b>') : '') + '<ul class="spiList spiItems">' + kept.join('') + '</ul>'; }
+            kept = [];
+        };
+        items.forEach(function (item) {
+            if (item.label !== label) { flush(); label = item.label; }
+            if (test(item.html)) { kept.push(item.html); }
+        });
+        flush();
+        return out;
+    }
+    /* the Service Principal / application a row is about */
+    function spiSnapSubject(index, gridId, row) {
+        var keys = spiSnapMeta[gridId].k.filter(function (key) { return key[1] === 'sp' || key[1] === 'app' || key[1] === 'object' || key[1] === 'appId'; });
+        for (var i = 0; i < keys.length; i++) {
+            var value = spiSnapValue(index, gridId, row, keys[i][0]);
+            if (value) { return { id: value, entity: spiSnapEntity(index, value) }; }
+        }
+        return null;
+    }
+    /* rows of other objects that name this one: the object of each row, then its columns. List cells show only the items
+       that pass itemTest (the cell is tested whole to choose the columns, its items when the row is shown); rows matched by
+       an exact column (exactRows) are about this object - not filtered. Columns that summarise all items of a row
+       (classification, count, tags) are left out where items are filtered. */
+    function spiSnapRelatedRowsHtml(index, gridId, rows, itemTest, self, exactRows) {
+        /* the snapshot's own name and type (a user's type in every HiPo row) are not repeated */
+        var own = new Set([String(self && self.name || '').toLowerCase(), String(self && self.type || '').toLowerCase()].filter(function (x) { return x; }));
+        var meta = spiSnapMeta[gridId];
+        var filtered = !!itemTest && rows.some(function (row) { return !exactRows || !exactRows.has(row); });
+        var columns = meta.c.filter(function (column) {
+            if (spiSnapIdentityRoles[column[5]] || column[5] === 'principal' || column[5] === 'principalName') { return false; }
+            if (filtered && column[5] === 'summary') { return false; }
+            /* the type column of the principal column */
+            return !meta.c.some(function (other) { return other[5] === 'principal' && other[4] === column[1]; });
+        });
+        var lines = rows.map(function (row) {
+            var test = exactRows && exactRows.has(row) ? null : itemTest;
+            var subject = spiSnapSubject(index, gridId, row);
+            var identity = subject ? spiSnapIdentityValues(index, subject.entity) : new Set();
+            if (subject && subject.entity.name) { identity.add(subject.entity.name.toLowerCase()); }
+            own.forEach(function (value) { identity.add(value); });
+            var cells = columns.map(function (column) {
+                var plain = spiSnapValue(index, gridId, row, column[1]);
+                var html = column[2] >= 0 ? spiSnapValue(index, gridId, row, column[2]) : '';
+                if (column[2] >= 0 && (!html || (test && !test(html)))) { return null; }
+                if (!plain && !html) { return null; }
+                if (!html && identity.has(plain.toLowerCase())) { return null; }
+                return { plain: plain, html: html, aux: column[4] >= 0 ? spiSnapValue(index, gridId, row, column[4]) : '', test: test };
+            });
+            return { subject: subject, cells: cells };
+        });
+        var shown = [];
+        columns.forEach(function (column, i) { if (lines.some(function (line) { return line.cells[i]; })) { shown.push(i); } });
+        return spiSnapTableHtml(['Service Principal / application'].concat(shown.map(function (i) { return columns[i][0]; })), lines, function (line) {
+            var subject = line.subject;
+            var subjectHtml = subject ? spiSnapEsc(subject.entity.row >= 0 ? subject.entity.name : subject.id) + (subject.entity.type ? ' <span class="spiDim">' + spiSnapEsc(subject.entity.type) + '</span>' : '') + spiSnapLinkHtml(subject.id, subject.entity.row >= 0 ? subject.entity.name : '') : '';
+            return '<tr><td>' + subjectHtml + '</td>' + shown.map(function (i) {
+                var cell = line.cells[i];
+                if (cell && cell.test) { cell = { plain: cell.plain, html: spiSnapItemsFilter(cell.html, cell.test), aux: cell.aux }; }
+                return '<td>' + (cell && (cell.html || cell.plain) ? spiSnapCellHtml(columns[i], cell) : '') + '</td>';
+            }).join('') + '</tr>';
+        });
+    }
+    /* the managed identities of resources at or below a scope: the identity, the resource */
+    function spiSnapResourceRowsHtml(index, gridId, rows) {
+        var key = spiSnapMeta[gridId].k.filter(function (k) { return k[1] === 'resource'; })[0];
+        return spiSnapTableHtml(['Managed identity', 'Azure resource'], rows, function (row) {
+            var subject = spiSnapSubject(index, gridId, row);
+            var resource = key ? spiSnapValue(index, gridId, row, key[0]).toLowerCase() : '';
+            var label = resource ? spiSnapScopeLabel(index, resource) : null;
+            return '<tr><td>' + (subject ? spiSnapEsc(subject.entity.row >= 0 ? subject.entity.name : subject.id) + spiSnapLinkHtml(subject.id, subject.entity.row >= 0 ? subject.entity.name : '') : '') + '</td><td>' +
+                (label ? spiSnapEsc(label.name) + ' <span class="spiDim">' + spiSnapEsc(label.type) + '</span>' + spiSnapLinkHtml(resource, label.name) : '') + '</td></tr>';
+        });
+    }
+    /* the name and type of an object that is not in the Service Principals list, from the rows about it (a removed object in
+       the change history, an agent object) */
+    function spiSnapNameFromRows(index, byGrid) {
+        var found = { name: '', type: '' };
+        Object.keys(byGrid).some(function (gridId) {
+            var name = spiSnapColumnsOfRole(gridId, 'objectName')[0], type = spiSnapColumnsOfRole(gridId, 'objectType')[0];
+            return byGrid[gridId].some(function (row) {
+                if (!found.name && name) { found.name = spiSnapValue(index, gridId, row, name[1]); }
+                if (!found.type && type) { found.type = spiSnapValue(index, gridId, row, type[1]); }
+                return found.name && found.type;
+            });
+        });
+        return found;
+    }
+    /* the snapshot of a user, group, another object (not in the Service Principals list: a removed or foreign one) or an Azure
+       scope */
+    function spiSnapRelatedHtml(index, entity) {
+        var reg = spiSnapRegistry();
+        var directory = spiSnapDirectory(index);
+        var groups = spiSnapGroups(false);
+        var head = '', total = 0, note = '';
+        if (entity.kind === 'scope') {
+            var refs = spiSnapScopeRefs(index, entity);
+            var titles = spiSnapScopeTitles(entity.id);
+            var markerTest = function (test) { return function (html) { return spiSnapScopeMarkersIn(html).some(test); }; };
+            spiSnapEachGrid(index, groups.byId, function (section, gridId, group) {
+                if (section.id === 'ChangeHistory') { return; }
+                if (refs.below[gridId]) { group.cards.push(spiSnapCardHtml(titles.below, refs.below[gridId].length, spiSnapFilterActionHtml(index, gridId, section, 'scope', entity.id === '/' || entity.id === spiSnapTenantRootGroup() ? '' : entity.id), spiSnapRelatedRowsHtml(index, gridId, refs.below[gridId], markerTest(refs.isBelow), null, null))); total++; }
+                if (refs.above[gridId]) { group.cards.push(spiSnapCardHtml(titles.above, refs.above[gridId].length, '', spiSnapRelatedRowsHtml(index, gridId, refs.above[gridId], markerTest(refs.isAbove), null, null))); total++; }
+                if (refs.resources[gridId]) { group.cards.push(spiSnapCardHtml(spiSnapResourceTitles[section.id] || section.title, refs.resources[gridId].length, '', spiSnapResourceRowsHtml(index, gridId, refs.resources[gridId]))); total++; }
+            }, true);
+            var tenant = reg.report && reg.report.tenantId ? reg.report.tenantId : '';
+            var scopeLabel = spiSnapScopeLabel(index, entity.id);
+            entity.name = scopeLabel.fullName || scopeLabel.name;
+            entity.type = scopeLabel.type;
+            var parents = spiSnapScopeParents(entity.id);
+            /* the Azure portal: only for a scope this report knows (a link from ?sp= text is not offered) */
+            var known = entity.id !== '/' && (directory.scopes.has(entity.id) || total > 0);
+            head = '<div class="spiSnapHead"><h2 id="spiSnapTitle">' + spiSnapEsc(entity.name) + '<span class="spiSnapType">' + spiSnapEsc(entity.type) + '</span></h2>' +
+                '<div class="spiSnapIds">Scope <code>' + spiSnapEsc(entity.id) + '</code>' + (tenant && known ? ' &middot; <a class="externallink" href="https://portal.azure.com/#@' + encodeURIComponent(tenant) + '/resource' + spiSnapEsc(entity.id) + '" target="_blank" rel="noopener">Azure portal</a>' : '') + '</div>' +
+                (parents.length ? '<div class="spiSnapIds">In: ' + parents.map(function (parent) { return spiSnapEsc(directory.scopes.get(parent) || parent) + spiSnapLinkHtml(parent, directory.scopes.get(parent) || parent); }).join(' &rsaquo; ') + '</div>' : '') +
+                (titles.note ? '<div class="spiSnapIds">' + spiSnapEsc(titles.note) + '</div>' : '') + '</div>';
+            note = 'No Service Principal with an Azure role assignment at, below or above this scope in this report.';
+        }
+        else {
+            /* the rows about it (an object outside the Service Principals list: its change history, the clients of its API) and the
+               rows of other objects that name it */
+            var selfRefs = spiSnapRefs(index, entity);
+            total += spiSnapSelfCards(index, entity, selfRefs, groups.byId, spiSnapIdentityValues(index, entity));
+            var principal = directory.principals.get(entity.id);
+            var fromRows = spiSnapNameFromRows(index, selfRefs.self);
+            entity.name = principal ? principal.name : (fromRows.name || entity.id);
+            entity.type = principal ? principal.type : fromRows.type;
+            var needles = spiSnapPrincipalNeedles(entity.id);
+            total += spiSnapRelationCards(index, spiSnapPrincipalRefs(index, entity, false), groups.byId, function (html) { return spiSnapHasNeedle(html, needles); }, entity);
+            var isUser = /^user/i.test(entity.type), isGroup = /^group/i.test(entity.type);
+            var portal = isUser ? spiPortalHref('user', entity.id, '') : (isGroup ? spiPortalHref('group', entity.id, '') : '');
+            head = '<div class="spiSnapHead"><h2 id="spiSnapTitle">' + spiSnapEsc(entity.name) + (entity.type ? '<span class="spiSnapType">' + spiSnapEsc(entity.type) + '</span>' : '') + '</h2>' +
+                '<div class="spiSnapIds">Object Id <code>' + spiSnapEsc(entity.id) + '</code>' + (portal ? ' &middot; Entra portal: <a class="externallink" href="' + portal + '" target="_blank" rel="noopener">' + (isUser ? 'User' : 'Group') + '</a>' : '') +
+                (principal ? '' : ' (not in the Service Principals list of this report)') + '</div></div>';
+            note = 'This object is not named in any section of this report.';
+        }
+        if (!total) {
+            return { entity: entity, html: head + '<div class="spiSnapNote"><i class="fa fa-circle-info" aria-hidden="true"></i> ' + spiSnapEsc(note) + '</div>', empty: true };
+        }
+        var used = groups.list.filter(function (group) { return group.cards.length; });
+        return { entity: entity, html: head + spiSnapGroupsHtml(used) };
+    }
+
+    /* ---------- graph: the object and its relations (feature zoom-in, level 3) ----------
+       The object in the centre - an enterprise application (Service Principal) and its app registration as two linked
+       nodes when both are in the tenant; around it one bubble per kind of relation (owners, owned objects, APIs and their
+       clients, Entra roles, Azure scopes, groups, assigned users, credentials, Azure resources of a managed identity, ...)
+       with its objects inside; a bubble hangs at the node it belongs to (application owners and the app's credentials at
+       the app registration). One edge per bubble, the arrow in the direction of the relation: the owner to the object,
+       the object to its API, role, scope or group, the client to the API, a credential to the object it signs in as. A
+       bubble with more than spiGraphBundleAt objects is closed until opened. An object is a button: a Service Principal,
+       application, user, group, scope or resource shows its own relations (one hop per click), a role opens its
+       AzAdvertizer page. Under the name: the Azure roles at a scope, the permissions on an API, a credential's expiry or
+       trust. Marked: relations that give control or privilege, Service Principals with critical / high effective
+       privilege. Icons: the Azure icons of the portal assets (Font Awesome when they cannot be loaded). Mouse wheel: zoom at
+       the pointer; drag: move. No graph library: the nodes are HTML (names wrap, nothing is cut), the edges SVG. */
+    var spiGraphBundleAt = 10, spiGraphScrollAt = 60;
+    /* relation names: the rows about the object (by section), the rows of other objects that name it (reverse) */
+    var spiGraphLabels = {
+        ServicePrincipalOwners: 'Owners', ApplicationOwners: 'Application owners', ServicePrincipalOwnedObjects: 'Owns',
+        ServicePrincipalsAADRoleAssignments: 'Entra roles', ServicePrincipalsAADRoleAssignedOn: 'Entra role holders on it', ApplicationsAADRoleAssignedOn: 'Entra role holders on the application',
+        ServicePrincipalsAppRoleAssignments: 'APIs (application permissions)', ServicePrincipalsOauth2PermissionGrants: 'APIs (delegated permissions)',
+        ServicePrincipalsAppRoleAssignedTo: 'Assigned users and groups', ServicePrincipalsAzureRoleAssignments: 'Azure role assignments', ServicePrincipalsGroupMemberships: 'Member of',
+        ApplicationSecrets: 'Secrets', ApplicationCertificates: 'Certificates', ServicePrincipalCredentials: 'Credentials on the service principal', FederatedIdentityCredentialTrust: 'Federated credentials',
+        ManagedIdentityUserAssignedAssociatedAzureResources: 'Attached to (Azure resources)'
+    };
+    var spiGraphReverseLabels = {
+        ServicePrincipalOwners: 'Owner of', ApplicationOwners: 'Owner of (applications)', ServicePrincipalOwnedObjects: 'Owned by',
+        ServicePrincipalsAppRoleAssignedTo: 'Assigned to', ServicePrincipalsGroupMemberships: 'Members', ServicePrincipalsAzureRoleAssignments: 'Role assignments through this group',
+        ServicePrincipalsAADRoleAssignments: 'Entra roles through this group', Hipos: 'HiPo: owns privileged',
+        ServicePrincipalsAppRoleAssignments: 'Clients (application permissions)', ServicePrincipalsOauth2PermissionGrants: 'Clients (delegated permissions)',
+        ServicePrincipalsAADRoleAssignedOn: 'Holds an Entra role on', ApplicationsAADRoleAssignedOn: 'Holds an Entra role on (applications)'
+    };
+    /* owners that control the object through ownership of another object (Owner Applicability: indirect) */
+    var spiGraphIndirectLabels = { 'Owners': 'Owners (indirect)', 'Application owners': 'Application owners (indirect)', 'Owner of': 'Owner of (indirect)', 'Owner of (applications)': 'Owner of (applications, indirect)' };
+    /* bubbles of role holders: the holder is the node, the role its detail */
+    var spiGraphHolderLabels = { 'Entra role holders on it': 1, 'Entra role holders on the application': 1 };
+    /* the managed identities of an Azure resource (scope graph and snapshot), by section */
+    var spiSnapResourceTitles = {
+        ServicePrincipals: 'Managed identities (system assigned) of resources here or below',
+        ManagedIdentityUserAssignedAssociatedAzureResources: 'Managed identities (user assigned) attached to resources here or below',
+        ManagedIdentityUserAssignedAssignmentRestrictions: 'Managed identities (user assigned) created here or below'
+    };
+    /* relations that give control or privilege: their edges and bubbles are marked */
+    var spiGraphRisky = {
+        'Owners': 1, 'Application owners': 1, 'Owns': 1, 'Owner of': 1, 'Owner of (applications)': 1, 'Owned by': 1,
+        'Owners (indirect)': 1, 'Application owners (indirect)': 1, 'Owner of (indirect)': 1, 'Owner of (applications, indirect)': 1,
+        'Entra roles': 1, 'Azure role assignments': 1, 'HiPo: owns privileged': 1, 'Role assignments through this group': 1, 'Entra roles through this group': 1,
+        'Entra role holders on it': 1, 'Entra role holders on the application': 1, 'Holds an Entra role on': 1, 'Holds an Entra role on (applications)': 1,
+        'Role assignments at this scope or below': 1, 'Role assignments at this management group': 1, 'Role assignments in the tenant (at the root and below)': 1, 'Inherited from above': 1,
+        'Federated credentials': 1, 'Federated credentials (app registration)': 1, 'Credentials on the service principal': 1
+    };
+    /* the direction: the related objects act on this one (they own it, use it as an API, hold a role on it, are members,
+       sign in as it, use it as their identity) - the arrow points to the centre; otherwise from the centre */
+    var spiGraphInward = { 'Owners': 1, 'Application owners': 1, 'Owners (indirect)': 1, 'Application owners (indirect)': 1, 'Owned by': 1, 'Role assignments at this management group': 1, 'Role assignments in the tenant (at the root and below)': 1, 'Clients (application permissions)': 1, 'Clients (delegated permissions)': 1, 'Entra role holders on it': 1, 'Entra role holders on the application': 1, 'Assigned users and groups': 1, 'Members': 1, 'Role assignments at this scope or below': 1, 'Inherited from above': 1, 'Secrets': 1, 'Certificates': 1, 'Credentials on the service principal': 1, 'Federated credentials': 1, 'Federated credentials (app registration)': 1, 'Attached to (Azure resources)': 1, 'Managed identity of (Azure resource)': 1 };
+    /* bubbles of the app registration (the other ones hang at the enterprise application) */
+    var spiGraphAppAnchored = { 'Application owners': 1, 'Application owners (indirect)': 1, 'Entra role holders on the application': 1, 'Secrets': 1, 'Certificates': 1, 'Federated credentials (app registration)': 1 };
+    /* the effective privilege of the Service Principals (critical / high), from the effective privilege section */
+    function spiGraphLevels(index) {
+        if (index.levels) { return index.levels; }
+        var levels = new Map();
+        index.grids.forEach(function (gridId) {
+            var levelColumn = spiSnapColumnsOfRole(gridId, 'level')[0];
+            if (!levelColumn) { return; }
+            for (var r = 0; r < index.data[gridId].rows.length; r++) {
+                var subject = spiSnapSubject(index, gridId, r);
+                var level = spiSnapValue(index, gridId, r, levelColumn[1]).toLowerCase();
+                if (!subject || !level) { continue; }
+                var key = subject.entity.id || subject.id.toLowerCase();
+                if (level === 'critical' || !levels.has(key)) { levels.set(key, level); }
+            }
+        });
+        index.levels = levels;
+        return levels;
+    }
+    /* the name and type of an Azure scope: the name of the report (role assignments) or, for a resource, its last segment
+       and the resource type */
+    function spiSnapScopeLabel(index, scope) {
+        var kind = spiSnapScopeKind(scope);
+        var known = spiSnapDirectory(index).scopes.get(scope);
+        if (kind !== 'Resource') { return { name: known || scope.split('/').pop() || scope, type: scope === spiSnapTenantRootGroup() ? 'Management group (Tenant Root Group)' : kind }; }
+        var at = scope.lastIndexOf('/providers/');
+        var parts = at >= 0 ? scope.slice(at + 11).split('/') : [];
+        var types = [];
+        for (var i = 1; i < parts.length; i += 2) { types.push(parts[i]); }
+        return { name: parts.length ? parts[parts.length - 1] : scope, type: parts.length ? parts[0] + '/' + types.join('/') : 'Resource', fullName: known || '' };
+    }
+    /* a node from an id (Service Principal, application id, user, group, scope) or a role / credential */
+    function spiGraphNode(index, raw) {
+        if (raw.kind === 'role' || raw.kind === 'credential') { return raw; }
+        var directory = spiSnapDirectory(index);
+        var entity = spiSnapEntity(index, raw.id);
+        if (entity.kind === 'sp') {
+            /* the app registration of a row (owned, an owner's application): its object id or application id, not the SP's */
+            var rawId = String(raw.id).toLowerCase();
+            if (entity.appObjectId && rawId !== entity.spId && (rawId === entity.appObjectId || (raw.app && entity.appIds.indexOf(rawId) >= 0))) {
+                return { id: entity.appObjectId, name: entity.appName || entity.name, type: 'App registration', kind: 'app', level: '' };
+            }
+            return { id: entity.id, name: entity.name, type: entity.type, kind: entity.spId ? 'sp' : 'app', level: spiGraphLevels(index).get(entity.id) || '' };
+        }
+        if (entity.kind === 'scope') { var label = spiSnapScopeLabel(index, entity.id); return { id: entity.id, name: label.name, type: label.type, kind: 'scope' }; }
+        var known = directory.principals.get(entity.id);
+        var type = raw.type || (known && known.type) || '';
+        return { id: entity.id, name: raw.name || (known && known.name) || entity.id, type: type, kind: /^group/i.test(type) ? 'group' : (/^user/i.test(type) ? 'user' : (/^(sp|serviceprincipal)/i.test(type) ? 'sp' : 'object')) };
+    }
+    /* the Azure roles per scope of an Azure RBAC cell: the role of each item with a scope marker, with its qualifiers (through a
+       group, PIM, a condition) - a scan per item (no regex over the whole cell: a long condition text made that quadratic) */
+    var spiGraphScopeMarker = '<span class="spiScope" data-spi-scope="';
+    function spiGraphScopeRoles(html) {
+        var roles = {};
+        (spiSnapCellItems(html) || []).forEach(function (item) {
+            var at = item.inner.indexOf(spiGraphScopeMarker);
+            if (at < 0) { return; }
+            var start = at + spiGraphScopeMarker.length;
+            var scope = spiSnapText(item.inner.slice(start, item.inner.indexOf('"', start)));
+            var role = spiSnapText(item.inner.slice(0, at)).trim();
+            if (!role) { return; }
+            var qualifiers = spiSnapItemDims(item.inner).filter(function (dim) { return dim === 'PIM' || dim.indexOf('through group ') === 0 || dim.indexOf(' condition') >= 0; });
+            (roles[scope] = roles[scope] || []).push(role + (qualifiers.length ? ' (' + qualifiers.join('; ') + ')' : ''));
+        });
+        return roles;
+    }
+    /* the permissions of a client on one API (its group in the permission cell, by the API's object id): the names */
+    function spiGraphApiPermissionNames(html, apiId) {
+        var group = spiSnapApiPermissionsHtml(html, apiId);
+        return group ? (spiSnapCellItems(group) || []).map(function (item) { return spiSnapItemName(item.inner); }).filter(function (name) { return name; }) : [];
+    }
+    /* the items of a list cell: name, the dimmed parts, the state (muted / warn) */
+    function spiGraphHtmlItems(html) {
+        return (spiSnapCellItems(html) || []).map(function (item) { return { name: spiSnapItemName(item.inner), dims: spiSnapItemDims(item.inner), state: item.state }; });
+    }
+    function spiGraphLastHtml(index, gridId, row) {
+        var htmlColumns = spiSnapMeta[gridId].c.filter(function (column) { return column[2] >= 0; });
+        return htmlColumns.length ? spiSnapValue(index, gridId, row, htmlColumns[htmlColumns.length - 1][2]) : '';
+    }
+    var spiGraphLinkPattern = /href="https:\/\/portal\.azure\.com\/#view\/Microsoft_AAD_(IAM\/ManagedAppMenuBlade\/~\/Overview\/objectId|RegisteredApps\/ApplicationMenuBlade\/~\/Overview\/appId|UsersAndTenants\/UserProfileMenuBlade\/~\/overview\/userId|IAM\/GroupDetailsMenuBlade\/~\/Overview\/groupId)\/([0-9a-fA-F-]{36})[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+    var spiGraphRolePattern = /href="(https:\/\/www\.azadvertizer\.net\/azentraidroles\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    /* a row of an owner section about an indirect owner (it controls the object through ownership of another one): the path */
+    function spiGraphIndirect(index, gridId, row) {
+        var column = spiSnapColumnsOfRole(gridId, 'applicability')[0];
+        if (!column || spiSnapValue(index, gridId, row, column[1]).toLowerCase() !== 'indirect') { return null; }
+        var via = spiSnapColumnsOfRole(gridId, 'via')[0];
+        var path = via ? spiSnapValue(index, gridId, row, via[1]) : '';
+        return ['indirect' + (path ? ' via ' + path : '')];
+    }
+    /* the related objects named in one row about the object: credentials (a credential per row, or the items of a
+       secret / certificate cell), principal (indirect owners in their own bubble), scope (with the roles), API (with the
+       permissions) and resource columns; the items of the list cells of grids without a principal column (an owner grid's
+       cells name the owners of the owners - a second hop): Entra roles with their scope and group, role holders (the holder,
+       the role as its detail), linked objects */
+    function spiGraphRowNeighbors(index, gridId, row, add, label) {
+        var meta = spiSnapMeta[gridId];
+        var roleColumn = function (role) { return meta.c.filter(function (column) { return column[5] === role; }); };
+        var credName = roleColumn('credName')[0];
+        if (credName) {
+            var credType = spiSnapValue(index, gridId, row, (roleColumn('credType')[0] || [0, -1])[1]);
+            var credOn = spiSnapValue(index, gridId, row, (roleColumn('credOn')[0] || [0, -1])[1]);
+            var fic = label === 'Federated credentials';
+            add({
+                kind: 'credential', id: 'cred:' + gridId + ':' + row, name: spiSnapValue(index, gridId, row, credName[1]) || '(no name)',
+                type: fic ? 'Federated credential' + (credType ? ' - ' + credType : '') : credType,
+                sub: fic ? 'fic' : (/certificate/i.test(credType) ? 'certificate' : 'secret'),
+                details: roleColumn('credDetail').map(function (column) { return spiSnapValue(index, gridId, row, column[1]); }).filter(function (x) { return x; }),
+                group: fic && /app/i.test(credOn) ? 'Federated credentials (app registration)' : ''
+            });
+            return;
+        }
+        if (label === 'Secrets' || label === 'Certificates') {
+            spiGraphHtmlItems(spiGraphLastHtml(index, gridId, row)).forEach(function (item, i) {
+                add({ kind: 'credential', id: 'cred:' + gridId + ':' + row + ':' + i, name: item.name || '(no name)', type: label === 'Secrets' ? 'Secret' : 'Certificate', sub: label === 'Secrets' ? 'secret' : 'certificate', details: item.dims.slice(0, 2), state: item.state });
+            });
+            return;
+        }
+        var hasPrincipal = meta.k.some(function (key) { return key[1] === 'principal'; });
+        var nameColumn = roleColumn('principalName')[0];
+        var indirect = spiGraphIndirect(index, gridId, row);
+        meta.k.forEach(function (key) {
+            var value = spiSnapValue(index, gridId, row, key[0]);
+            if (!value) { return; }
+            if (key[1] === 'principal') {
+                var column = meta.c.filter(function (c) { return c[1] === key[0]; })[0];
+                add({ id: value, name: nameColumn ? spiSnapValue(index, gridId, row, nameColumn[1]) : '', type: column && column[4] >= 0 ? spiSnapValue(index, gridId, row, column[4]) : (column && column[3] === 'user' ? 'User' : ''), group: indirect ? (spiGraphIndirectLabels[label] || '') : '', details: indirect || [] });
+            }
+            else if (key[1] === 'scope') {
+                var roles = spiGraphScopeRoles(spiGraphLastHtml(index, gridId, row));
+                value.split('\n').forEach(function (scope) { if (scope) { add({ id: scope, details: roles[scope] || [] }); } });
+            }
+            else if (key[1] === 'api') {
+                var permissionHtml = spiGraphLastHtml(index, gridId, row);
+                value.split(/\s+/).forEach(function (id) { if (id) { add({ id: id, details: spiGraphApiPermissionNames(permissionHtml, id) }); } });
+            }
+            else if (key[1] === 'resource') { add({ id: value.toLowerCase() }); }
+        });
+        if (hasPrincipal) { return; }
+        var holders = !!spiGraphHolderLabels[label];
+        meta.c.forEach(function (column) {
+            if (column[2] < 0) { return; }
+            var html = spiSnapValue(index, gridId, row, column[2]);
+            if (!html) { return; }
+            (spiSnapCellItems(html) || [{ inner: html }]).forEach(function (item) {
+                var roles = [], match;
+                spiGraphRolePattern.lastIndex = 0;
+                while ((match = spiGraphRolePattern.exec(item.inner))) { roles.push({ href: match[1], name: spiSnapText(match[2]) }); }
+                if (holders) {
+                    var roleNames = roles.length ? roles.map(function (role) { return role.name; }) : [spiSnapItemName(item.inner)].filter(function (name) { return name; });
+                    spiSnapPrincipalMarkers(item.inner).forEach(function (holder) { add({ id: holder.id, name: holder.name, type: holder.type, details: roleNames }); });
+                    return;
+                }
+                /* the scope of an Entra role (an administrative unit, an application) and the group it comes through: a role scoped
+                   to one object is not tenant-wide, one role at two scopes is two nodes */
+                var qualifiers = spiSnapItemDims(item.inner).filter(function (dim) { return dim.indexOf('scope: ') === 0 || dim.indexOf('through group ') === 0; });
+                if (!roles.length && label === 'Entra roles' && item.inner !== html) { roles.push({ href: '', name: spiSnapItemName(item.inner) }); }
+                roles.forEach(function (role) {
+                    if (!role.name) { return; }
+                    add({ kind: 'role', id: 'role:' + (role.href || role.name) + (qualifiers.length ? '|' + qualifiers.join('|') : ''), name: role.name, type: 'Entra role', href: role.href, details: qualifiers });
+                });
+                spiGraphLinkPattern.lastIndex = 0;
+                while ((match = spiGraphLinkPattern.exec(item.inner))) { add({ id: match[2], name: spiSnapText(match[3]), app: match[1].indexOf('RegisteredApps') === 0 }); }
+            });
+        });
+    }
+    /* the relation groups of an object: [{ label, risky, inward, indirect, anchor, nodes }] */
+    function spiGraphGroups(index, entity) {
+        var reg = spiSnapRegistry();
+        var groups = [], byLabel = {};
+        var own = new Set(spiSnapEntityIds(entity));
+        var pair = entity.kind === 'sp' && entity.spId && entity.appObjectId;
+        var adder = function (label) {
+            if (!byLabel[label]) { byLabel[label] = { label: label, risky: !!spiGraphRisky[label], inward: !!spiGraphInward[label], indirect: /indirect\)$/.test(label), anchor: spiGraphAppAnchored[label] ? 'app' : 'sp', nodes: [], byId: {} }; groups.push(byLabel[label]); }
+            var group = byLabel[label];
+            return function (raw) {
+                if (raw.group && raw.group !== label) { adder(raw.group)(Object.assign({}, raw, { group: '' })); return; }
+                var node = spiGraphNode(index, raw);
+                if (!node.id) { return; }
+                if (own.has(node.id)) {
+                    /* a relation to itself - an enterprise application that owns its own app registration (it can add credentials
+                       to itself), a client of its own API: a marked note, not dropped */
+                    if (raw.kind === 'role' || raw.kind === 'credential') { return; }
+                    node = { kind: 'note', id: 'self:' + node.kind, name: 'Itself', type: pair ? (node.kind === 'app' ? 'its app registration' : 'its enterprise application') : 'this object', state: 'warn' };
+                }
+                var details = raw.details || [];
+                var known = group.byId[node.id];
+                if (!known) { known = group.byId[node.id] = Object.assign({}, node, { details: [] }); group.nodes.push(known); }
+                details.forEach(function (detail) { if (known.details.indexOf(detail) < 0) { known.details.push(detail); } });
+            };
+        };
+        /* the grids in the order of the report's sections */
+        var sectionOfGrid = {}, gridOrder = [];
+        (reg.sections || []).forEach(function (section) { (section.grids || []).forEach(function (gridId) { sectionOfGrid[gridId] = section; gridOrder.push(gridId); }); });
+        var inOrder = function (byGrid) { return gridOrder.filter(function (gridId) { return byGrid && byGrid[gridId]; }); };
+        /* the objects of the rows that name this one; labelOf(section, gridId, row): the bubble ('' - none); details: the roles /
+           permissions of the row that concern it */
+        var subjects = function (byGrid, labelOf, detailsOf) {
+            inOrder(byGrid).forEach(function (gridId) {
+                byGrid[gridId].forEach(function (row) {
+                    var label = labelOf(sectionOfGrid[gridId], gridId, row);
+                    var subject = label ? spiSnapSubject(index, gridId, row) : null;
+                    if (subject) { adder(label)({ id: subject.id, details: detailsOf ? detailsOf(gridId, row) : [] }); }
+                });
+            });
+        };
+        /* the owner rows: direct and indirect owners in separate bubbles */
+        var ownerLabel = function (labels) {
+            return function (section, gridId, row) {
+                var label = section ? labels[section.id] : '';
+                if (!label) { return ''; }
+                return spiGraphIndirect(index, gridId, row) ? (spiGraphIndirectLabels[label] || label) : label;
+            };
+        };
+        if (entity.kind === 'sp' || entity.kind === 'principal') {
+            var refs = spiSnapRefs(index, entity);
+            inOrder(refs.self).forEach(function (gridId) {
+                var section = sectionOfGrid[gridId];
+                if (gridId === spiSnapEntityGrid) {
+                    /* the Azure resource of a system-assigned managed identity */
+                    var resourceColumn = spiSnapMeta[gridId].k.filter(function (key) { return key[1] === 'resource'; })[0];
+                    if (resourceColumn) { refs.self[gridId].forEach(function (row) { var value = spiSnapValue(index, gridId, row, resourceColumn[0]); if (value) { adder('Managed identity of (Azure resource)')({ id: value.toLowerCase() }); } }); }
+                    return;
+                }
+                var label = section && spiGraphLabels[section.id];
+                if (!label) { return; }
+                var add = adder(label);
+                refs.self[gridId].forEach(function (row) { spiGraphRowNeighbors(index, gridId, row, add, label); });
+            });
+            var apiId = entity.spId || entity.id;
+            subjects(refs.api, function (section) { return section ? spiGraphReverseLabels[section.id] || '' : ''; }, function (gridId, row) {
+                return spiGraphApiPermissionNames(spiGraphLastHtml(index, gridId, row), apiId);
+            });
+        }
+        if (entity.kind === 'sp' && entity.spId) {
+            /* the objects it controls through ownership of other objects (the objects it owns directly: Owns) */
+            subjects(spiSnapPrincipalRefs(index, { id: entity.spId }, true).rel, function (section, gridId, row) {
+                return spiGraphIndirect(index, gridId, row) ? ownerLabel(spiGraphReverseLabels)(section, gridId, row) : '';
+            }, function (gridId, row) { return spiGraphIndirect(index, gridId, row) || []; });
+        }
+        else if (entity.kind === 'principal') {
+            var needles = spiSnapPrincipalNeedles(entity.id);
+            subjects(spiSnapPrincipalRefs(index, entity, false).rel, function (section, gridId, row) {
+                if (!section) { return ''; }
+                return ownerLabel(spiGraphReverseLabels)(section, gridId, row) || spiGraphReverseLabels[section.id] || section.title;
+            }, function (gridId, row) {
+                var indirect = spiGraphIndirect(index, gridId, row);
+                if (indirect) { return indirect; }
+                /* the roles it holds on the object / the roles that come through the group */
+                var out = [];
+                spiSnapMeta[gridId].c.forEach(function (column) {
+                    if (column[2] < 0) { return; }
+                    (spiSnapCellItems(spiSnapValue(index, gridId, row, column[2])) || []).forEach(function (item) {
+                        if (item.inner.indexOf('data-spi-principal=') >= 0 && spiSnapHasNeedle(item.inner, needles)) {
+                            var name = spiSnapItemName(item.inner);
+                            if (name && out.indexOf(name) < 0) { out.push(name); }
+                        }
+                    });
+                });
+                return out;
+            });
+        }
+        else if (entity.kind === 'scope') {
+            var scopeRefs = spiSnapScopeRefs(index, entity);
+            var titles = spiSnapScopeTitles(entity.id);
+            var rolesWhere = function (test) {
+                return function (gridId, row) {
+                    var roles = spiGraphScopeRoles(spiGraphLastHtml(index, gridId, row)), out = [];
+                    Object.keys(roles).forEach(function (scope) { if (test(scope)) { roles[scope].forEach(function (role) { if (out.indexOf(role) < 0) { out.push(role); } }); } });
+                    return out;
+                };
+            };
+            subjects(scopeRefs.below, function () { return titles.below; }, rolesWhere(scopeRefs.isBelow));
+            subjects(scopeRefs.above, function () { return 'Inherited from above'; }, rolesWhere(scopeRefs.isAbove));
+            var resourceLabels = { ServicePrincipals: 'Managed identities (system assigned)', ManagedIdentityUserAssignedAssociatedAzureResources: 'Managed identities attached', ManagedIdentityUserAssignedAssignmentRestrictions: 'Managed identities created here' };
+            subjects(scopeRefs.resources, function (section) { return section ? resourceLabels[section.id] || '' : ''; });
+            var parents = spiSnapScopeParents(entity.id);
+            if (parents.length) { var addParent = adder('In'); parents.forEach(function (parent) { addParent({ id: parent }); }); }
+        }
+        return groups.filter(function (group) { return group.nodes.length; });
+    }
+    /* icons: the Azure icons of the hosted portal assets (the folder of the page icons); Font Awesome as the fallback */
+    var spiGraphKindIcons = { note: 'fa-rotate', sp: 'fa-cubes', app: 'fa-window-restore', user: 'fa-user', group: 'fa-users', scope: 'fa-sitemap', role: 'fa-user-shield', object: 'fa-circle-nodes', credential: 'fa-key' };
+    var spiGraphIconFiles = {
+        sp: '10225-icon-service-Enterprise-Applications.svg', mi: '10227-icon-service-Managed-Identities.svg', app: '10232-icon-service-App-Registrations.svg',
+        user: '10230-icon-service-Users.svg', group: '10223-icon-service-Groups.svg', role: '10340-icon-service-Entra-Identity-Roles-and-Administrators.svg',
+        'Tenant root': '10011-icon-service-Management-Groups.svg', 'Management group': '10011-icon-service-Management-Groups.svg', 'Subscription': '10002-icon-service-Subscriptions.svg',
+        'Resource group': '10007-icon-service-Resource-Groups.svg', 'Resource': '10001-icon-service-All-Resources.svg',
+        secret: '00787-icon-service-Keys.svg', certificate: '00049-icon-service-App-Service-Certificates.svg', fic: '03338-icon-service-External-Identities.svg'
+    };
+    /* an icon that is not hosted yet: the hosted icon closest to it (before the Font Awesome fallback) */
+    var spiGraphIconAlternatives = { app: '10225-icon-service-Enterprise-Applications.svg' };
+    function spiSnapIconBase() {
+        if (spiSnapIconBase.value === undefined) {
+            var page = (spiSnapRegistry().pages || []).filter(function (p) { return p.icon; })[0];
+            spiSnapIconBase.value = page ? String(page.icon).replace(/\/[^/]+$/, '/') : '';
+        }
+        return spiSnapIconBase.value;
+    }
+    function spiGraphIconHtml(node) {
+        var key = node.kind === 'sp' ? (/^SP MI/i.test(node.type || '') ? 'mi' : 'sp') : (node.kind === 'scope' ? spiSnapScopeKind(node.id) : (node.kind === 'credential' ? node.sub : node.kind));
+        var fa = spiGraphKindIcons[node.kind] || 'fa-circle', file = spiGraphIconFiles[key], base = spiSnapIconBase();
+        if (!file || !base) { return '<i class="fa ' + fa + '" aria-hidden="true"></i>'; }
+        var alternative = spiGraphIconAlternatives[key];
+        return '<img class="spiGraphIcon" src="' + spiSnapEsc(base + file) + '" alt="" data-fa="' + fa + '"' + (alternative ? ' data-alt="' + spiSnapEsc(base + alternative) + '"' : '') + '>';
+    }
+    /* an icon that cannot be loaded (the hosted file missing, offline): the Font Awesome icon */
+    document.addEventListener('error', function (event) {
+        var image = event.target;
+        if (!image || !image.classList || !image.classList.contains('spiGraphIcon')) { return; }
+        var alternative = image.getAttribute('data-alt');
+        if (alternative) { image.removeAttribute('data-alt'); image.src = alternative; return; }
+        var icon = document.createElement('i');
+        icon.className = 'fa ' + (image.getAttribute('data-fa') || 'fa-circle');
+        icon.setAttribute('aria-hidden', 'true');
+        image.replaceWith(icon);
+    }, true);
+    /* a node; x / y: the position of a centre node (the others sit in their bubble) */
+    /* staticNode: no button (a centre node: it is the object shown) */
+    function spiGraphNodeHtml(node, x, y, extra, attributes, staticNode) {
+        var details = (node.details || []).join(', ');
+        var title = node.name + (node.type ? ' (' + node.type + ')' : '') + (details ? ' - ' + details : '') + (node.level ? ' - effective privilege: ' + node.level : '');
+        var inner = spiGraphIconHtml(node) + '<span class="spiGraphName">' + spiSnapEsc(node.name) + '</span>' +
+            (node.type ? '<span class="spiGraphType">' + spiSnapEsc(node.type) + '</span>' : '') + (details ? '<span class="spiGraphDetail">' + spiSnapEsc(details) + '</span>' : '');
+        var cls = 'spiGraphNode spiGraphKind-' + node.kind + (node.level ? ' spiGraphLevel-' + spiSnapEsc(node.level) : '') + (node.state ? ' spiGraphState-' + spiSnapEsc(node.state) : '') + (extra || '');
+        var style = x === null || x === undefined ? '' : ' style="left: ' + Math.round(x) + 'px; top: ' + Math.round(y) + 'px;"';
+        var title2 = ' title="' + spiSnapEsc(title) + '"' + (attributes || '');
+        if (node.kind === 'role' && node.href) { return '<a class="' + cls + '"' + style + ' href="' + spiSnapEsc(node.href) + '" target="_blank" rel="noopener"' + title2 + '>' + inner + '</a>'; }
+        if (staticNode || node.kind === 'credential' || node.kind === 'note' || node.kind === 'role') { return '<span class="' + cls + '"' + style + title2 + '>' + inner + '</span>'; }
+        return '<button type="button" class="' + cls + '"' + style + ' data-graph-id="' + spiSnapEsc(node.id) + '"' + title2 + '>' + inner + '</button>';
+    }
+    /* the relation groups of an object, built once per object (opening a bubble, Cards / Graph: no rebuild) */
+    function spiGraphGroupsCached(index, entity) {
+        var key = 'graph|' + entity.kind + '|' + entity.id;
+        var cached = spiSnapCacheGet(key);
+        if (!cached) { cached = spiGraphGroups(index, entity); spiSnapCacheSet(key, cached); }
+        return cached;
+    }
+    /* the effective privilege of the object (critical / high): a badge in the head of the cards and the graph */
+    function spiSnapLevelHtml(index, entity) {
+        var level = entity.kind === 'sp' ? spiGraphLevels(index).get(entity.id) || '' : '';
+        if (level !== 'critical' && level !== 'high') { return ''; }
+        return '<span class="spiSnapLevel spiSnapLevel-' + level + '" title="Effective privilege (incl. control through ownership): ' + level + '">Effective privilege: ' + level + '</span>';
+    }
+    function spiGraphHtml(index, id) {
+        var entity = spiSnapEntity(index, id);
+        if (entity.kind !== 'sp' && entity.kind !== 'scope' && entity.kind !== 'principal') {
+            return { entity: entity, html: '<div class="spiSnapNote">No object with the id <code>' + spiSnapEsc(id) + '</code> in this report.</div>' };
+        }
+        var groups = spiGraphGroupsCached(index, entity);
+        var hiddenGroups = 0;
+        if (spiSnapState.graphRiskyOnly) { hiddenGroups = groups.filter(function (group) { return !group.risky; }).length; groups = groups.filter(function (group) { return group.risky; }); }
+        /* an id this report does not know at all: the same note as the cards, no node of its own */
+        if (entity.kind === 'principal' && !groups.length && !spiSnapDirectory(index).principals.has(entity.id)) {
+            return { entity: entity, html: '<div class="spiSnapHead"><h2 id="spiSnapTitle">' + spiSnapEsc(entity.id) + '</h2></div><div class="spiSnapNote"><i class="fa fa-circle-info" aria-hidden="true"></i> This object is not named in any section of this report.</div>' };
+        }
+        /* the centre: the enterprise application and its app registration (both when both are in the tenant) */
+        var centers = [], note = '';
+        if (entity.kind === 'sp') {
+            var spNode = entity.spId ? spiGraphNode(index, { id: entity.spId }) : null;
+            if (spNode) { centers.push({ key: 'sp', node: Object.assign({}, spNode, { kind: 'sp', type: /^SP MI/i.test(spNode.type || '') ? spNode.type : 'Enterprise application' + (spNode.type ? ' (' + spNode.type + ')' : '') }) }); }
+            if (entity.appObjectId) { centers.push({ key: 'app', node: { id: entity.appObjectId, name: entity.appName || entity.name, type: 'App registration', kind: 'app' } }); }
+            if (spNode && entity.appObjectId) { note = 'The enterprise application (service principal) and its app registration.'; }
+            else if (!spNode) { note = 'An app registration without an enterprise application (service principal) in this tenant: the app cannot sign in here.'; }
+            else if (/^SP MI/i.test(entity.type)) { note = 'A managed identity: a service principal without an app registration.'; }
+            else { note = 'The app registration of this enterprise application is in another tenant (the publisher\'s) - not in this one.'; }
+        }
+        else { centers.push({ key: 'sp', node: spiGraphNode(index, { id: entity.id }) }); }
+        var main = centers[0].node;
+        spiSnapState.graphData = { centers: centers, groups: groups };
+        if (entity.kind === 'principal' && main.name === entity.id) {
+            /* an object outside the lists of users and groups: its name from the rows about it */
+            var fromRows = spiSnapNameFromRows(index, spiSnapRefs(index, entity).self);
+            if (fromRows.name) { main = centers[0].node = Object.assign({}, main, { name: fromRows.name, type: main.type || fromRows.type }); }
+        }
+        var hasApp = centers.some(function (c) { return c.key === 'app'; }), hasSp = centers.some(function (c) { return c.key === 'sp'; });
+        groups.forEach(function (group) { if ((group.anchor === 'app' && !hasApp) || (group.anchor === 'sp' && !hasSp)) { group.anchor = centers[0].key; } });
+        var expanded = spiSnapState.graphExpanded || {};
+        /* the first layout (the browser lays out again with the real sizes, spiGraphLayout): with two centre nodes the
+           bubbles of the enterprise application on the left, those of the app registration on the right */
+        var size = 1400, cx = size / 2, cy = size / 2, radius = 420;
+        var angles = [];
+        if (centers.length === 2) {
+            var left = groups.filter(function (g) { return g.anchor === 'sp'; }), right = groups.filter(function (g) { return g.anchor === 'app'; });
+            left.forEach(function (g, k) { g.angle = Math.PI / 2 + (k + 0.5) * Math.PI / left.length; });
+            right.forEach(function (g, k) { g.angle = -Math.PI / 2 + (k + 0.5) * Math.PI / right.length; });
+        }
+        else {
+            var start = groups.length === 2 ? Math.PI : -Math.PI / 2, step = 2 * Math.PI / Math.max(groups.length, 1);
+            groups.forEach(function (g, k) { g.angle = start + k * step; });
+        }
+        var lines = [], bubbles = [];
+        groups.forEach(function (group, g) {
+            var angle = group.angle;
+            var x = cx + radius * Math.cos(angle), y = cy + radius * Math.sin(angle);
+            var large = group.nodes.length > spiGraphBundleAt;
+            var open = !large || expanded[group.label];
+            var titleId = 'spiGraphBubble-' + g;
+            var head = '<div class="spiGraphBubbleHead"><span class="spiGraphBubbleTitle" id="' + titleId + '">' + spiSnapEsc(group.label) + '</span><span class="spiSnapCount">' + group.nodes.length + '</span>' +
+                (large ? '<button type="button" class="spiSnapAction" data-graph-bundle="' + spiSnapEsc(group.label) + '" aria-expanded="' + !!open + '">' + (open ? 'Close' : 'Show all') + '</button>' : '') + '</div>';
+            var body = open ? group.nodes.map(function (node) { return spiGraphNodeHtml(node); }).join('') : '<span class="spiGraphClosed">' + group.nodes.length + ' objects</span>';
+            /* about square: a bubble with many objects gets more columns (a node is up to 170 px wide); more than spiGraphScrollAt
+               objects scroll inside the bubble (nothing is cut, the graph keeps an overview) */
+            var width = open ? Math.min(900, Math.max(200, Math.ceil(Math.sqrt(group.nodes.length * 1.6)) * 178 + 20)) : 260;
+            var direction = group.inward ? 'towards ' : 'from ';
+            bubbles.push('<div class="spiGraphBubble' + (group.risky ? ' risky' : '') + (group.indirect ? ' indirect' : '') + (open ? '' : ' spiGraphCollapsed') + '" role="group" aria-labelledby="' + titleId + '" aria-description="' + spiSnapEsc((group.risky ? 'Gives control or privilege. ' : '') + 'Arrow ' + direction + (group.anchor === 'app' && hasApp ? 'the app registration' : 'the object')) + '" data-angle="' + angle.toFixed(4) + '" data-i="' + g + '" data-anchor="' + group.anchor + '" style="left: ' + Math.round(x) + 'px; top: ' + Math.round(y) + 'px; max-width: ' + width + 'px;">' + head + '<div class="spiGraphBubbleBody' + (open && group.nodes.length > spiGraphScrollAt ? ' spiGraphScroll' : '') + '">' + body + '</div></div>');
+            lines.push('<line data-i="' + g + '" data-inward="' + (group.inward ? 1 : 0) + '" class="' + (group.risky ? 'risky' : '') + (group.indirect ? ' indirect' : '') + '" x1="' + cx + '" y1="' + cy + '" x2="' + Math.round(x) + '" y2="' + Math.round(y) + '" marker-end="url(#spiGraphArrow' + (group.risky ? 'Risky' : '') + ')"/>');
+        });
+        if (centers.length === 2) { lines.push('<line class="spiGraphPair" data-pair="1" x1="' + (cx - 100) + '" y1="' + cy + '" x2="' + (cx + 100) + '" y2="' + cy + '"/>'); }
+        var centerHtml = centers.map(function (c, i) {
+            return spiGraphNodeHtml(c.node, cx + (centers.length === 2 ? (i === 0 ? -120 : 120) : 0), cy, ' spiGraphCenter', ' data-center="' + c.key + '"', true);
+        }).join('');
+        var legend = '<div class="spiGraphLegend" aria-label="Legend">' +
+            '<span><i class="spiGraphSwatch spiGraphSwatch-risky" aria-hidden="true"></i>gives control or privilege</span>' +
+            '<span><i class="spiGraphSwatch spiGraphSwatch-indirect" aria-hidden="true"></i>indirect (through ownership of another object)</span>' +
+            '<span><i class="spiGraphSwatch spiGraphSwatch-critical" aria-hidden="true"></i>effective privilege critical</span>' +
+            '<span><i class="spiGraphSwatch spiGraphSwatch-high" aria-hidden="true"></i>effective privilege high</span>' +
+            '<span><i class="spiGraphSwatch spiGraphSwatch-warn" aria-hidden="true"></i>credential expiring / relation to itself</span>' +
+            '<span><i class="spiGraphSwatch spiGraphSwatch-muted" aria-hidden="true"></i>expired</span></div>';
+        var html = '<div class="spiSnapHead"><h2 id="spiSnapTitle">' + spiGraphIconHtml(main) + ' ' + spiSnapEsc(main.name) + (main.type ? '<span class="spiSnapType">' + spiSnapEsc(main.type) + '</span>' : '') + spiSnapLevelHtml(index, entity) + '</h2>' +
+            (note ? '<div class="spiSnapIds"><b>' + spiSnapEsc(note) + '</b></div>' : '') +
+            '<div class="spiSnapIds">Its relations, one bubble per kind; the arrow shows the direction (an owner to its object, an object to its API, role, scope or group, a credential to the object it signs in as). Select an object to see its relations. Mouse wheel: zoom, drag: move (a bubble by its frame); keyboard: + / - / 0 in the graph or the zoom buttons, Tab through the objects.</div>' + legend + '</div>' +
+            (groups.length || hiddenGroups ? '<div class="spiGraphTools"><span class="spiGraphFilter"><input type="search" class="spiGraphHighlightInput" placeholder="Highlight: name, role, permission" aria-label="Highlight objects (name, type, role, permission)" autocomplete="off" spellcheck="false"><span class="spiGraphHighlightStatus" aria-live="polite"></span><label><input type="checkbox" data-graph-risky' + (spiSnapState.graphRiskyOnly ? ' checked' : '') + '> Control and privilege only' + (hiddenGroups ? ' (' + hiddenGroups + ' other ' + (hiddenGroups === 1 ? 'kind' : 'kinds') + ' hidden)' : '') + '</label></span><span class="spiGraphZoom"><button type="button" class="spiSnapBtn" data-graph-zoom="out" title="Zoom out" aria-label="Zoom out"><i class="fa fa-minus" aria-hidden="true"></i></button><button type="button" class="spiSnapBtn" data-graph-zoom="fit" title="Fit the whole graph into the window">Fit</button><button type="button" class="spiSnapBtn" data-graph-zoom="in" title="Zoom in" aria-label="Zoom in"><i class="fa fa-plus" aria-hidden="true"></i></button></span></div>' : '<div class="spiSnapNote">No relations of this object in this report.</div>') +
+            '<div class="spiGraphWrap" tabindex="0" role="region" aria-label="Graph (+ and - zoom, 0 fits)"><div class="spiGraphSizer"><div class="spiGraph" data-size="' + size + '" style="width: ' + size + 'px; height: ' + size + 'px;"><svg class="spiGraphEdges" width="' + size + '" height="' + size + '" aria-hidden="true">' +
+            '<defs><marker id="spiGraphArrow" class="spiGraphArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker><marker id="spiGraphArrowRisky" class="spiGraphArrow risky" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>' +
+            lines.join('') + '</svg>' + bubbles.join('') + centerHtml + '</div></div></div>';
+        return { entity: entity, html: html };
+    }
+    /* the layout with the real sizes (browser): the centre node(s) side by side; each bubble keeps its angle and moves
+       outwards until it clears the centre and the bubbles placed before it; the edges run from the node the bubble belongs
+       to and end at the borders; the canvas fits everything */
+    function spiGraphLayout(graph) {
+        var size = Number(graph.getAttribute('data-size'));
+        var cx = size / 2, cy = size / 2, gap = 14;
+        var box = function (x, y, w, h) { return { l: x - w / 2 - gap, r: x + w / 2 + gap, t: y - h / 2 - gap, b: y + h / 2 + gap }; };
+        var hits = function (a, b) { return a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b; };
+        var centerElements = Array.prototype.slice.call(graph.querySelectorAll('.spiGraphCenter'));
+        var centers = {};
+        var pairGap = 110;
+        var totalWidth = centerElements.reduce(function (sum, element) { return sum + element.offsetWidth; }, 0) + (centerElements.length - 1) * pairGap;
+        var x0 = cx - totalWidth / 2;
+        var placed = [];
+        centerElements.forEach(function (element) {
+            var w = element.offsetWidth, h = element.offsetHeight;
+            var x = x0 + w / 2;
+            centers[element.getAttribute('data-center')] = { element: element, x: x, y: cy, w: w, h: h };
+            placed.push(box(x, cy, w, h));
+            x0 += w + pairGap;
+        });
+        var ch = Math.max.apply(null, centerElements.map(function (element) { return element.offsetHeight; }));
+        var items = [];
+        graph.querySelectorAll('.spiGraphBubble').forEach(function (bubble) {
+            var angle = Number(bubble.getAttribute('data-angle'));
+            var w = bubble.offsetWidth, h = bubble.offsetHeight;
+            var r = (totalWidth + w) / 2 * Math.abs(Math.cos(angle)) + (ch + h) / 2 * Math.abs(Math.sin(angle)) + 70;
+            var x, y, rect;
+            for (var k = 0; k < 600; k++) {
+                x = cx + r * Math.cos(angle); y = cy + r * Math.sin(angle);
+                rect = box(x, y, w, h);
+                if (!placed.some(function (p) { return hits(p, rect); })) { break; }
+                r += 16;
+            }
+            placed.push(rect);
+            items.push({ element: bubble, x: x, y: y, w: w, h: h, i: bubble.getAttribute('data-i'), anchor: centers[bubble.getAttribute('data-anchor')] || centers.sp || centers.app });
+        });
+        var extent = 0;
+        placed.forEach(function (p) { extent = Math.max(extent, cx - p.l, p.r - cx, cy - p.t, p.b - cy); });
+        var newSize = Math.ceil(2 * (extent + 20));
+        var shift = newSize / 2 - cx;
+        var move = function (element, x, y) { element.style.left = Math.round(x + shift) + 'px'; element.style.top = Math.round(y + shift) + 'px'; };
+        Object.keys(centers).forEach(function (key) { move(centers[key].element, centers[key].x, centers[key].y); });
+        items.forEach(function (item) { move(item.element, item.x, item.y); spiGraphUpdateEdge(graph, item.element); });
+        var pair = graph.querySelector('line[data-pair]');
+        if (pair && centers.sp && centers.app) {
+            pair.setAttribute('x1', Math.round(centers.sp.x + centers.sp.w / 2 + shift)); pair.setAttribute('y1', Math.round(cy + shift));
+            pair.setAttribute('x2', Math.round(centers.app.x - centers.app.w / 2 + shift)); pair.setAttribute('y2', Math.round(cy + shift));
+        }
+        graph.style.width = newSize + 'px';
+        graph.style.height = newSize + 'px';
+        graph.setAttribute('data-size', newSize);
+        var svg = graph.querySelector('svg');
+        svg.setAttribute('width', newSize);
+        svg.setAttribute('height', newSize);
+    }
+    /* the edge of a bubble: from the centre node it belongs to (or to it, inward), ending at the borders of both */
+    function spiGraphUpdateEdge(graph, bubble) {
+        var line = graph.querySelector('line[data-i="' + bubble.getAttribute('data-i') + '"]');
+        var anchor = graph.querySelector('.spiGraphCenter[data-center="' + bubble.getAttribute('data-anchor') + '"]') || graph.querySelector('.spiGraphCenter');
+        if (!line || !anchor) { return; }
+        var border = function (fx, fy, x, y, w, h) {
+            var dx = fx - x, dy = fy - y;
+            var scale = Math.min(dx ? (w / 2 + 3) / Math.abs(dx) : Infinity, dy ? (h / 2 + 3) / Math.abs(dy) : Infinity);
+            return scale === Infinity ? { x: x, y: y } : { x: x + dx * scale, y: y + dy * scale };
+        };
+        var ax = parseFloat(anchor.style.left), ay = parseFloat(anchor.style.top), bx = parseFloat(bubble.style.left), by = parseFloat(bubble.style.top);
+        var atCenter = border(bx, by, ax, ay, anchor.offsetWidth, anchor.offsetHeight), atBubble = border(ax, ay, bx, by, bubble.offsetWidth, bubble.offsetHeight);
+        var inward = line.getAttribute('data-inward') === '1';
+        var from = inward ? atBubble : atCenter, to = inward ? atCenter : atBubble;
+        line.setAttribute('x1', Math.round(from.x)); line.setAttribute('y1', Math.round(from.y));
+        line.setAttribute('x2', Math.round(to.x)); line.setAttribute('y2', Math.round(to.y));
+    }
+    /* the scale; anchor: a point of the view (client coordinates) that stays where it is - else the centre of the view;
+       center: the centre of the graph to the centre of the view. A graph smaller than the view sits at an offset inside it
+       (moved so the point under the pointer stays), a larger one scrolls. */
+    function spiGraphSetScale(scale, anchor, center) {
+        var wrap = spiSnapState.dialog && spiSnapState.dialog.querySelector('.spiGraphWrap'), graph = wrap && wrap.querySelector('.spiGraph');
+        if (!graph) { return; }
+        var size = Number(graph.getAttribute('data-size')) || graph.offsetWidth;
+        var old = spiSnapState.graphScale || 1;
+        scale = Math.max(0.25, Math.min(2.5, scale));
+        var rect = wrap.getBoundingClientRect();
+        var cw = wrap.clientWidth, ch = wrap.clientHeight;
+        var ax = anchor ? anchor.x - rect.left - wrap.clientLeft : cw / 2, ay = anchor ? anchor.y - rect.top - wrap.clientTop : ch / 2;
+        var ox = parseFloat(graph.style.left) || 0, oy = parseFloat(graph.style.top) || 0;
+        var gx = center ? size / 2 : (wrap.scrollLeft + ax - ox) / old, gy = center ? size / 2 : (wrap.scrollTop + ay - oy) / old;
+        if (center) { ax = cw / 2; ay = ch / 2; }
+        spiSnapState.graphScale = scale;
+        var w = size * scale;
+        var sizer = wrap.querySelector('.spiGraphSizer');
+        sizer.style.width = Math.round(Math.max(w, cw)) + 'px';
+        sizer.style.height = Math.round(Math.max(w, ch)) + 'px';
+        graph.style.transform = 'scale(' + scale + ')';
+        graph.style.left = Math.round(w <= cw ? Math.max(0, Math.min(cw - w, ax - gx * scale)) : 0) + 'px';
+        graph.style.top = Math.round(w <= ch ? Math.max(0, Math.min(ch - w, ay - gy * scale)) : 0) + 'px';
+        wrap.scrollLeft = w <= cw ? 0 : gx * scale - ax;
+        wrap.scrollTop = w <= ch ? 0 : gy * scale - ay;
+    }
+    /* zoom: 'fit' (the whole graph in the window, down to 25 %), 'start' (when a graph opens: the whole graph if it fits at 75 %
+       or more, else 75 % with the centre in view - the names stay readable), 'keep' (the scale before, centred), 'in', 'out' */
+    function spiGraphZoom(mode) {
+        var wrap = spiSnapState.dialog && spiSnapState.dialog.querySelector('.spiGraphWrap'), graph = wrap && wrap.querySelector('.spiGraph');
+        if (!graph) { return; }
+        var current = spiSnapState.graphScale || 1;
+        if (mode === 'in' || mode === 'out') { spiGraphSetScale(mode === 'in' ? current * 1.25 : current / 1.25); return; }
+        var size = Number(graph.getAttribute('data-size')) || graph.offsetWidth;
+        var fit = Math.min(1, (wrap.clientWidth - 4) / size, (wrap.clientHeight - 4) / size);
+        var scale = mode === 'keep' ? current : (mode === 'start' ? Math.max(0.75, fit) : Math.max(0.25, fit));
+        spiGraphSetScale(scale, null, true);
+    }
+    /* mouse: the wheel zooms at the pointer; a drag on a bubble (its frame or title, not an object) moves the bubble and its
+       edge, a drag on the background moves the view */
+    function spiGraphBind(wrap) {
+        /* keyboard: + and - zoom, 0 fits */
+        wrap.addEventListener('keydown', function (event) {
+            if (event.ctrlKey || event.metaKey || event.altKey) { return; }
+            var mode = event.key === '+' || event.key === '=' ? 'in' : (event.key === '-' ? 'out' : (event.key === '0' ? 'fit' : ''));
+            if (!mode) { return; }
+            event.preventDefault();
+            spiGraphZoom(mode);
+        });
+        wrap.addEventListener('wheel', function (event) {
+            if (!event.deltaY) { return; }
+            var scroller = event.target.closest ? event.target.closest('.spiGraphScroll') : null;
+            if (scroller && (event.deltaY < 0 ? scroller.scrollTop > 0 : scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight)) { return; }
+            event.preventDefault();
+            spiGraphSetScale((spiSnapState.graphScale || 1) * (event.deltaY < 0 ? 1.12 : 1 / 1.12), { x: event.clientX, y: event.clientY });
+        }, { passive: false });
+        wrap.addEventListener('mousedown', function (event) {
+            if (event.button !== 0 || event.target.closest('button, a')) { return; }
+            /* the scrollbar of a scrolling bubble */
+            if (event.target.classList.contains('spiGraphScroll') && event.offsetX >= event.target.clientWidth) { return; }
+            event.preventDefault();
+            var bubble = event.target.closest('.spiGraphBubble');
+            if (bubble) {
+                var graph = wrap.querySelector('.spiGraph');
+                var size = Number(graph.getAttribute('data-size')) || graph.offsetWidth;
+                var scale = spiSnapState.graphScale || 1;
+                var origin = { x: event.clientX, y: event.clientY, left: parseFloat(bubble.style.left), top: parseFloat(bubble.style.top) };
+                var halfW = bubble.offsetWidth / 2, halfH = bubble.offsetHeight / 2;
+                bubble.classList.add('spiGraphMoving');
+                var drag = function (e) {
+                    bubble.style.left = Math.round(Math.max(halfW, Math.min(size - halfW, origin.left + (e.clientX - origin.x) / scale))) + 'px';
+                    bubble.style.top = Math.round(Math.max(halfH, Math.min(size - halfH, origin.top + (e.clientY - origin.y) / scale))) + 'px';
+                    spiGraphUpdateEdge(graph, bubble);
+                };
+                var drop = function () { bubble.classList.remove('spiGraphMoving'); window.removeEventListener('mousemove', drag); window.removeEventListener('mouseup', drop); };
+                window.addEventListener('mousemove', drag);
+                window.addEventListener('mouseup', drop);
+                return;
+            }
+            var start = { x: event.clientX, y: event.clientY, left: wrap.scrollLeft, top: wrap.scrollTop };
+            wrap.classList.add('spiGraphDragging');
+            var move = function (e) { wrap.scrollLeft = start.left - (e.clientX - start.x); wrap.scrollTop = start.top - (e.clientY - start.y); };
+            var up = function () { wrap.classList.remove('spiGraphDragging'); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+            window.addEventListener('mousemove', move);
+            window.addEventListener('mouseup', up);
+        });
+    }
+
+    /* ---------- find ---------- */
+    function spiSnapEntities(index) {
+        if (index.entities) { return index.entities; }
+        var data = index.data[spiSnapEntityGrid];
+        index.entities = data ? data.rows.map(function (row, r) {
+            var entity = spiSnapEntityFromRow(index, r);
+            entity.search = (entity.name + ' ' + (entity.appName || '')).toLowerCase();
+            entity.searchIds = '\n' + spiSnapEntityIds(entity).join('\n');
+            return entity;
+        }) : [];
+        var directory = spiSnapDirectory(index);
+        directory.principals.forEach(function (principal) {
+            index.entities.push({ kind: 'principal', row: -1, id: principal.id, spId: '', appObjectId: '', appIds: [], name: principal.name, type: principal.type || 'Object', search: principal.name.toLowerCase(), searchIds: '\n' + principal.id });
+        });
+        directory.scopes.forEach(function (name, scope) {
+            index.entities.push({ kind: 'scope', row: -1, id: scope, spId: '', appObjectId: '', appIds: [], name: name || scope, type: spiSnapScopeKind(scope), search: ((name || '') + ' ' + scope).toLowerCase(), searchIds: '\n' + scope });
+        });
+        return index.entities;
+    }
+    function spiSnapFind(index, term) {
+        term = String(term || '').trim().toLowerCase();
+        if (!term) { return []; }
+        var starts = [], contains = [];
+        var idTerm = '\n' + term;
+        spiSnapEntities(index).forEach(function (entity) {
+            var at = entity.search.indexOf(term);
+            if (at === 0 || entity.searchIds.indexOf(idTerm) >= 0) { starts.push(entity); }
+            else if (at > 0) { contains.push(entity); }
+        });
+        return starts.concat(contains).slice(0, 50);
+    }
+    function spiSnapShowHits(hits) {
+        var box = spiSnapState.dialog.querySelector('.spiSnapHits');
+        spiSnapState.hits = hits;
+        spiSnapState.hit = hits.length ? 0 : -1;
+        box.innerHTML = hits.length ? hits.map(function (entity, i) {
+            return '<button type="button" class="spiSnapHit' + (i === 0 ? ' active' : '') + '" role="option" id="spiSnapHit-' + i + '" aria-selected="' + (i === 0) + '" tabindex="-1" data-id="' + spiSnapEsc(entity.id) + '">' + spiSnapEsc(entity.name) + ' <span class="spiDim">' + spiSnapEsc(entity.type) + ' &middot; ' + spiSnapEsc(entity.id) + '</span></button>';
+        }).join('') : '<div class="spiSnapNote" role="option" aria-disabled="true">Nothing found</div>';
+        box.hidden = false;
+        var input = spiSnapState.dialog.querySelector('.spiSnapFind input');
+        input.setAttribute('aria-expanded', 'true');
+        if (hits.length) { input.setAttribute('aria-activedescendant', 'spiSnapHit-0'); } else { input.removeAttribute('aria-activedescendant'); }
+    }
+    function spiSnapHideHits() {
+        var box = spiSnapState.dialog && spiSnapState.dialog.querySelector('.spiSnapHits');
+        if (box) { box.hidden = true; box.innerHTML = ''; }
+        var input = spiSnapState.dialog && spiSnapState.dialog.querySelector('.spiSnapFind input');
+        if (input) { input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); }
+        spiSnapState.hits = [];
+        spiSnapState.hit = -1;
+    }
+    function spiSnapMoveHit(step) {
+        var buttons = spiSnapState.dialog.querySelectorAll('.spiSnapHit');
+        if (!buttons.length) { return; }
+        spiSnapState.hit = (spiSnapState.hit + step + buttons.length) % buttons.length;
+        buttons.forEach(function (button, i) { button.classList.toggle('active', i === spiSnapState.hit); button.setAttribute('aria-selected', String(i === spiSnapState.hit)); });
+        buttons[spiSnapState.hit].scrollIntoView({ block: 'nearest' });
+        spiSnapState.dialog.querySelector('.spiSnapFind input').setAttribute('aria-activedescendant', buttons[spiSnapState.hit].id);
+    }
+
+    /* ---------- the start page of the dialog: the most exposed objects (no object selected yet) ---------- */
+    function spiSnapStartHtml(index) {
+        var entities = spiSnapEntities(index).filter(function (entity) { return entity.kind === 'sp'; });
+        var byId = {};
+        entities.forEach(function (entity) { byId[entity.id] = { entity: entity, findings: 0, expiring: 0, expired: 0 }; });
+        var subjectOf = function (gridId, row) { var subject = spiSnapSubject(index, gridId, row); return subject && byId[subject.entity.id] ? byId[subject.entity.id] : null; };
+        (spiSnapRegistry().sections || []).forEach(function (section) {
+            (section.grids || []).forEach(function (gridId) {
+                var data = index.data[gridId];
+                if (!data || !spiSnapMeta[gridId]) { return; }
+                if (section.state === 'warning') { for (var r = 0; r < data.rows.length; r++) { var item = subjectOf(gridId, r); if (item) { item.findings++; } } }
+                /* credentials: the states of the secret / certificate items (warn: expires soon, muted: expired) */
+                if (section.id === 'ApplicationSecrets' || section.id === 'ApplicationCertificates') {
+                    for (var c = 0; c < data.rows.length; c++) {
+                        var owner = subjectOf(gridId, c);
+                        if (!owner) { continue; }
+                        spiGraphHtmlItems(spiGraphLastHtml(index, gridId, c)).forEach(function (credential) { if (credential.state === 'warn') { owner.expiring++; } else if (credential.state === 'muted') { owner.expired++; } });
+                    }
+                }
+            });
+        });
+        var levels = spiGraphLevels(index);
+        var rank = { critical: 2, high: 1 };
+        var all = Object.keys(byId).map(function (id) { var item = byId[id]; item.level = levels.get(id) || ''; return item; });
+        var objectHtml = function (item) { return spiSnapEsc(item.entity.name) + ' <span class="spiDim">' + spiSnapEsc(item.entity.type) + '</span>' + spiSnapLinkHtml(item.entity.id, item.entity.name); };
+        var levelHtml = function (item) { return item.level ? '<span class="spiSnapLevel spiSnapLevel-' + spiSnapEsc(item.level) + '">' + spiSnapEsc(item.level) + '</span>' : ''; };
+        var privileged = all.filter(function (item) { return rank[item.level]; }).sort(function (a, b) { return rank[b.level] - rank[a.level] || b.findings - a.findings; });
+        var findings = all.filter(function (item) { return item.findings; }).sort(function (a, b) { return b.findings - a.findings || (rank[b.level] || 0) - (rank[a.level] || 0); });
+        var credentials = all.filter(function (item) { return item.expiring || item.expired; }).sort(function (a, b) { return b.expiring - a.expiring || b.expired - a.expired; });
+        var card = function (title, items, headers, cells) {
+            return items.length ? spiSnapCardHtml(title, items.length, '', spiSnapTableHtml(headers, items, function (item) { return '<tr>' + cells(item).map(function (cell) { return '<td>' + cell + '</td>'; }).join('') + '</tr>'; })) : '';
+        };
+        var html = card('Critical and high effective privilege', privileged, ['Object', 'Effective privilege', 'Findings'], function (item) { return [objectHtml(item), levelHtml(item), String(item.findings || '')]; }) +
+            card('Most findings', findings, ['Object', 'Findings', 'Effective privilege'], function (item) { return [objectHtml(item), String(item.findings), levelHtml(item)]; }) +
+            card('Secrets and certificates expiring or expired', credentials, ['Object', 'Expiring', 'Expired'], function (item) { return [objectHtml(item), String(item.expiring || ''), String(item.expired || '')]; });
+        return html ? '<div class="spiSnapGroup"><h3 class="spiSnapGroupTitle" tabindex="-1"><i class="fa fa-ranking-star" aria-hidden="true"></i> Most exposed</h3>' + html + '</div>' : '';
+    }
+    /* ---------- graph: highlight by name, only the relations that give control or privilege ---------- */
+    function spiGraphHighlight(term) {
+        var body = spiSnapState.dialog.querySelector('.spiSnapBody');
+        var graph = spiSnapState.graphData;
+        term = String(term || '').trim().toLowerCase();
+        var hits = 0;
+        var matches = function (node) { return !term || (node.name + ' ' + (node.type || '') + ' ' + (node.details || []).join(' ')).toLowerCase().indexOf(term) >= 0; };
+        body.querySelectorAll('.spiGraphBubble').forEach(function (bubble) {
+            var group = graph && graph.groups[Number(bubble.getAttribute('data-i'))];
+            if (!group) { return; }
+            var found = group.nodes.filter(matches).length;
+            hits += term ? found : 0;
+            bubble.classList.toggle('spiGraphDim', !!term && !found);
+            bubble.classList.toggle('spiGraphHit', !!term && found > 0);
+            var badge = bubble.querySelector('.spiGraphHitCount');
+            if (badge) { badge.remove(); }
+            if (term && found && bubble.classList.contains('spiGraphCollapsed')) { bubble.querySelector('.spiGraphBubbleHead').insertAdjacentHTML('beforeend', '<span class="spiGraphHitCount">' + found + ' found</span>'); }
+            bubble.querySelectorAll('.spiGraphNode').forEach(function (element, i) {
+                var node = group.nodes[i];
+                element.classList.toggle('spiGraphDim', !!term && !!node && !matches(node));
+            });
+        });
+        var status = body.querySelector('.spiGraphHighlightStatus');
+        if (status) { status.textContent = term ? hits + (hits === 1 ? ' object found' : ' objects found') : ''; }
+    }
+
+    /* the head of a snapshot (trail, title, ids, at a glance, the section buttons) stays at the top while the cards scroll;
+       --spi-top-height: its height (a jump to a section stops below it) */
+    function spiSnapStickTop(body) {
+        var parts = Array.prototype.filter.call(body.children, function (child) { return child.classList.contains('spiSnapTrail') || child.classList.contains('spiSnapHead') || child.classList.contains('spiSnapToc'); });
+        if (!parts.length) { body.style.removeProperty('--spi-top-height'); return; }
+        var top = document.createElement('div');
+        top.className = 'spiSnapTop';
+        body.insertBefore(top, body.firstChild);
+        parts.forEach(function (part) { top.appendChild(part); });
+        var measure = function () { body.style.setProperty('--spi-top-height', top.offsetHeight + 'px'); };
+        measure();
+        if (window.ResizeObserver) { new ResizeObserver(measure).observe(top); }
+    }
+    /* ---------- the context of a snapshot: the trail of the snapshots opened, the focus of the report ---------- */
+    /* the name of an object (trail, exports) */
+    function spiSnapNameOf(index, id) {
+        var entity = spiSnapEntity(index, id);
+        if (entity.kind === 'sp') { return entity.name || entity.id; }
+        if (entity.kind === 'scope') { var label = spiSnapScopeLabel(index, entity.id); return label.fullName || label.name; }
+        var known = spiSnapDirectory(index).principals.get(entity.id);
+        return known ? known.name : entity.id;
+    }
+    /* the snapshots opened one after the other (A > B > C, kept in the history entries): a click steps back to one of them */
+    function spiSnapTrailHtml(index) {
+        var trail = history.state && history.state.spiSnap && history.state.trail ? history.state.trail : [];
+        if (trail.length < 2) { return ''; }
+        var last = trail.length - 1;
+        return '<nav class="spiSnapTrail" aria-label="Snapshots opened">' + trail.map(function (id, i) {
+            var name = spiSnapEsc(spiSnapNameOf(index, id));
+            return i === last ? '<span aria-current="page">' + name + '</span>' : '<button type="button" class="spiSnapAction" data-trail="' + (i - last) + '">' + name + '</button>';
+        }).join(' <span class="spiDim" aria-hidden="true">&rsaquo;</span> ') + '</nav>';
+    }
+    /* the focus of the report while the snapshot covers it (the chip is behind the dialog) */
+    function spiSnapFocusedHere(entity) {
+        if (!spiFocusState.entity || !entity) { return false; }
+        var ids = spiSnapEntityIds(entity);
+        return spiSnapEntityIds(spiFocusState.entity).some(function (id) { return ids.indexOf(id) >= 0; });
+    }
+    function spiSnapFocusUi() {
+        var dialog = spiSnapState.dialog;
+        if (!dialog) { return; }
+        var entity = spiSnapState.entity;
+        var here = spiSnapFocusedHere(entity);
+        var button = dialog.querySelector('[data-act="focus"]');
+        button.querySelector('span').textContent = here ? 'Unfocus' : 'Focus';
+        button.title = here ? 'Clear the focus: the tables show all objects again' : 'Focus the report on this object: every table shows only its rows';
+        button.setAttribute('aria-pressed', String(here));
+        var note = dialog.querySelector('.spiSnapFocusNote');
+        if (note) {
+            var other = spiFocusState.entity && !here;
+            note.hidden = !other;
+            note.innerHTML = other ? '<i class="fa fa-filter" aria-hidden="true"></i> The report is focused on <b>' + spiSnapEsc(spiFocusState.entity.name) + '</b> <button type="button" class="spiSnapAction" data-act="focus-clear">Clear focus</button>' : '';
+        }
+    }
+
+    /* ---------- copy: the cards as Markdown / JSON, the graph as Mermaid / CSV (edges) ---------- */
+    function spiSnapCellText(element) { return (element ? element.textContent : '').replace(/\s+/g, ' ').trim(); }
+    /* the cards shown: every row of a table, also those not shown yet */
+    function spiSnapCardsData(body) {
+        var data = { object: spiSnapCellText(body.querySelector('#spiSnapTitle')), details: Array.prototype.map.call(body.querySelectorAll('.spiSnapHead .spiSnapIds'), spiSnapCellText), sections: [] };
+        body.querySelectorAll('.spiSnapGroup').forEach(function (group) {
+            var groupTitle = spiSnapCellText(group.querySelector('.spiSnapGroupTitle'));
+            group.querySelectorAll('.spiSnapCard').forEach(function (card) {
+                var section = { group: groupTitle, title: spiSnapCellText(card.querySelector('h4')), rows: [] };
+                var count = card.querySelector('.spiSnapCount');
+                if (count) { section.count = Number(spiSnapCellText(count)); }
+                var fields = card.querySelector('dl.spiSnapFields'), table = card.querySelector('table.spiSnapTable');
+                if (fields) {
+                    section.columns = ['Field', 'Value'];
+                    fields.querySelectorAll('dt').forEach(function (term) { section.rows.push([spiSnapCellText(term), spiSnapCellText(term.nextElementSibling)]); });
+                }
+                else if (table) {
+                    section.columns = Array.prototype.map.call(table.querySelectorAll('thead th'), spiSnapCellText);
+                    var tbody = table.querySelector('tbody');
+                    var more = spiSnapState.more[tbody.getAttribute('data-more-body')];
+                    var rows = tbody.querySelectorAll('tr');
+                    if (more) {
+                        var all = document.createElement('table');
+                        all.innerHTML = '<tbody>' + more.items.map(more.renderRow).join('') + '</tbody>';
+                        rows = all.querySelectorAll('tr');
+                    }
+                    rows.forEach(function (row) { section.rows.push(Array.prototype.map.call(row.children, spiSnapCellText)); });
+                }
+                else { section.columns = ['Note']; section.rows.push([spiSnapCellText(card.querySelector('.spiSnapCardBody'))]); }
+                data.sections.push(section);
+            });
+        });
+        return data;
+    }
+    function spiSnapMarkdown(data) {
+        var cell = function (text) { return String(text).replace(/\|/g, '\\|'); };
+        var lines = ['# ' + data.object, ''];
+        data.details.forEach(function (line) { lines.push(line, ''); });
+        var group = null;
+        data.sections.forEach(function (section) {
+            if (section.group !== group) { group = section.group; lines.push('## ' + group, ''); }
+            lines.push('### ' + section.title + (section.count !== undefined ? ' (' + section.count + ')' : ''), '');
+            lines.push('| ' + section.columns.map(cell).join(' | ') + ' |', '|' + section.columns.map(function () { return ' --- '; }).join('|') + '|');
+            section.rows.forEach(function (row) { lines.push('| ' + row.map(cell).join(' | ') + ' |'); });
+            lines.push('');
+        });
+        return lines.join('\n');
+    }
+    /* the graph: every relation of every bubble (also closed ones), in the direction of the arrows */
+    function spiGraphEdges() {
+        var graph = spiSnapState.graphData;
+        if (!graph) { return []; }
+        var centerOf = {};
+        graph.centers.forEach(function (center) { centerOf[center.key] = center.node; });
+        var edges = [];
+        if (centerOf.sp && centerOf.app) { edges.push({ from: centerOf.sp, to: centerOf.app, relation: 'App registration of' }); }
+        graph.groups.forEach(function (group) {
+            var center = centerOf[group.anchor] || graph.centers[0].node;
+            group.nodes.forEach(function (node) {
+                edges.push(group.inward ? { from: node, to: center, relation: group.label } : { from: center, to: node, relation: group.label });
+            });
+        });
+        return edges;
+    }
+    function spiGraphMermaid() {
+        var ids = {}, count = 0, lines = ['graph LR'];
+        var label = function (text) { return String(text).replace(/"/g, '#quot;').replace(/[\r\n]+/g, ' '); };
+        var nodeId = function (node) {
+            var key = node.kind + '|' + node.id;
+            if (!ids[key]) { ids[key] = 'n' + (count++); lines.push('    ' + ids[key] + '["' + label(node.name + (node.type ? ' (' + node.type + ')' : '')) + '"]'); }
+            return ids[key];
+        };
+        spiGraphEdges().forEach(function (edge) {
+            var from = nodeId(edge.from), to = nodeId(edge.to);
+            lines.push('    ' + from + ' -->|"' + label(edge.relation + ((edge.from.details || []).length || (edge.to.details || []).length ? ': ' + (edge.to.details || []).concat(edge.from.details || []).join(', ') : '')) + '"| ' + to);
+        });
+        return lines.join('\n');
+    }
+    function spiGraphCsv() {
+        var csv = function (value) { var text = String(value === undefined || value === null ? '' : value); return /[",\r\n]/.test(text) || /^[=+\-@]/.test(text) ? '"' + (/^[=+\-@]/.test(text) ? "'" : '') + text.replace(/"/g, '""') + '"' : text; };
+        var rows = [['From', 'From type', 'From id', 'Relation', 'To', 'To type', 'To id', 'Details']];
+        spiGraphEdges().forEach(function (edge) {
+            rows.push([edge.from.name, edge.from.type, edge.from.id, edge.relation, edge.to.name, edge.to.type, edge.to.id, (edge.to.details || []).concat(edge.from.details || []).join('; ')]);
+        });
+        return rows.map(function (row) { return row.map(csv).join(','); }).join('\r\n');
+    }
+    /* what: markdown, json (cards), mermaid, csv (graph); text to the clipboard, the CSV as a file */
+    function spiSnapCopy(what) {
+        var body = spiSnapState.dialog.querySelector('.spiSnapBody');
+        var name = spiSnapState.entity ? (spiSnapState.entity.name || spiSnapState.entity.id) : 'snapshot';
+        if (what === 'csv') {
+            var link = document.createElement('a');
+            link.href = URL.createObjectURL(new Blob(['\ufeff' + spiGraphCsv()], { type: 'text/csv;charset=utf-8' }));
+            link.download = String(name).replace(/[^\w.-]+/g, '_').slice(0, 80) + '_relations.csv';
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(function () { URL.revokeObjectURL(link.href); link.remove(); }, 1000);
+            spiSnapAnnounce('Relations saved as CSV');
+            return;
+        }
+        var text = what === 'mermaid' ? spiGraphMermaid() : (what === 'json' ? JSON.stringify(spiSnapCardsData(body), null, 2) : spiSnapMarkdown(spiSnapCardsData(body)));
+        var done = function (ok) { spiSnapAnnounce(ok ? 'Copied as ' + what : 'Could not copy'); var label = spiSnapState.dialog.querySelector('[data-act="copy"] span'); label.textContent = ok ? 'Copied' : 'Not copied'; setTimeout(function () { label.textContent = 'Copy'; }, 1500); };
+        if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); }); }
+        else { done(false); }
+    }
+    function spiSnapCopyMenu(button) {
+        var menu = spiSnapState.dialog.querySelector('.spiSnapCopyMenu');
+        if (!menu.hidden) { menu.hidden = true; button.setAttribute('aria-expanded', 'false'); return; }
+        var graph = spiSnapState.view === 'graph';
+        menu.innerHTML = (graph ? [['mermaid', 'Graph as Mermaid (to the clipboard)'], ['csv', 'Relations as CSV (file)']] : [['markdown', 'Snapshot as Markdown (to the clipboard)'], ['json', 'Snapshot as JSON (to the clipboard)']]).map(function (item) {
+            return '<button type="button" role="menuitem" data-copy="' + item[0] + '">' + item[1] + '</button>';
+        }).join('');
+        menu.hidden = false;
+        button.setAttribute('aria-expanded', 'true');
+        menu.querySelector('button').focus();
+    }
+
+    /* ---------- dialog, address and history ---------- */
+    function spiSnapUrl(id) {
+        var url = new URL(location.href);
+        if (id) { url.searchParams.set('sp', id); } else { url.searchParams.delete('sp'); }
+        if (id && spiSnapState.view === 'graph') { url.searchParams.set('view', 'graph'); } else { url.searchParams.delete('view'); }
+        return url.href;
+    }
+    function spiSnapViewFromUrl() {
+        try { spiSnapState.view = new URL(location.href).searchParams.get('view') === 'graph' ? 'graph' : 'cards'; } catch (e) { }
+    }
+    function spiSnapSteps() {
+        return history.state && history.state.spiSnap ? (history.state.steps || 0) : 0;
+    }
+    var spiSnapMaxSteps = 40;
+    function spiSnapHistory(id) {
+        try {
+            var steps = spiSnapSteps();
+            /* the trail: the objects of the snapshot entries up to this one */
+            var trail = steps > 0 && history.state.trail ? history.state.trail.slice() : [];
+            /* beyond spiSnapMaxSteps hops the newest entry is replaced: Close (back by the number of steps) stays possible */
+            if (steps >= spiSnapMaxSteps) { trail[Math.max(0, trail.length - 1)] = id; history.replaceState({ spiSnap: id, steps: steps, trail: trail }, '', spiSnapUrl(id)); }
+            else { trail.push(id); history.pushState({ spiSnap: id, steps: steps + 1, trail: trail }, '', spiSnapUrl(id)); }
+        } catch (e) { /* no history (sandboxed frame): the snapshot works without */ }
+    }
+    /* the ids ?sp= accepts: an object id (GUID) or an Azure scope (ARM path) - anything else is not opened */
+    var spiSnapScopePattern = /^\/(?:subscriptions\/[^\/]+(?:\/.*)?|providers\/microsoft\.management\/managementgroups\/[^\/]+)?$/i;
+    function spiSnapValidId(id) {
+        id = String(id || '').trim();
+        if (!id || id.length > 2048) { return false; }
+        return spiSnapGuid.test(id) || (id.charAt(0) === '/' && spiSnapScopePattern.test(id.replace(/\/+$/, '') || '/'));
+    }
+    /* closes without touching the history (popstate, 'Show in report') */
+    function spiSnapHide() {
+        var dialog = spiSnapState.dialog;
+        if (dialog && dialog.open) { spiSnapState.silent = true; dialog.close(); }
+    }
+    function spiSnapDialog() {
+        if (spiSnapState.dialog) { return spiSnapState.dialog; }
+        var dialog = document.createElement('dialog');
+        dialog.className = 'spiSnap';
+        dialog.setAttribute('aria-label', 'Snapshot');
+        dialog.innerHTML = '<div class="spiSnapBar">' +
+            '<button type="button" class="spiSnapBtn" data-act="back" title="Back to the previous snapshot"><i class="fa fa-arrow-left" aria-hidden="true"></i><span>Back</span></button>' +
+            '<div class="spiSnapFind"><input type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="spiSnapHits" placeholder="Find a Service Principal, application, user, group or Azure scope: name or Id" aria-label="Find a Service Principal, application, user, group or Azure scope" autocomplete="off" spellcheck="false"><div class="spiSnapHits" id="spiSnapHits" role="listbox" aria-label="Objects found" hidden></div></div>' +
+            '<span class="spiSnapView" role="group" aria-label="View"><button type="button" class="spiSnapBtn" data-act="view-cards" aria-pressed="true" title="Everything about the object, by section"><i class="fa fa-table-list" aria-hidden="true"></i><span>Cards</span></button><button type="button" class="spiSnapBtn" data-act="view-graph" aria-pressed="false" title="The object and its relations"><i class="fa fa-diagram-project" aria-hidden="true"></i><span>Graph</span></button></span>' +
+            '<button type="button" class="spiSnapBtn" data-act="focus" title="Focus the report on this object: every table shows only its rows"><i class="fa fa-filter" aria-hidden="true"></i><span>Focus</span></button>' +
+            '<button type="button" class="spiSnapBtn" data-act="tab" title="Open this snapshot in a new tab (the report with the snapshot open)"><i class="fa fa-arrow-up-right-from-square" aria-hidden="true"></i><span>New tab</span></button>' +
+            '<span class="spiSnapCopy"><button type="button" class="spiSnapBtn" data-act="copy" aria-haspopup="menu" aria-expanded="false" title="Copy the snapshot (Markdown, JSON) or the graph (Mermaid, CSV)"><i class="fa fa-copy" aria-hidden="true"></i><span>Copy</span></button><div class="spiSnapCopyMenu" role="menu" hidden></div></span>' +
+            '<button type="button" class="spiSnapBtn" data-act="link" title="Copy the link to this snapshot"><i class="fa fa-link" aria-hidden="true"></i><span>Link</span></button>' +
+            '<button type="button" class="spiSnapBtn" data-act="close" title="Close (Esc)"><i class="fa fa-xmark" aria-hidden="true"></i><span>Close</span></button>' +
+            '</div><div class="spiSnapFocusNote" role="status" hidden></div><div class="spiSnapLive" aria-live="polite"></div><div class="spiSnapBody" tabindex="-1"></div>';
+        document.body.appendChild(dialog);
+        spiSnapState.dialog = dialog;
+        var input = dialog.querySelector('.spiSnapFind input');
+        dialog.addEventListener('close', function () {
+            var silent = spiSnapState.silent;
+            spiSnapState.silent = false;
+            spiSnapState.id = null;
+            spiSnapHideHits();
+            var afterClose = spiSnapState.afterClose;
+            spiSnapState.afterClose = null;
+            if (silent) { return; }
+            var steps = spiSnapSteps();
+            if (steps > 0) {
+                spiSnapState.onPop = afterClose || function () { };
+                history.go(-steps);
+                /* no popstate (the entries are gone): the address without the snapshot, then what closing was for */
+                setTimeout(function () {
+                    if (!spiSnapState.onPop) { return; }
+                    var pending = spiSnapState.onPop;
+                    spiSnapState.onPop = null;
+                    try { history.replaceState(null, '', spiSnapUrl(null)); } catch (e) { }
+                    pending();
+                }, 400);
+                return;
+            }
+            try { if (new URL(location.href).searchParams.has('sp')) { history.replaceState(null, '', spiSnapUrl(null)); } } catch (e) { }
+            if (afterClose) { afterClose(); }
+        });
+        /* graph: highlight, only the relations that give control or privilege */
+        dialog.addEventListener('input', function (event) {
+            if (event.target.classList && event.target.classList.contains('spiGraphHighlightInput')) { spiGraphHighlight(event.target.value); }
+        });
+        dialog.addEventListener('change', function (event) {
+            if (!event.target.hasAttribute || !event.target.hasAttribute('data-graph-risky')) { return; }
+            spiSnapState.graphRiskyOnly = event.target.checked;
+            spiSnapState.focusAfter = '[data-graph-risky]';
+            spiSnapRender(spiSnapState.id);
+        });
+        /* a list built when it is opened (the clients of one permission) */
+        dialog.addEventListener('toggle', function (event) {
+            var lazy = event.target;
+            if (!lazy.classList || !lazy.classList.contains('spiSnapLazy') || !lazy.open) { return; }
+            var holder = lazy.querySelector('.spiSnapLazyBody'), entry = spiSnapState.more[lazy.getAttribute('data-lazy')];
+            if (holder && !holder.innerHTML && entry && entry.lazy) { holder.innerHTML = spiSnapDecorate(entry.lazy()); }
+        }, true);
+        dialog.addEventListener('cancel', function (event) {
+            var menu = dialog.querySelector('.spiSnapCopyMenu');
+            if (!menu.hidden) { event.preventDefault(); menu.hidden = true; dialog.querySelector('[data-act="copy"]').setAttribute('aria-expanded', 'false'); dialog.querySelector('[data-act="copy"]').focus(); return; }
+            if (!dialog.querySelector('.spiSnapHits').hidden) { event.preventDefault(); spiSnapHideHits(); }
+        });
+        /* a click on the backdrop closes - not the end of a drag or a text selection that left the dialog */
+        var downOnBackdrop = false;
+        dialog.addEventListener('mousedown', function (event) { downOnBackdrop = event.target === dialog; });
+        dialog.addEventListener('click', function (event) {
+            if (event.target === dialog) { if (downOnBackdrop) { dialog.close(); } downOnBackdrop = false; return; }
+            var copyItem = event.target.closest('[data-copy]');
+            var copyMenu = dialog.querySelector('.spiSnapCopyMenu');
+            if (!copyMenu.hidden && !event.target.closest('.spiSnapCopy')) { copyMenu.hidden = true; dialog.querySelector('[data-act="copy"]').setAttribute('aria-expanded', 'false'); }
+            if (copyItem) { copyMenu.hidden = true; dialog.querySelector('[data-act="copy"]').setAttribute('aria-expanded', 'false'); spiSnapCopy(copyItem.getAttribute('data-copy')); return; }
+            var trailStep = event.target.closest('[data-trail]');
+            if (trailStep) { history.go(Number(trailStep.getAttribute('data-trail'))); return; }
+            var act = event.target.closest('[data-act]');
+            if (act) {
+                var what = act.getAttribute('data-act');
+                if (what === 'close') { dialog.close(); }
+                else if (what === 'back') { history.back(); }
+                else if (what === 'copy' && spiSnapState.id) { spiSnapCopyMenu(act); }
+                else if (what === 'focus-clear' || (what === 'focus' && spiSnapFocusedHere(spiSnapState.entity))) { spiFocusClear(); spiSnapFocusUi(); spiSnapAnnounce('Focus cleared'); }
+                else if (what === 'focus' && spiSnapState.id) {
+                    var focusId = spiSnapState.id;
+                    spiSnapState.afterClose = function () { spiFocus(focusId); };
+                    dialog.close();
+                }
+                else if ((what === 'view-cards' || what === 'view-graph') && spiSnapState.id) {
+                    spiSnapState.view = what === 'view-graph' ? 'graph' : 'cards';
+                    try { history.replaceState(history.state, '', spiSnapUrl(spiSnapState.id)); } catch (e) { }
+                    spiSnapRender(spiSnapState.id);
+                }
+                else if (what === 'tab' && spiSnapState.id) { window.open(spiSnapUrl(spiSnapState.id), '_blank', 'noopener'); }
+                else if (what === 'link' && spiSnapState.id) {
+                    var label = act.querySelector('span');
+                    var done = function (text) { label.textContent = text; spiSnapAnnounce(text === 'Copied' ? 'Link copied' : 'The link could not be copied'); setTimeout(function () { label.textContent = 'Link'; }, 1500); };
+                    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(spiSnapUrl(spiSnapState.id)).then(function () { done('Copied'); }, function () { done('Not copied'); }); }
+                    else { done('Not copied'); }
+                }
+                return;
+            }
+            var toc = event.target.closest('.spiSnapToc button');
+            if (toc) {
+                var target = document.getElementById(toc.getAttribute('data-target'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    var heading = target.querySelector('.spiSnapGroupTitle');
+                    if (heading) { heading.focus({ preventScroll: true }); }
+                }
+                return;
+            }
+            var graphZoom = event.target.closest('[data-graph-zoom]');
+            if (graphZoom) { spiGraphZoom(graphZoom.getAttribute('data-graph-zoom')); return; }
+            var graphBundle = event.target.closest('[data-graph-bundle]');
+            if (graphBundle) {
+                var bundle = graphBundle.getAttribute('data-graph-bundle');
+                spiSnapState.graphExpanded[bundle] = !spiSnapState.graphExpanded[bundle];
+                spiSnapState.focusAfter = '[data-graph-bundle="' + (window.CSS && CSS.escape ? CSS.escape(bundle) : bundle) + '"]';
+                spiSnapRender(spiSnapState.id);
+                return;
+            }
+            var graphNode = event.target.closest('[data-graph-id]');
+            if (graphNode) {
+                spiSnapOpen(graphNode.getAttribute('data-graph-id'), true);
+                return;
+            }
+            var moreButton = event.target.closest('[data-more-step]');
+            if (moreButton) { spiSnapShowMore(moreButton); return; }
+            var action = event.target.closest('.spiSnapAction');
+            if (action) { spiSnapShowInReport(action); return; }
+            var hit = event.target.closest('.spiSnapHit');
+            if (hit) { input.value = ''; spiSnapHideHits(); spiSnapOpen(hit.getAttribute('data-id'), true); return; }
+            if (!event.target.closest('.spiSnapFind')) { spiSnapHideHits(); }
+        });
+        /* a short pause before searching (a search over 100k objects per keystroke lags) */
+        var findTimer = null;
+        input.addEventListener('input', function () {
+            var term = input.value;
+            clearTimeout(findTimer);
+            if (!term.trim()) { spiSnapHideHits(); return; }
+            findTimer = setTimeout(function () {
+                spiSnapIndex().then(function (index) { if (input.value === term) { spiSnapShowHits(spiSnapFind(index, term)); } });
+            }, 120);
+        });
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'ArrowDown') { event.preventDefault(); spiSnapMoveHit(1); }
+            else if (event.key === 'ArrowUp') { event.preventDefault(); spiSnapMoveHit(-1); }
+            else if (event.key === 'Enter') {
+                var entity = spiSnapState.hits[spiSnapState.hit];
+                if (entity) { event.preventDefault(); input.value = ''; spiSnapHideHits(); spiSnapOpen(entity.id, true); }
+            }
+        });
+        return dialog;
+    }
+    /* id: the object (null: the find box only); push: a new history entry (false: popstate - the entry exists) */
+    function spiSnapOpen(id, push) {
+        var dialog = spiSnapDialog();
+        if (!dialog.open) {
+            try { dialog.showModal(); } catch (e) { dialog.setAttribute('open', ''); }
+        }
+        if (id && !spiSnapValidId(id)) { spiSnapRender(null, 'The address names no object id and no Azure scope. Find an object with the box above.'); return; }
+        if (id && push && String(id).toLowerCase() !== String(spiSnapState.id || '').toLowerCase()) { spiSnapHistory(id); }
+        spiSnapRender(id);
+    }
+    /* a message for screen readers (loaded, copied) */
+    function spiSnapAnnounce(text) {
+        var live = spiSnapState.dialog && spiSnapState.dialog.querySelector('.spiSnapLive');
+        if (live) { live.textContent = ''; setTimeout(function () { live.textContent = text; }, 30); }
+    }
+    /* the snapshots built (cards: html and the long tables; graph: the relation groups) - Cards / Graph and opening a bubble
+       do not build them again; a few objects are kept */
+    var spiSnapCache = { keys: [], items: {} };
+    function spiSnapCacheGet(key) { return spiSnapCache.items[key]; }
+    function spiSnapCacheSet(key, value) {
+        if (!spiSnapCache.items[key]) { spiSnapCache.keys.push(key); }
+        spiSnapCache.items[key] = value;
+        while (spiSnapCache.keys.length > 8) { delete spiSnapCache.items[spiSnapCache.keys.shift()]; }
+    }
+    function spiSnapCardsCached(index, id) {
+        var entity = spiSnapEntity(index, id);
+        var key = 'cards|' + entity.kind + '|' + entity.id;
+        var cached = spiSnapCacheGet(key);
+        if (cached) {
+            spiSnapState.more = {};
+            Object.keys(cached.more).forEach(function (moreKey) { spiSnapState.more[moreKey] = Object.assign({}, cached.more[moreKey], cached.more[moreKey].items ? { next: spiSnapPage } : {}); });
+            return cached.result;
+        }
+        var result = spiSnapHtml(index, id);
+        var more = {};
+        Object.keys(spiSnapState.more).forEach(function (moreKey) { more[moreKey] = Object.assign({}, spiSnapState.more[moreKey]); });
+        spiSnapCacheSet(key, { result: result, more: more });
+        return result;
+    }
+    function spiSnapRender(id, message) {
+        var dialog = spiSnapDialog();
+        var body = dialog.querySelector('.spiSnapBody');
+        spiSnapState.id = id || null;
+        /* the open bubbles belong to one object */
+        if (String(id || '').toLowerCase() !== spiSnapState.renderedId) { spiSnapState.graphExpanded = {}; spiSnapState.renderedId = String(id || '').toLowerCase(); }
+        dialog.querySelector('[data-act="back"]').disabled = spiSnapSteps() < 2;
+        dialog.querySelector('[data-act="link"]').disabled = !id;
+        dialog.querySelector('[data-act="tab"]').disabled = !id;
+        dialog.querySelector('[data-act="copy"]').disabled = true;
+        dialog.querySelector('.spiSnapCopyMenu').hidden = true;
+        dialog.querySelector('[data-act="focus"]').disabled = true;
+        dialog.querySelectorAll('.spiSnapView [data-act]').forEach(function (button) { button.disabled = !id; });
+        /* no object yet (the start page): the buttons that act on an object are hidden */
+        dialog.classList.toggle('spiSnapNoObject', !id);
+        spiSnapState.entity = null;
+        spiSnapFocusUi();
+        spiSnapHideHits();
+        if (!id) {
+            dialog.removeAttribute('aria-labelledby');
+            dialog.setAttribute('aria-label', 'Snapshot');
+            body.innerHTML = (message ? '<div class="spiSnapNote"><i class="fa fa-circle-info" aria-hidden="true"></i> ' + spiSnapEsc(message) + '</div>' : '') +
+                '<div class="spiSnapNote"><i class="fa fa-magnifying-glass-plus" aria-hidden="true"></i> Everything this report knows about one object on one page - a Service Principal or application (identity, findings, permissions, roles, ownership, credentials, the clients of its API, its changes), a user, a group or an Azure scope. Find one with the box above, or select <i class="fa fa-magnifying-glass-plus" aria-hidden="true"></i> next to an object in any section.</div>';
+            dialog.querySelector('.spiSnapFind input').focus();
+            spiSnapState.more = {};
+            spiSnapIndex().then(function (index) { if (!spiSnapState.id) { body.insertAdjacentHTML('beforeend', spiSnapStartHtml(index)); } });
+            return;
+        }
+        dialog.querySelectorAll('.spiSnapView [data-act]').forEach(function (button) { button.setAttribute('aria-pressed', String(button.getAttribute('data-act') === 'view-' + spiSnapState.view)); });
+        body.innerHTML = '<div class="spiSnapNote"><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> Reading the report data</div>';
+        spiSnapIndex().then(function (index) {
+            if (spiSnapState.id !== id) { return; }
+            spiSnapState.graphData = null;
+            var result = spiSnapState.view === 'graph' ? spiGraphHtml(index, id) : spiSnapCardsCached(index, id);
+            body.innerHTML = spiSnapTrailHtml(index) + result.html;
+            spiSnapStickTop(body);
+            spiSnapState.entity = result.entity;
+            spiSnapFocusUi();
+            dialog.querySelector('[data-act="copy"]').disabled = !!result.empty || (spiSnapState.view === 'graph' && !spiSnapState.graphData);
+            dialog.removeAttribute('aria-label');
+            dialog.setAttribute('aria-labelledby', 'spiSnapTitle');
+            /* no snapshot link to the object itself */
+            var own = spiSnapEntityIds(result.entity);
+            body.querySelectorAll('a[data-spi-snap]').forEach(function (link) {
+                if (own.indexOf(String(link.getAttribute('data-spi-snap')).toLowerCase()) >= 0) { link.remove(); }
+            });
+            dialog.querySelector('[data-act="focus"]').disabled = result.entity.row < 0;
+            body.scrollTop = 0;
+            var restoring = !!spiSnapState.focusAfter && spiSnapState.view === 'graph';
+            if (spiSnapState.view === 'graph') {
+                var graph = body.querySelector('.spiGraph');
+                if (graph) { spiGraphLayout(graph); spiGraphBind(body.querySelector('.spiGraphWrap')); }
+                spiGraphZoom(restoring && spiSnapState.graphScale ? 'keep' : 'start');
+            }
+            /* after a bubble was opened or closed: its button keeps the focus */
+            var refocus = restoring ? body.querySelector(spiSnapState.focusAfter) : null;
+            spiSnapState.focusAfter = null;
+            if (refocus) { refocus.focus({ preventScroll: true }); } else { body.focus({ preventScroll: true }); }
+            if (!restoring) { spiSnapAnnounce((spiSnapState.view === 'graph' ? 'Graph of ' : 'Snapshot of ') + (result.entity.name || result.entity.id)); }
+            /* the find box: prepared when the browser is idle */
+            (window.requestIdleCallback || function (callback) { return setTimeout(callback, 200); })(function () { spiSnapEntities(index); });
+        }, function (error) {
+            body.innerHTML = '<div class="spiSnapNote">The report data could not be read: ' + spiSnapEsc(error && error.message ? error.message : error) + '</div>';
+        });
+    }
+    function spiSnapShowInReport(button) {
+        var gridId = button.getAttribute('data-grid'), colId = button.getAttribute('data-col'), value = button.getAttribute('data-value');
+        var section = button.getAttribute('data-section'), hash = '#' + section;
+        var objectId = String(spiSnapState.id || '').toLowerCase();
+        if (spiFocusState.entity && spiSnapEntityIds(spiFocusState.entity).indexOf(objectId) < 0) { spiFocusClear(); }
+        spiSnapHide();
+        var url = spiSnapUrl(null).replace(/#.*$/, '') + hash;
+        try { history.pushState(null, '', url); } catch (e) { location.hash = hash; }
+        spiSnapLastHash = location.hash;
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+        setTimeout(function () {
+            spiCreateGrid(gridId).then(function (api) {
+                if (colId && value) {
+                    var model = {};
+                    model[colId] = { filterType: 'text', type: 'contains', filter: value };
+                    api.setFilterModel(spiFocusKeep(gridId, model));
+                }
+                var card = document.getElementById('card-' + section);
+                if (card) {
+                    var top = card.getBoundingClientRect().top;
+                    if (top < 0 || top > window.innerHeight / 2) { card.scrollIntoView({ block: 'start' }); }
+                }
+            });
+        }, 60);
+    }
+    /* the icon in grid cells and in the snapshot (capture: before the grid and the shell handle the click; a modified click
+       opens the link - ?sp=<id> - in a new tab) */
+    document.addEventListener('click', function (event) {
+        var link = event.target && event.target.closest ? event.target.closest('a[data-spi-snap]') : null;
+        if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) { return; }
+        event.preventDefault();
+        event.stopPropagation();
+        spiSnapOpen(link.getAttribute('data-spi-snap'), true);
+    }, true);
+    /* the hash the shell last routed to (null: not known yet) */
+    var spiSnapLastHash = null;
+    window.addEventListener('hashchange', function () { spiSnapLastHash = location.hash; });
+    window.addEventListener('popstate', function () {
+        var id = null;
+        try { id = new URL(location.href).searchParams.get('sp'); } catch (e) { }
+        var onPop = spiSnapState.onPop;
+        spiSnapState.onPop = null;
+        if (spiSnapLastHash !== null && location.hash !== spiSnapLastHash) { spiSnapLastHash = location.hash; window.dispatchEvent(new HashChangeEvent('hashchange')); }
+        spiFocusFromUrl();
+        if (id) { spiSnapViewFromUrl(); spiSnapOpen(id, false); } else { spiSnapHide(); }
+        if (onPop && !id) { onPop(); }
+    });
+    document.addEventListener('DOMContentLoaded', function () {
+        spiSnapLastHash = location.hash;
+        var button = document.getElementById('spiSnapOpen');
+        if (button) { button.addEventListener('click', function () { spiSnapOpen(null, false); }); }
+        var id = null;
+        try { id = new URL(location.href).searchParams.get('sp'); } catch (e) { }
+        if (id) {
+            /* the entry of the shared link becomes the report without snapshot, the snapshot a new entry: closing and Back
+               return to the report */
+            spiSnapViewFromUrl();
+            try { history.replaceState(null, '', spiSnapUrl(null)); } catch (e) { }
+            spiSnapOpen(id, true);
+        }
+    });
+
+    /* ---------- focus: the whole report filtered to one object (feature zoom-in, level 2) ----------
+       Every grid with an id column of the object gets a filter on that column (also grids created later, spiCreateGrid);
+       the section counts in the navigation and on the cards show the object's rows, sections without any are dimmed. A chip
+       in the top bar names the object (select: its snapshot) and clears the focus. ?focus=<id> keeps it in the address
+       (reload, shared link); no history entry. Charts and the Overview keep showing the whole tenant. */
+    var spiFocusState = { entity: null, plan: null, applied: {} };
+    /* per grid: the id column to filter (a grid column), the values (the object's ids in it - an object can be named by its
+       Service Principal id in some rows and its application object id in others), the rows the filter shows */
+    function spiFocusPlan(index, entity) {
+        var refs = spiSnapRefs(index, entity);
+        var ids = spiSnapEntityIds(entity);
+        var valueOfRole = { sp: entity.spId, app: entity.appObjectId, appId: entity.appIds[0], object: entity.spId || entity.appObjectId };
+        var plan = {};
+        index.grids.forEach(function (gridId) {
+            var meta = spiSnapMeta[gridId], data = index.data[gridId];
+            var keys = meta.k.filter(function (key) { return spiSnapSelfRoles[key[1]] && meta.c.some(function (column) { return column[1] === key[0]; }); });
+            if (!keys.length) { return; }
+            var rows = refs.self[gridId] || [];
+            var best = null;
+            keys.forEach(function (key) {
+                var counts = {};
+                rows.forEach(function (row) {
+                    var cell = spiSnapValue(index, gridId, row, key[0]);
+                    if (cell && ids.indexOf(cell.toLowerCase()) >= 0) { counts[cell] = (counts[cell] || 0) + 1; }
+                });
+                /* a text filter takes two conditions */
+                var values = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 2);
+                var count = values.reduce(function (sum, value) { return sum + counts[value]; }, 0);
+                if (!best || count > best.count) { best = { column: key[0], values: values, count: count }; }
+            });
+            if (!best.values.length) {
+                /* no rows: a filter that leaves the grid empty (the id of the object in an id column of the grid) */
+                var key = keys.filter(function (k) { return valueOfRole[k[1]]; })[0] || keys[0];
+                best = { column: key[0], values: [valueOfRole[key[1]] || entity.id], count: 0 };
+            }
+            plan[gridId] = { colId: data.columns[best.column], values: best.values, count: best.count };
+        });
+        return plan;
+    }
+    function spiFocusModel(plan) {
+        var condition = function (value) { return { filterType: 'text', type: 'contains', filter: value }; };
+        return plan.values.length === 1 ? condition(plan.values[0]) : { filterType: 'text', operator: 'OR', conditions: plan.values.map(condition) };
+    }
+    /* applied: per grid the column and the filter the user had on it before (restored when the focus ends) */
+    function spiFocusApplyGrid(gridId, api) {
+        var plan = spiFocusState.plan ? spiFocusState.plan[gridId] : null;
+        var previous = spiFocusState.applied[gridId];
+        if (!plan && !previous) { return; }
+        var model = api.getFilterModel() || {};
+        if (previous) {
+            if (previous.previous) { model[previous.colId] = previous.previous; } else { delete model[previous.colId]; }
+            delete spiFocusState.applied[gridId];
+        }
+        if (plan) {
+            spiFocusState.applied[gridId] = { colId: plan.colId, previous: model[plan.colId] || null };
+            model[plan.colId] = spiFocusModel(plan);
+        }
+        api.setFilterModel(model);
+    }
+    /* a new filter model of a focused grid (a chart click, 'Clear all filters', 'Show in report'): the focus filter kept */
+    function spiFocusKeep(gridId, model) {
+        var applied = spiFocusState.applied[gridId], plan = spiFocusState.plan ? spiFocusState.plan[gridId] : null;
+        if (!applied || !plan) { return model; }
+        model = model || {};
+        if (!model[plan.colId]) { model[plan.colId] = spiFocusModel(plan); }
+        return model;
+    }
+    /* the counts of the sections (navigation, card heads): the object's rows while the focus is on, the stored count after */
+    function spiFocusBadges() {
+        var plan = spiFocusState.plan;
+        (spiSnapRegistry().sections || []).forEach(function (section) {
+            var gridId = (section.grids || [])[0];
+            var item = plan && gridId ? plan[gridId] : null;
+            var link = document.querySelector('a.az-nav-l2[data-section="' + section.id + '"]');
+            var card = document.getElementById('card-' + section.id);
+            [link ? link.querySelector('.az-count') : null, card ? card.querySelector('.az-card-head .az-badge') : null].forEach(function (badge) {
+                if (!badge) { return; }
+                if (item) {
+                    if (!badge.hasAttribute('data-spi-count')) { badge.setAttribute('data-spi-count', badge.textContent); }
+                    badge.textContent = String(item.count);
+                    badge.hidden = false;
+                }
+                else if (badge.hasAttribute('data-spi-count')) {
+                    badge.textContent = badge.getAttribute('data-spi-count');
+                    badge.removeAttribute('data-spi-count');
+                    badge.hidden = !badge.textContent;
+                }
+            });
+            [link, card].forEach(function (element) { if (element) { element.classList.toggle('spiFocusNone', !!item && item.count === 0); } });
+            [link ? link.querySelector('.az-count') : null, card ? card.querySelector('.az-card-head .az-badge') : null].forEach(function (badge) { if (badge) { badge.classList.toggle('spiFocusZero', !!item && item.count === 0); } });
+        });
+        /* the pages: the number of finding sections with rows of the object */
+        (spiSnapRegistry().pages || []).forEach(function (page) {
+            var badge = document.querySelector('a.az-nav-l1[data-page="' + page.id + '"] .az-count');
+            if (!badge) { return; }
+            if (plan) {
+                var findings = (spiSnapRegistry().sections || []).filter(function (section) {
+                    var gridId = (section.grids || [])[0];
+                    return section.page === page.id && section.state === 'warning' && gridId && plan[gridId] && plan[gridId].count > 0;
+                }).length;
+                if (!badge.hasAttribute('data-spi-count')) { badge.setAttribute('data-spi-count', badge.textContent); badge.setAttribute('data-spi-title', badge.getAttribute('title') || ''); }
+                badge.textContent = String(findings);
+                badge.title = findings + (findings === 1 ? ' section' : ' sections') + ' with findings for ' + (spiFocusState.entity ? spiFocusState.entity.name : 'the object');
+                badge.hidden = findings === 0;
+            }
+            else if (badge.hasAttribute('data-spi-count')) {
+                badge.textContent = badge.getAttribute('data-spi-count');
+                badge.title = badge.getAttribute('data-spi-title') || '';
+                badge.removeAttribute('data-spi-count');
+                badge.removeAttribute('data-spi-title');
+                badge.hidden = false;
+            }
+        });
+    }
+    function spiFocusUrl(id) {
+        var url = new URL(location.href);
+        if (id) { url.searchParams.set('focus', id); } else { url.searchParams.delete('focus'); }
+        return url.href;
+    }
+    function spiFocusChip() {
+        var chip = document.getElementById('spiFocusChip');
+        if (!chip) { return; }
+        var entity = spiFocusState.entity;
+        chip.hidden = !entity;
+        chip.querySelector('.spiFocusName').textContent = entity ? entity.name : '';
+        chip.title = entity ? 'Focus: the tables show only ' + entity.name + ' (charts and the Overview show the whole tenant)' : '';
+    }
+    function spiFocus(id, fromUrl) {
+        return spiSnapIndex().then(function (index) {
+            var entity = spiSnapEntity(index, id);
+            if (entity.row < 0) {
+                /* an id the report does not know: no focus, and the address does not keep it */
+                if (fromUrl) { try { history.replaceState(history.state, '', spiFocusUrl(null)); } catch (e) { } }
+                return false;
+            }
+            spiFocusState.entity = entity;
+            spiFocusState.plan = spiFocusPlan(index, entity);
+            Object.keys(spiGrids).forEach(function (gridId) { if (spiGrids[gridId].api) { spiFocusApplyGrid(gridId, spiGrids[gridId].api); } });
+            spiFocusBadges();
+            spiFocusChip();
+            document.documentElement.classList.add('spiFocusOn');
+            if (!fromUrl) { try { history.replaceState(history.state, '', spiFocusUrl(entity.id)); } catch (e) { } }
+            return true;
+        });
+    }
+    /* the focus of the address (Back / Forward to an entry with another ?focus=) */
+    function spiFocusFromUrl() {
+        var id = null;
+        try { id = new URL(location.href).searchParams.get('focus'); } catch (e) { }
+        id = id ? id.trim().toLowerCase() : '';
+        var current = spiFocusState.entity ? spiFocusState.entity.id : '';
+        if (id === current) { return; }
+        if (id) { spiFocus(id, true); } else { spiFocusClear(true); }
+    }
+    function spiFocusClear(fromUrl) {
+        spiFocusState.entity = null;
+        spiFocusState.plan = null;
+        Object.keys(spiFocusState.applied).forEach(function (gridId) { if (spiGrids[gridId] && spiGrids[gridId].api) { spiFocusApplyGrid(gridId, spiGrids[gridId].api); } });
+        spiFocusState.applied = {};
+        spiFocusBadges();
+        spiFocusChip();
+        document.documentElement.classList.remove('spiFocusOn');
+        if (fromUrl !== true) { try { history.replaceState(history.state, '', spiFocusUrl(null)); } catch (e) { } }
+    }
+    document.addEventListener('DOMContentLoaded', function () {
+        var chip = document.getElementById('spiFocusChip');
+        if (chip) {
+            chip.querySelector('.spiFocusClear').addEventListener('click', function () {
+                spiFocusClear();
+                /* the chip is gone: the focus to the snapshot button next to it */
+                var open = document.getElementById('spiSnapOpen');
+                if (open) { open.focus(); }
+            });
+            chip.querySelector('.spiFocusName').addEventListener('click', function () { if (spiFocusState.entity) { spiSnapOpen(spiFocusState.entity.id, true); } });
+        }
+        var id = null;
+        try { id = new URL(location.href).searchParams.get('focus'); } catch (e) { }
+        /* after the shell built the navigation (its badges) */
+        if (id) { setTimeout(function () { spiFocus(id, true); }, 0); }
+    });
 '@
 #endregion AG Grid runtime
 

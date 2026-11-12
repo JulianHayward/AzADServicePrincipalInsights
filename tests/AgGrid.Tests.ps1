@@ -89,7 +89,7 @@ Describe 'AG Grid emitter' {
         $lines[1] | Should -Match 'floatingFilterComponent: spiSelectFloatingFilter.*values: spiRowData\.dictionaries\[1\]'
         $lines[2] | Should -Match "spiColumnNumberValueGetter\(spiRowData, 2\).*valueFormatter: spiColumnTextFormatter\(spiRowData, 2\).*filter: 'agNumberColumnFilter'"
         $lines[4] | Should -Match "spiColumnValueGetter\(spiRowData, 5\).*spiColumnHtmlRenderer\(spiRowData, 4,.*separator: ','.*headerTooltip: 'it\\'s'"
-        $script:Html | Should -Match "spiRegisterReportGrid\('TenantSummary_A', '\w+', 'A \\'grid\\''\);"
+        $script:Html | Should -Match "spiRegisterReportGrid\('TenantSummary_A', '\w+', 'A \\'grid\\'', \{"
     }
     It 'an empty grid has no rows and still a valid block' {
         $script:Grids['TenantSummary_Empty'].Rows.Count | Should -Be 0

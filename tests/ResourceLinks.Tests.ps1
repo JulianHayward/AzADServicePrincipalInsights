@@ -54,9 +54,9 @@ Describe 'wiring' {
         @{ Column = "@{ header = 'MI Resource type'; property = 'c16'; htmlProperty = 'c16Html'; filter = 'select' }" }
         @{ Column = "@{ header = 'MI ResourceId'; property = 'c5'; htmlProperty = 'c5Html' }" }
         @{ Column = "@{ header = 'Res Type'; property = 'c10'; htmlProperty = 'c10Html'; filter = 'select' }" }
-        @{ Column = "@{ header = 'Res Id'; property = 'c15'; htmlProperty = 'c15Html' }" }
+        @{ Column = "@{ header = 'Res Id'; property = 'c15'; htmlProperty = 'c15Html'; snapshot = 'resource' }" }
         @{ Column = "@{ header = 'Resource Id (ARM)'; property = 'c3'; htmlProperty = 'c3Html' }" }
-        @{ Column = "@{ Header = 'MI ResourceId'; Property = 'MIResourceId'; HtmlProperty = 'MIResourceIdHtml' }" }
+        @{ Column = "@{ Header = 'MI ResourceId'; Property = 'MIResourceId'; HtmlProperty = 'MIResourceIdHtml'; Snapshot = 'resource' }" }
         @{ Column = "@{ Header = 'Assignment restrictions'; Property = 'AssignmentRestrictions'; HtmlProperty = 'AssignmentRestrictionsHtml'; Select = `$true }" }
         @{ Column = "@{ Header = 'Attached resource types'; Property = 'AttachedResourceTypes'; HtmlProperty = 'AttachedResourceTypesHtml' }" }
     ) {
@@ -76,10 +76,12 @@ Describe 'Service Principal and application links (Microsoft Entra pages in the 
         $node = Get-Command node -ErrorAction SilentlyContinue
         if (-not $node) { Set-ItResult -Skipped -Because 'node is not available'; return }
         $source = $script:Source
-        $start = $source.IndexOf('    function spiColumnPortalLinkRenderer(')
+        #spiPortalHref (the links) and the renderer that uses it; the snapshot icon is tested in SpSnapshot.Tests.ps1
+        $start = $source.IndexOf('    function spiPortalHref(')
         $end = $source.IndexOf("`n    }", $source.IndexOf('        };', $start)) + 6
         $js = $source.Substring($start, $end - $start) + @'
 
+function spiSnapCellLink() { return ''; }
 var highlighter = { text: function (v) { return String(v === undefined || v === null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;'); } };
 var encoded = { dictionaries: [['66666666-6666-4666-8666-666666666666', '<img>', ''], ['a3dfc3c6-2c7d-4f42-aeec-b2877f9bce97', 'x']] };
 var column = { getColId: function () { return 'c0'; } };
@@ -137,7 +139,7 @@ Describe 'user and group names in list cells (server side)' {
         $script:Source | Should -Match 'MainHtml = \(getSpiEntraObjectLinkHtml -Kind \$_\.principalType -Id \$_\.principalId -Text \$_\.principalDisplayName\)'
         $script:Source | Should -Match "MainHtml = \(getSpiEntraObjectLinkHtml -Kind 'group' -Id \`$_\.ObjectId -Text \`$_\.DisplayName\)"
         @([regex]::Matches($script:Source, "@\{ header = 'Owner Id'; property = 'c7'; portal = 'principal'; typeProperty = 'c6' \}")).Count | Should -Be 2
-        $script:Source | Should -Match "@\{ header = 'UserId'; property = 'c1'; portal = 'user' \}"
+        $script:Source | Should -Match "@\{ header = 'UserId'; property = 'c1'; portal = 'user'; typeProperty = 'c2' \}"
     }
 }
 
